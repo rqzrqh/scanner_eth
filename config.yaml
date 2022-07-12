@@ -1,0 +1,31 @@
+app_name: sync-chain-eth
+
+fetch:
+  host: "https://mainnet.infura.io/v3/72a1c8f3063949e98aaf947fd54b0c4e"
+  timeout: 5s
+  task_window_size: 40
+  worker: 2
+  start_height : -1
+  end_height : -1
+
+store:
+  host: "root:123456@tcp(127.0.0.1:3306)/chain_eth?charset=utf8mb4"
+  channel_size: 100
+  batch_size: 20
+  auto_create_tables: true # prd environment set false
+
+log:
+  stdout:
+    enable: true
+    level: 5
+  file:
+    enable: false
+    path: "./log/app.log"
+    level: 5
+  kafka:
+    enable: false
+    topic: "applog"
+    kafka_servers:
+      - "127.0.0.1:9092"
+    level: 5
+
