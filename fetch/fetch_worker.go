@@ -58,48 +58,62 @@ func InitAbi() {
 }
 
 type FetchWorker struct {
-	id     int
-	fm     *FetchManager
-	client *rpc.Client
+	nodeId                   int
+	taskId                   int
+	client                   *rpc.Client
+	height                   uint64
+	forkVersion              uint64
+	fetchResultNotifyChannel chan<- *types.FetchResult
 }
 
-func NewFetchWorker(id int, fm *FetchManager, client *rpc.Client) *FetchWorker {
+func NewFetchWorker(nodeId int, taskId int, client *rpc.Client, height uint64, forkVersion uint64, fetchResultNotifyChannel chan<- *types.FetchResult) *FetchWorker {
 	return &FetchWorker{
-		id:     id,
-		fm:     fm,
-		client: client,
+		nodeId:                   nodeId,
+		taskId:                   taskId,
+		client:                   client,
+		height:                   height,
+		forkVersion:              forkVersion,
+		fetchResultNotifyChannel: fetchResultNotifyChannel,
 	}
 }
 
 func (fw *FetchWorker) Run() {
+	logrus.Infof("new fetch task. nodeId:%v taskId:%v height:%v fork_version:%v", fw.nodeId, fw.taskId, fw.height, fw.forkVersion)
+
 	go func() {
+		height := fw.height
+		forkVersion := fw.forkVersion
+		tryCount := 0
+
 		for {
-			height, forkVersion, err := fw.fm.getTask()
-			if err != nil {
-				time.Sleep(100 * time.Millisecond)
-				continue
+			tryCount++
+			startTime := time.Now()
+			fullblock := fw.fetch(height)
+			costTime := time.Since(startTime)
+			if fullblock != nil {
+				logrus.Infof("fetch success. nodeId:%v taskId:%v height:%v fork_version:%v hash:%v parent_hash:%v cost:%v",
+					fw.nodeId, fw.taskId, height, forkVersion, fullblock.Block.BlockHash, fullblock.Block.ParentHash, costTime.String())
+			} else {
+				logrus.Warnf("fetch failed. nodeId:%v taskId:%v height:%v fork_version:%v try_count:%v", fw.nodeId, fw.taskId, height, forkVersion, tryCount)
 			}
 
-			tryCount := 0
-			for {
-				tryCount++
-				startTime := time.Now()
-				fullblock := fw.fetch(height)
-				if fullblock != nil {
-					logrus.Infof("fetch success.worker:%v height:%v fork_version:%v hash:%v parent_hash:%v cost:%v",
-						fw.id, height, forkVersion, fullblock.Block.BlockHash, fullblock.Block.ParentHash, time.Since(startTime).String())
-					fw.fm.addBlock(fullblock, forkVersion)
-					break
-				} else {
-					time.Sleep(1 * time.Second)
+			if tryCount >= 3 || fullblock != nil {
+				fetchResult := &types.FetchResult{
+					NodeId:      fw.nodeId,
+					TaskId:      fw.taskId,
+					ForkVersion: forkVersion,
+					FullBlock:   fullblock,
+					CostTime:    costTime,
 				}
+				fw.fetchResultNotifyChannel <- fetchResult
+				break
 			}
 		}
 	}()
 }
 
 func (fw *FetchWorker) fetch(height uint64) *types.FullBlock {
-	return FetchFullBlock(fw.id, fw.client, height)
+	return FetchFullBlock(fw.nodeId, fw.taskId, fw.client, height)
 }
 
 func isErc20Tx(topic0, topic1, topic2, topic3 string) bool {
@@ -131,14 +145,19 @@ func transTraceAddressToString(opcode string, traceAddress []uint64) string {
 	return res
 }
 
-func FetchFullBlock(workerID int, client *rpc.Client, height uint64) *types.FullBlock {
+func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *types.FullBlock {
 	blkJson := &types.BlockJson{}
-
 	// fetch block with txs
-	h := new(big.Int).SetUint64(height)
-	err := client.Call(blkJson, "eth_getBlockByNumber", util.ToBlockNumArg(h), true)
-	if err != nil {
-		return nil
+	{
+		startTime := time.Now()
+		h := new(big.Int).SetUint64(height)
+		err := client.Call(blkJson, "eth_getBlockByNumber", util.ToBlockNumArg(h), true)
+		if err != nil {
+			logrus.Errorf("eth_getBlockByNumber failed. nodeId:%v taskId:%v error:%v height:%v", nodeId, taskId, err, height)
+			return nil
+		}
+
+		logrus.Debugf("eth_getBlockByNumber nodeId:%v taskId:%v txs:%v height:%v cost:%v", nodeId, taskId, len(blkJson.Txs), height, time.Since(startTime).String())
 	}
 
 	gasUsed := hexutil.MustDecodeUint64(blkJson.GasUsed)
@@ -185,31 +204,37 @@ func FetchFullBlock(workerID int, client *rpc.Client, height uint64) *types.Full
 		ExtraData:       blkJson.ExtraData,
 	}
 
-	// fetch receipts
-	elemsReceipts := make([]rpc.BatchElem, 0)
 	receipts := make(map[string]*eth_types.Receipt)
 
-	for _, tx := range blkJson.Txs {
-		receipt := &eth_types.Receipt{}
-		elemsReceipt := rpc.BatchElem{
-			Method: "eth_getTransactionReceipt",
-			Args:   []interface{}{tx.Hash},
-			Result: receipt,
+	// fetch receipts
+	{
+		startTime := time.Now()
+		elemsReceipts := make([]rpc.BatchElem, len(blkJson.Txs))
+		for i, tx := range blkJson.Txs {
+			receipt := &eth_types.Receipt{}
+			elemsReceipt := rpc.BatchElem{
+				Method: "eth_getTransactionReceipt",
+				Args:   []interface{}{tx.Hash},
+				Result: receipt,
+			}
+			receipts[tx.Hash] = receipt
+			elemsReceipts[i] = elemsReceipt
 		}
-		receipts[tx.Hash] = receipt
-		elemsReceipts = append(elemsReceipts, elemsReceipt)
-	}
 
-	if err := client.BatchCallContext(context.Background(), elemsReceipts); err != nil {
-		logrus.Errorf("rpc get receipts failed. error:%v height:%v", err, height)
-		return nil
-	}
+		if len(elemsReceipts) > 0 {
+			if err := client.BatchCallContext(context.Background(), elemsReceipts); err != nil {
+				logrus.Errorf("rpc get receipts failed. nodeId:%v taskId:%v height:%v error:%v", nodeId, taskId, height, err)
+				return nil
+			}
 
-	for idx, elem := range elemsReceipts {
-		if elem.Error != nil {
-			logrus.Errorf("rpc get receipts failed. elem(%v) error:%v height:%v", idx, err, height)
-			return nil
+			for idx, elem := range elemsReceipts {
+				if elem.Error != nil {
+					logrus.Errorf("rpc get receipts elem failed. nodeId:%v taskId:%v height:%v elem(%v) error:%v", nodeId, taskId, height, idx, elem.Error)
+					return nil
+				}
+			}
 		}
+		logrus.Debugf("eth_getTransactionReceipt nodeId:%v taskId:%v txs:%v height:%v cost:%v", nodeId, taskId, len(blkJson.Txs), height, time.Since(startTime).String())
 	}
 
 	// fetch internal tx
@@ -219,7 +244,7 @@ func FetchFullBlock(workerID int, client *rpc.Client, height uint64) *types.Full
 		arg := map[string]interface{}{}
 		method := "debug_traceActionByBlockNumber"
 		if err := client.CallContext(context.Background(), &txInternalJsonList, method, util.ToBlockNumArg(new(big.Int).SetUint64(height)), arg); err != nil {
-			logrus.Errorf("fetch internal tx failed. err:%v height:%v", err, height)
+			logrus.Errorf("fetch internal tx failed. nodeId:%v taskId:%v err:%v height:%v", nodeId, taskId, err, height)
 			os.Exit(0)
 		}
 	}
@@ -249,11 +274,17 @@ func FetchFullBlock(workerID int, client *rpc.Client, height uint64) *types.Full
 	// merge erc20 balance set
 	for k, v := range txBalanceErc20Address {
 		for c := range v {
+			if _, ok := balanceErc20Address[k]; !ok {
+				balanceErc20Address[k] = make(map[string]struct{}, 0)
+			}
 			balanceErc20Address[k][c] = struct{}{}
 		}
 	}
 	for k, v := range txInternalBalanceErc20Address {
 		for c := range v {
+			if _, ok := balanceErc20Address[k]; !ok {
+				balanceErc20Address[k] = make(map[string]struct{}, 0)
+			}
 			balanceErc20Address[k][c] = struct{}{}
 		}
 	}
@@ -268,7 +299,7 @@ func FetchFullBlock(workerID int, client *rpc.Client, height uint64) *types.Full
 		}
 
 		if err := fetchBalances(client, balances, height); err != nil {
-			logrus.Errorf("fetch balance failed. height:%v err:%v", height, err)
+			logrus.Errorf("fetch balance failed. nodeId:%v taskId:%v height:%v err:%v", nodeId, taskId, height, err)
 			os.Exit(0)
 		}
 
@@ -295,7 +326,7 @@ func FetchFullBlock(workerID int, client *rpc.Client, height uint64) *types.Full
 		}
 
 		if err := fetchErc20BalancesBatch(client, balancesErc20, height); err != nil {
-			logrus.Errorf("fetch balance failed. height:%v err:%v", height, err)
+			logrus.Errorf("fetch balance failed. nodeId:%v taskId:%v height:%v err:%v", nodeId, taskId, height, err)
 			os.Exit(0)
 		}
 
@@ -510,6 +541,13 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 
 				// erc20 balance
 				if tokenAmount.Uint64() != 0 {
+					if _, ok := balanceErc20Address[sender]; !ok {
+						balanceErc20Address[sender] = make(map[string]struct{}, 0)
+					}
+					if _, ok := balanceErc20Address[receiver]; !ok {
+						balanceErc20Address[receiver] = make(map[string]struct{}, 0)
+					}
+
 					balanceErc20Address[sender][contractAddr] = struct{}{}
 					balanceErc20Address[receiver][contractAddr] = struct{}{}
 				}

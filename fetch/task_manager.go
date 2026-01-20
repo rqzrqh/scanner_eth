@@ -10,6 +10,7 @@ import (
 
 type TaskManager struct {
 	maxTaskCount int
+	taskId       int
 	pendingFetch *list.List // soft in height
 	inFetch      map[uint64]struct{}
 	inStage      map[uint64]struct{}
@@ -18,6 +19,7 @@ type TaskManager struct {
 func NewTaskManager(maxTaskCount int) *TaskManager {
 	return &TaskManager{
 		maxTaskCount: maxTaskCount,
+		taskId:       0,
 		pendingFetch: list.New(),
 		inFetch:      make(map[uint64]struct{}),
 		inStage:      make(map[uint64]struct{}),
@@ -28,12 +30,23 @@ func (tm *TaskManager) getTask() (uint64, error) {
 	if tm.pendingFetch.Len() != 0 {
 		e := tm.pendingFetch.Front()
 		height := e.Value.(uint64)
-		tm.pendingFetch.Remove(e)
-		tm.inFetch[height] = struct{}{}
 		return height, nil
 	}
 
 	return 0, xerrors.New("no valid task")
+}
+
+func (tm *TaskManager) popTask() (int, uint64, error) {
+	if tm.pendingFetch.Len() != 0 {
+		e := tm.pendingFetch.Front()
+		height := e.Value.(uint64)
+		tm.pendingFetch.Remove(e)
+		tm.inFetch[height] = struct{}{}
+		tm.taskId++
+		return tm.taskId, height, nil
+	}
+
+	return 0, 0, xerrors.New("no valid task")
 }
 
 func (tm *TaskManager) clear() {

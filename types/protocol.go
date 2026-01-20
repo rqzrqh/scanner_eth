@@ -2,7 +2,7 @@ package types
 
 import "math/big"
 
-type BlockJson struct {
+type BlockHeaderJson struct {
 	BaseFeePerGas   string        `json:"baseFeePerGas"`
 	Difficulty      string        `json:"difficulty"`
 	ExtraData       string        `json:"extraData"`
@@ -19,9 +19,13 @@ type BlockJson struct {
 	StateRoot       string        `json:"stateRoot"`
 	TimeStamp       string        `json:"timestamp"`
 	TotalDifficulty string        `json:"totalDifficulty"`
-	Txs             []*TxJson     `json:"transactions"`
 	TransactionRoot string        `json:"transactionsRoot"`
 	Uncles          []interface{} `json:"uncles"`
+}
+
+type BlockJson struct {
+	BlockHeaderJson
+	Txs []*TxJson `json:"transactions"`
 }
 
 type TxJson struct {

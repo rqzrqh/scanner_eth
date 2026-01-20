@@ -1,58 +1,58 @@
 package fetch
 
 import (
-	"sync"
-	"sync_eth/store"
 	"sync_eth/types"
-	"time"
 
+	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/sirupsen/logrus"
 )
 
 type FetchManager struct {
-	mtx               sync.Mutex
-	differ            *Differ
-	mc                *MemoryChain
-	sm                *store.StoreManager
-	dm                *DataManager
-	tm                *TaskManager
-	forkVersion       uint64
-	eventID           uint64
-	storeEventChannel chan *types.ChainEvent
+	nodeManager              *NodeManager
+	localChain               *LocalChain
+	pendingBlocks            *PendingBlocks
+	taskManager              *TaskManager
+	forkVersion              uint64
+	eventID                  uint64
+	remoteChainUpdateChannel <-chan *types.RemoteChainUpdate
+	fetchResultNotifyChannel chan *types.FetchResult
+	storeEventChannel        chan *types.ChainEvent
 }
 
-func NewFetchManager(differ *Differ, mc *MemoryChain, sm *store.StoreManager, maxTaskCount int, storeEventChannel chan *types.ChainEvent) *FetchManager {
+func NewFetchManager(clients []*rpc.Client, localChain *LocalChain, maxTaskCount int, remoteChainUpdateChannel <-chan *types.RemoteChainUpdate,
+	storeEventChannel chan *types.ChainEvent) *FetchManager {
+
+	fetchResultNotifyChannel := make(chan *types.FetchResult, 100)
+
 	return &FetchManager{
-		mtx:               sync.Mutex{},
-		differ:            differ,
-		mc:                mc,
-		sm:                sm,
-		dm:                NewDataManager(),
-		tm:                NewTaskManager(maxTaskCount),
-		forkVersion:       0,
-		eventID:           0,
-		storeEventChannel: storeEventChannel,
+		nodeManager:              NewNodeManager(clients),
+		localChain:               localChain,
+		pendingBlocks:            NewPendingBlocks(),
+		taskManager:              NewTaskManager(maxTaskCount),
+		forkVersion:              0,
+		eventID:                  0,
+		remoteChainUpdateChannel: remoteChainUpdateChannel,
+		fetchResultNotifyChannel: fetchResultNotifyChannel,
+		storeEventChannel:        storeEventChannel,
 	}
 }
 
 func (fm *FetchManager) addBlock(data *types.FullBlock, forkVersion uint64) {
-	fm.mtx.Lock()
-	defer fm.mtx.Unlock()
 
 	if forkVersion != fm.forkVersion {
 		logrus.Infof("addblock find old fork version. height:%v version:%v currentVersion:%v", data.Block.Height, forkVersion, fm.forkVersion)
 		return
 	}
 
-	fm.dm.addBlock(data)
-	fm.tm.fetchSuccess(data.Block.Height)
+	fm.pendingBlocks.addBlock(data)
+	fm.taskManager.fetchSuccess(data.Block.Height)
 
 	for {
-		currentHeight, _ := fm.mc.GetChainInfo()
+		currentHeight, _ := fm.localChain.GetChainInfo()
 		nextHeight := currentHeight + 1
 
 		// query block
-		fullblock, err := fm.dm.getBlock(nextHeight)
+		fullblock, err := fm.pendingBlocks.getBlock(nextHeight)
 		if err != nil {
 			logrus.Tracef("addblock can not get next. height:%v fork_version:%v event_id:%v", nextHeight, fm.forkVersion, fm.eventID)
 			break
@@ -60,14 +60,14 @@ func (fm *FetchManager) addBlock(data *types.FullBlock, forkVersion uint64) {
 
 		fm.eventID++
 
-		if err := fm.mc.Grow(nextHeight, fullblock.Block.BlockHash, fullblock.Block.ParentHash); err != nil {
+		if err := fm.localChain.Grow(nextHeight, fullblock.Block.BlockHash, fullblock.Block.ParentHash); err != nil {
 			fm.forkVersion++
-			logrus.Infof("memory chain revert. height:%v fork_version:%v event_id:%v", currentHeight, fm.forkVersion, fm.eventID)
-			fm.tm.clear()
-			fm.dm.clear()
+			logrus.Infof("local chain revert. height:%v fork_version:%v event_id:%v", currentHeight, fm.forkVersion, fm.eventID)
+			fm.taskManager.clear()
+			fm.pendingBlocks.clear()
 			// revert one block
 
-			fm.mc.Revert(currentHeight)
+			fm.localChain.Revert(currentHeight)
 
 			ev := &types.ChainEvent{
 				Type: types.Revert,
@@ -80,9 +80,9 @@ func (fm *FetchManager) addBlock(data *types.FullBlock, forkVersion uint64) {
 			fm.storeEventChannel <- ev
 			break
 		} else {
-			fm.tm.processSuccess(nextHeight)
-			fm.dm.removeData(nextHeight)
-			logrus.Infof("memory chain grow. height:%v fork_version:%v event_id:%v", nextHeight, fm.forkVersion, fm.eventID)
+			fm.taskManager.processSuccess(nextHeight)
+			fm.pendingBlocks.removeData(nextHeight)
+			logrus.Infof("local chain grow. height:%v fork_version:%v event_id:%v", nextHeight, fm.forkVersion, fm.eventID)
 			ev := &types.ChainEvent{
 				Type: types.Apply,
 				Data: &types.ApplyData{
@@ -95,34 +95,70 @@ func (fm *FetchManager) addBlock(data *types.FullBlock, forkVersion uint64) {
 			fm.storeEventChannel <- ev
 		}
 	}
-
-	// [startHeight, endHeight)
-	startHeight, endHeight, err := fm.differ.CalcDiffer()
-	if err == nil {
-		fm.tm.extendTask(startHeight, endHeight)
-	}
-}
-
-func (fm *FetchManager) getTask() (uint64, uint64, error) {
-	fm.mtx.Lock()
-	defer fm.mtx.Unlock()
-
-	height, err := fm.tm.getTask()
-	return height, fm.forkVersion, err
 }
 
 func (fm *FetchManager) Run() {
 	go func() {
 		for {
-			time.Sleep(1 * time.Second)
-			fm.mtx.Lock()
+			select {
+			case remoteChainUpdate := <-fm.remoteChainUpdateChannel:
+				fm.nodeManager.UpdateNodeChainInfo(remoteChainUpdate.Id, remoteChainUpdate.Height, remoteChainUpdate.BlockHash)
+				fm.updateTask()
+				fm.dispatchTask()
 
-			// [startHeight, endHeight)
-			startHeight, endHeight, err := fm.differ.CalcDiffer()
-			if err == nil {
-				fm.tm.extendTask(startHeight, endHeight)
+			case fetchResult := <-fm.fetchResultNotifyChannel:
+				fm.nodeManager.SetNodeIdle(fetchResult.NodeId)
+				if fetchResult.FullBlock != nil {
+					fm.addBlock(fetchResult.FullBlock, fetchResult.ForkVersion)
+					fm.nodeManager.UpdateNodeMetric(fetchResult.NodeId, fetchResult.CostTime.Microseconds())
+				} else {
+					fm.nodeManager.UpdateNodeMetric(fetchResult.NodeId, fetchResult.CostTime.Microseconds())
+					fm.nodeManager.SetNodeInvalid(fetchResult.NodeId)
+				}
+
+				fm.updateTask()
+				fm.dispatchTask()
 			}
-			fm.mtx.Unlock()
 		}
 	}()
+}
+
+func (fm *FetchManager) updateTask() {
+
+	localHeight, _ := fm.localChain.GetChainInfo()
+
+	for i := 0; i < len(fm.nodeManager.nodes); i++ {
+		remoteHeight := fm.nodeManager.GetNodeState(i).GetChainInfo()
+
+		if remoteHeight == 0 {
+			continue
+		}
+		if remoteHeight > localHeight {
+			// [startHeight, endHeight)
+			startHeight := localHeight
+			endHeight := remoteHeight
+			fm.taskManager.extendTask(startHeight, endHeight)
+		}
+	}
+}
+
+func (fm *FetchManager) dispatchTask() {
+	height, err := fm.taskManager.getTask()
+	if err != nil {
+		return
+	}
+
+	nodeId, client, err := fm.nodeManager.GetBestNode(height)
+	if err != nil {
+		return
+	}
+
+	taskId, height, err := fm.taskManager.popTask()
+	if err != nil {
+		return
+	}
+	fm.nodeManager.SetNodeBusy(nodeId)
+
+	worker := NewFetchWorker(nodeId, taskId, client, height, fm.forkVersion, fm.fetchResultNotifyChannel)
+	worker.Run()
 }

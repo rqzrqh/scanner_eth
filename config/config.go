@@ -11,12 +11,10 @@ import (
 )
 
 type Fetch struct {
-	Host           string        `mapstructure:"host"`
-	Timeout        time.Duration `mapstructure:"timeout"`
-	TaskWindowSize int           `mapstructure:"task_window_size"`
-	WorkerCount    int           `mapstructure:"work"`
-	StartHeight    uint64        `mapstructure:"start_height"`
-	EndHeight      uint64        `mapstructure:"end_height"`
+	RpcNodes    []string      `mapstructure:"rpc_nodes"`
+	Timeout     time.Duration `mapstructure:"timeout"`
+	StartHeight uint64        `mapstructure:"start_height"`
+	EndHeight   uint64        `mapstructure:"end_height"`
 }
 
 type Store struct {
@@ -85,11 +83,9 @@ func LoadConf(fpath string, env string) (*Config, error) {
 
 	conf := &Config{
 		Fetch: Fetch{
-			Timeout:        5 * time.Second,
-			TaskWindowSize: 40,
-			WorkerCount:    2,
-			StartHeight:    math.MaxUint64,
-			EndHeight:      math.MaxUint64,
+			Timeout:     5 * time.Second,
+			StartHeight: math.MaxUint64,
+			EndHeight:   math.MaxUint64,
 		},
 		Store: Store{
 			ChannelSize:      50,
