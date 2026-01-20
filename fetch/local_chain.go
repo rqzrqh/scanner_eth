@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"sync"
 
 	"github.com/sirupsen/logrus"
 	"golang.org/x/xerrors"
@@ -17,15 +16,14 @@ type BlockDigest struct {
 }
 
 // store recent block
-type MemoryChain struct {
-	mtx               sync.Mutex
+type LocalChain struct {
 	reversibleSize    int
 	reversibleSection map[uint64]*BlockDigest
 	startHeight       uint64
 	endHeight         uint64
 }
 
-func NewMemoryChain(reversibleSize int, blkDigestList []*BlockDigest) *MemoryChain {
+func NewLocalChain(reversibleSize int, blkDigestList []*BlockDigest) *LocalChain {
 	if len(blkDigestList) == 0 {
 		logrus.Errorf("memory incoming empty block digest list")
 		os.Exit(0)
@@ -41,8 +39,7 @@ func NewMemoryChain(reversibleSize int, blkDigestList []*BlockDigest) *MemoryCha
 		reversibleSection[v.Height] = v
 	}
 
-	return &MemoryChain{
-		mtx:               sync.Mutex{},
+	return &LocalChain{
 		reversibleSize:    reversibleSize,
 		reversibleSection: reversibleSection,
 		startHeight:       blkDigestList[0].Height,
@@ -50,11 +47,9 @@ func NewMemoryChain(reversibleSize int, blkDigestList []*BlockDigest) *MemoryCha
 	}
 }
 
-func (mc *MemoryChain) Grow(height uint64, hash string, parentHash string) error {
-	mc.mtx.Lock()
-	defer mc.mtx.Unlock()
+func (lc *LocalChain) Grow(height uint64, hash string, parentHash string) error {
 
-	endBlk := mc.reversibleSection[mc.endHeight]
+	endBlk := lc.reversibleSection[lc.endHeight]
 	if len(parentHash) != len(endBlk.Hash) {
 		return xerrors.New("grow failed. hash len not equal")
 	}
@@ -71,13 +66,13 @@ func (mc *MemoryChain) Grow(height uint64, hash string, parentHash string) error
 		ParentHash: parentHash,
 	}
 
-	mc.reversibleSection[height] = blk
-	mc.endHeight = height
+	lc.reversibleSection[height] = blk
+	lc.endHeight = height
 
 	for {
-		if len(mc.reversibleSection) > mc.reversibleSize {
-			delete(mc.reversibleSection, mc.startHeight)
-			mc.startHeight++
+		if len(lc.reversibleSection) > lc.reversibleSize {
+			delete(lc.reversibleSection, lc.startHeight)
+			lc.startHeight++
 		} else {
 			break
 		}
@@ -86,28 +81,24 @@ func (mc *MemoryChain) Grow(height uint64, hash string, parentHash string) error
 	return nil
 }
 
-func (mc *MemoryChain) Revert(height uint64) {
-	mc.mtx.Lock()
-	defer mc.mtx.Unlock()
+func (lc *LocalChain) Revert(height uint64) {
 
-	if height != mc.endHeight {
+	if height != lc.endHeight {
 		fmt.Println("memory revert failed")
 		os.Exit(0)
 	}
 
-	delete(mc.reversibleSection, height)
-	mc.endHeight--
+	delete(lc.reversibleSection, height)
+	lc.endHeight--
 
-	if len(mc.reversibleSection) == 0 {
+	if len(lc.reversibleSection) == 0 {
 		fmt.Println("memory revert out of limit")
 		os.Exit(0)
 	}
 }
 
-func (mc *MemoryChain) GetChainInfo() (uint64, string) {
-	mc.mtx.Lock()
-	defer mc.mtx.Unlock()
+func (lc *LocalChain) GetChainInfo() (uint64, string) {
 
-	blk := mc.reversibleSection[mc.endHeight]
-	return mc.endHeight, blk.Hash
+	blk := lc.reversibleSection[lc.endHeight]
+	return lc.endHeight, blk.Hash
 }

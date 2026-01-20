@@ -63,24 +63,24 @@ func main() {
 	})
 
 	if err != nil {
-		logrus.Error("failed to connect database %v", err)
+		logrus.Errorf("failed to connect database %v", err)
 		os.Exit(0)
 	}
 
 	sqlDB, err := db.DB()
 	if err != nil {
-		logrus.Error(err)
+		logrus.Errorf("failed to get database instance %v", err)
 		os.Exit(0)
 	}
 
 	if err := sqlDB.Ping(); err != nil {
-		logrus.Error(err)
+		logrus.Errorf("failed to ping database %v", err)
 		os.Exit(0)
 	}
 
 	fmt.Println("sql ping success")
 
-	if err := db.Debug().AutoMigrate(
+	if err := db.AutoMigrate(
 		&model.Block{},
 		&model.Tx{},
 		&model.TxInternal{},
@@ -97,24 +97,28 @@ func main() {
 		&model.BalanceErc20{},
 		&model.BalanceErc1155{},
 	); err != nil {
-		logrus.Error(err)
+		logrus.Errorf("auto migrate failed %v", err)
 		os.Exit(0)
 	}
 
-	client, err := rpc.DialHTTPWithClient(conf.Fetch.Host, &http.Client{
-		Transport: &http.Transport{
-			DisableKeepAlives: true,
-		},
-		Timeout: conf.Fetch.Timeout,
-	})
-	if err != nil {
-		logrus.Error(err)
-		os.Exit(0)
+	clients := make([]*rpc.Client, len(conf.Fetch.RpcNodes))
+	for i, node := range conf.Fetch.RpcNodes {
+		client, err := rpc.DialHTTPWithClient(node, &http.Client{
+			Transport: &http.Transport{
+				DisableKeepAlives: true,
+			},
+			Timeout: conf.Fetch.Timeout,
+		})
+		if err != nil {
+			logrus.Error(err)
+			os.Exit(0)
+		}
+		clients[i] = client
 	}
 
 	logrus.Info("create eth client success")
 
-	s := newSyncer(client, db, conf.Store.ChannelSize, conf.Store.BatchSize, conf.Store.WorkerCount, conf.Fetch.TaskWindowSize, conf.Fetch.WorkerCount, conf.Fetch.StartHeight, conf.Fetch.EndHeight)
+	s := newSyncer(clients, db, conf.Store.ChannelSize, conf.Store.BatchSize, conf.Store.WorkerCount, conf.Fetch.StartHeight, conf.Fetch.EndHeight)
 
 	leaseAlive()
 	s.Run()

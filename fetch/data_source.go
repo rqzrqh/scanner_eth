@@ -1,7 +1,7 @@
 package fetch
 
 import (
-	"math"
+	"sync_eth/types"
 	"sync_eth/util"
 	"time"
 
@@ -11,26 +11,22 @@ import (
 )
 
 type DataSource struct {
-	client         *rpc.Client
-	remote         *RemoteChain
-	endBlockHeight uint64
-	endBlockHash   string
+	id                       int
+	client                   *rpc.Client
+	remote                   *RemoteChain
+	remoteChainUpdateChannel chan<- *types.RemoteChainUpdate
 }
 
-func NewDataSource(client *rpc.Client, endBlockHeight uint64, endBlockHash string) *DataSource {
+func NewDataSource(id int, client *rpc.Client, remoteChainUpdateChannel chan<- *types.RemoteChainUpdate) *DataSource {
 	return &DataSource{
-		client:         client,
-		remote:         NewRemoteChain(),
-		endBlockHeight: endBlockHeight,
-		endBlockHash:   endBlockHash,
+		id:                       id,
+		client:                   client,
+		remote:                   NewRemoteChain(),
+		remoteChainUpdateChannel: remoteChainUpdateChannel,
 	}
 }
 
 func (ds *DataSource) Run() {
-	if ds.endBlockHeight != math.MaxUint64 {
-		ds.remote.Update(ds.endBlockHeight, ds.endBlockHash)
-		return
-	}
 
 	type BlockDigestJson struct {
 		Hash   string `json:"hash"`
@@ -38,19 +34,20 @@ func (ds *DataSource) Run() {
 	}
 
 	go func() {
+
 		for {
-			time.Sleep(2000 * time.Millisecond)
+			time.Sleep(5000 * time.Millisecond)
 
 			blkJson := &BlockDigestJson{}
 
 			err := ds.client.Call(blkJson, "eth_getBlockByNumber", util.ToBlockNumArg(nil), false)
 			if err != nil {
-				logrus.Warnf("datasource failed to get latest block", err)
+				logrus.Warnf("datasource failed to get latest block. id:%d error:%v", ds.id, err)
 				continue
 			}
 
-			if blkJson == nil || blkJson.Number == "" {
-				logrus.Warnf("datasource get empty block")
+			if blkJson.Number == "" {
+				logrus.Warnf("datasource get empty block. id:%d", ds.id)
 				continue
 			}
 
@@ -58,10 +55,12 @@ func (ds *DataSource) Run() {
 			blockHash := blkJson.Hash
 
 			ds.remote.Update(height, blockHash)
+
+			ds.remoteChainUpdateChannel <- &types.RemoteChainUpdate{
+				Id:        ds.id,
+				Height:    height,
+				BlockHash: blockHash,
+			}
 		}
 	}()
-}
-
-func (ds *DataSource) GetRemoteChain() *RemoteChain {
-	return ds.remote
 }
