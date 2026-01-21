@@ -19,7 +19,7 @@ type FetchManager struct {
 	storeEventChannel        chan *types.ChainEvent
 }
 
-func NewFetchManager(clients []*rpc.Client, localChain *LocalChain, maxTaskCount int, remoteChainUpdateChannel <-chan *types.RemoteChainUpdate,
+func NewFetchManager(clients []*rpc.Client, localChain *LocalChain, maxUnorganizedBlockCount int, remoteChainUpdateChannel <-chan *types.RemoteChainUpdate,
 	storeEventChannel chan *types.ChainEvent) *FetchManager {
 
 	fetchResultNotifyChannel := make(chan *types.FetchResult, 100)
@@ -28,7 +28,7 @@ func NewFetchManager(clients []*rpc.Client, localChain *LocalChain, maxTaskCount
 		nodeManager:              NewNodeManager(clients),
 		localChain:               localChain,
 		pendingBlocks:            NewPendingBlocks(),
-		taskManager:              NewTaskManager(maxTaskCount),
+		taskManager:              NewTaskManager(maxUnorganizedBlockCount),
 		forkVersion:              0,
 		eventID:                  0,
 		remoteChainUpdateChannel: remoteChainUpdateChannel,

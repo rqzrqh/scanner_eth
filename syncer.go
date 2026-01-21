@@ -106,9 +106,9 @@ func newSyncer(clients []*rpc.Client, db *gorm.DB, storeChannelSize int, storeBa
 		dses[i] = fetch.NewDataSource(i, client, remoteChainUpdateChannel)
 	}
 
-	fetchTaskWindowSize := len(clients)
+	maxUnorganizedBlockCount := 50 * len(clients)
 
-	fm := fetch.NewFetchManager(clients, localChain, fetchTaskWindowSize, remoteChainUpdateChannel, storeEventChannel)
+	fm := fetch.NewFetchManager(clients, localChain, maxUnorganizedBlockCount, remoteChainUpdateChannel, storeEventChannel)
 
 	event_center := event.NewEventCenter(publishEventChannel)
 
