@@ -57,7 +57,7 @@ func (ds *DataSource) Run() {
 			ds.remote.Update(height, blockHash)
 
 			ds.remoteChainUpdateChannel <- &types.RemoteChainUpdate{
-				Id:        ds.id,
+				NodeId:    ds.id,
 				Height:    height,
 				BlockHash: blockHash,
 			}

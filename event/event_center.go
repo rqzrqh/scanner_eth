@@ -11,30 +11,12 @@ type RevertData struct {
 }
 
 type EventCenter struct {
-	eventChannel chan *types.ChainEvent
+	publicshOperationChannel <-chan *types.PublishOperation
 }
 
-func NewEventCenter(eventChannel chan *types.ChainEvent) *EventCenter {
+func NewEventCenter(publicshOperationChannel <-chan *types.PublishOperation) *EventCenter {
 	return &EventCenter{
-		eventChannel: eventChannel,
-	}
-}
-
-func (ec *EventCenter) Apply(fullblock *types.FullBlock) {
-	ec.eventChannel <- &types.ChainEvent{
-		Type: types.Apply,
-		Data: &ApplyData{
-			FullBlock: fullblock,
-		},
-	}
-}
-
-func (ec *EventCenter) Revert(height uint64) {
-	ec.eventChannel <- &types.ChainEvent{
-		Type: types.Revert,
-		Data: &RevertData{
-			Height: height,
-		},
+		publicshOperationChannel: publicshOperationChannel,
 	}
 }
 
@@ -43,10 +25,10 @@ func (ec *EventCenter) Run() {
 		for {
 			select {
 			// must async publish
-			case ev := <-ec.eventChannel:
-				if ev.Type == types.Apply {
+			case ev := <-ec.publicshOperationChannel:
+				if ev.Type == types.PublishApply {
 
-				} else if ev.Type == types.Revert {
+				} else if ev.Type == types.PublishRollback {
 
 				}
 			}

@@ -49,12 +49,12 @@ func Revert(db *gorm.DB, height uint64) error {
 	return nil
 }
 
-func StoreFullBlock(db *gorm.DB, fullblock *types.FullBlock, forkVersion uint64, eventID uint64, batchSize int, storeTaskChannel chan *StoreTask, storeCompleteChannel chan *StoreComplete) error {
+func StoreFullBlock(db *gorm.DB, fullblock *types.FullBlock, batchSize int, storeTaskChannel chan *StoreTask, storeCompleteChannel chan *StoreComplete) error {
 	startTime := time.Now()
 
 	height := fullblock.Block.Height
 
-	dispatchComplate := make(chan map[uint64]struct{}, 1)
+	dispatchComplete := make(chan map[uint64]struct{}, 1)
 
 	grp, _ := errgroup.WithContext(context.Background())
 
@@ -67,7 +67,7 @@ func StoreFullBlock(db *gorm.DB, fullblock *types.FullBlock, forkVersion uint64,
 		splitTxErc1155(fullblock.TxErc1155List, batchSize, height, storeTaskChannel, taskSet)
 		splitBalance(fullblock.BalanceList, batchSize, height, storeTaskChannel, taskSet)
 
-		dispatchComplate <- taskSet
+		dispatchComplete <- taskSet
 
 		return nil
 	})
@@ -97,7 +97,7 @@ func StoreFullBlock(db *gorm.DB, fullblock *types.FullBlock, forkVersion uint64,
 						break Loop
 					}
 				}
-			case e := <-dispatchComplate:
+			case e := <-dispatchComplete:
 				dispatchTaskSet = e
 				for k := range storeCompleteTaskSet {
 					delete(dispatchTaskSet, k)
@@ -134,8 +134,8 @@ func StoreFullBlock(db *gorm.DB, fullblock *types.FullBlock, forkVersion uint64,
 	prevHash := fullblock.Block.ParentHash
 	blockHash := fullblock.Block.BlockHash
 
-	logrus.Infof("store success. height:%v fork_version:%v event_id:%v hash:%v prev_hash:%v cost:%v",
-		height, forkVersion, eventID, blockHash, prevHash, time.Since(startTime).String())
+	logrus.Infof("store success. height:%v hash:%v prev_hash:%v cost:%v",
+		height, blockHash, prevHash, time.Since(startTime).String())
 
 	return nil
 }
