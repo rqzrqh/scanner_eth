@@ -16,12 +16,12 @@ type FetchManager struct {
 	eventID                  uint64
 	remoteChainUpdateChannel <-chan *types.RemoteChainUpdate
 	fetchResultNotifyChannel chan *types.FetchResult
-	storeEventChannel        chan *types.ChainEvent
+	storeOperationChannel    chan<- *types.StoreOperation
+	publishOperationChannel  chan<- *types.PublishOperation
 }
 
 func NewFetchManager(clients []*rpc.Client, localChain *LocalChain, maxUnorganizedBlockCount int, remoteChainUpdateChannel <-chan *types.RemoteChainUpdate,
-	storeEventChannel chan *types.ChainEvent) *FetchManager {
-
+	storeOperationChannel chan<- *types.StoreOperation, publishOperationChannel chan<- *types.PublishOperation) *FetchManager {
 	fetchResultNotifyChannel := make(chan *types.FetchResult, 100)
 
 	return &FetchManager{
@@ -33,7 +33,8 @@ func NewFetchManager(clients []*rpc.Client, localChain *LocalChain, maxUnorganiz
 		eventID:                  0,
 		remoteChainUpdateChannel: remoteChainUpdateChannel,
 		fetchResultNotifyChannel: fetchResultNotifyChannel,
-		storeEventChannel:        storeEventChannel,
+		storeOperationChannel:    storeOperationChannel,
+		publishOperationChannel:  publishOperationChannel,
 	}
 }
 
@@ -69,30 +70,42 @@ func (fm *FetchManager) addBlock(data *types.FullBlock, forkVersion uint64) {
 
 			fm.localChain.Revert(currentHeight)
 
-			ev := &types.ChainEvent{
-				Type: types.Revert,
-				Data: &types.RevertData{
-					Height:      currentHeight,
-					ForkVersion: fm.forkVersion,
-					EventID:     fm.eventID,
+			storeOperation := &types.StoreOperation{
+				Type: types.StoreRollback,
+				Data: &types.StoreRollbackData{
+					Height: currentHeight,
 				},
 			}
-			fm.storeEventChannel <- ev
+			fm.storeOperationChannel <- storeOperation
+
+			publishOperation := &types.PublishOperation{
+				Type: types.PublishRollback,
+				Data: &types.PublishRollbackData{
+					Height: currentHeight,
+				},
+			}
+			fm.publishOperationChannel <- publishOperation
+
 			break
 		} else {
 			fm.taskManager.processSuccess(nextHeight)
 			fm.pendingBlocks.removeData(nextHeight)
 			logrus.Infof("local chain grow. height:%v fork_version:%v event_id:%v", nextHeight, fm.forkVersion, fm.eventID)
-			ev := &types.ChainEvent{
-				Type: types.Apply,
-				Data: &types.ApplyData{
-					FullBlock:   fullblock,
-					ForkVersion: fm.forkVersion,
-					EventID:     fm.eventID,
+			storeOperation := &types.StoreOperation{
+				Type: types.StoreApply,
+				Data: &types.StoreApplyData{
+					FullBlock: fullblock,
 				},
 			}
+			fm.storeOperationChannel <- storeOperation
 
-			fm.storeEventChannel <- ev
+			publishOperation := &types.PublishOperation{
+				Type: types.PublishApply,
+				Data: &types.PublishApplyData{
+					FullBlock: fullblock,
+				},
+			}
+			fm.publishOperationChannel <- publishOperation
 		}
 	}
 }
@@ -102,7 +115,7 @@ func (fm *FetchManager) Run() {
 		for {
 			select {
 			case remoteChainUpdate := <-fm.remoteChainUpdateChannel:
-				fm.nodeManager.UpdateNodeChainInfo(remoteChainUpdate.Id, remoteChainUpdate.Height, remoteChainUpdate.BlockHash)
+				fm.nodeManager.UpdateNodeChainInfo(remoteChainUpdate.NodeId, remoteChainUpdate.Height, remoteChainUpdate.BlockHash)
 				fm.updateTask()
 				fm.dispatchTask()
 

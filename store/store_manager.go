@@ -10,24 +10,22 @@ import (
 )
 
 type StoreManager struct {
-	db                   *gorm.DB
-	batchSize            int
-	storeEventChannel    chan *types.ChainEvent
-	publishEventChannel  chan *types.ChainEvent
-	storeTaskChannel     chan *StoreTask
-	storeCompleteChannel chan *StoreComplete
+	db                    *gorm.DB
+	batchSize             int
+	storeOperationChannel chan *types.StoreOperation
+	storeTaskChannel      chan *StoreTask
+	storeCompleteChannel  chan *StoreComplete
 }
 
-func NewStoreManager(db *gorm.DB, batchSize int, storeEventChannel chan *types.ChainEvent, publishEventChannel chan *types.ChainEvent,
+func NewStoreManager(db *gorm.DB, batchSize int, storeOperationChannel chan *types.StoreOperation,
 	storeTaskChannel chan *StoreTask, storeCompleteChannel chan *StoreComplete) *StoreManager {
 
 	return &StoreManager{
-		db:                   db,
-		batchSize:            batchSize,
-		storeEventChannel:    storeEventChannel,
-		publishEventChannel:  publishEventChannel,
-		storeTaskChannel:     storeTaskChannel,
-		storeCompleteChannel: storeCompleteChannel,
+		db:                    db,
+		batchSize:             batchSize,
+		storeOperationChannel: storeOperationChannel,
+		storeTaskChannel:      storeTaskChannel,
+		storeCompleteChannel:  storeCompleteChannel,
 	}
 }
 
@@ -35,17 +33,17 @@ func (sm *StoreManager) Run() {
 	go func() {
 		for {
 			select {
-			case ev := <-sm.storeEventChannel:
-				if ev.Type == types.Apply {
-					data := ev.Data.(*types.ApplyData)
+			case op := <-sm.storeOperationChannel:
+				if op.Type == types.StoreApply {
+					data := op.Data.(*types.StoreApplyData)
 					height := data.FullBlock.Block.Height
 
-					if err := StoreFullBlock(sm.db, data.FullBlock, data.ForkVersion, data.EventID, sm.batchSize, sm.storeTaskChannel, sm.storeCompleteChannel); err != nil {
+					if err := StoreFullBlock(sm.db, data.FullBlock, sm.batchSize, sm.storeTaskChannel, sm.storeCompleteChannel); err != nil {
 						logrus.Errorf("write fullblock failed. height:%v err:%v", height, err)
 						os.Exit(0)
 					}
-				} else if ev.Type == types.Revert {
-					data := ev.Data.(*types.RevertData)
+				} else if op.Type == types.StoreRollback {
+					data := op.Data.(*types.StoreRollbackData)
 					height := data.Height
 
 					tryCount := 0
@@ -63,8 +61,6 @@ func (sm *StoreManager) Run() {
 						}
 					}
 				}
-
-				sm.publishEventChannel <- ev
 			}
 		}
 	}()

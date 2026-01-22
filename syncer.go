@@ -93,10 +93,9 @@ func newSyncer(clients []*rpc.Client, db *gorm.DB, storeChannelSize int, storeBa
 		blkDigestList = append(blkDigestList, blk)
 	}
 
-	storeEventChannel := make(chan *types.ChainEvent, storeChannelSize)
-	publishEventChannel := make(chan *types.ChainEvent, 0)
+	storeOperationChannel := make(chan *types.StoreOperation, storeChannelSize)
 
-	sm := store.NewStoreManager(db, storeBatchSize, storeEventChannel, publishEventChannel, storeTaskChannel, storeCompleteChannel)
+	sm := store.NewStoreManager(db, storeBatchSize, storeOperationChannel, storeTaskChannel, storeCompleteChannel)
 	localChain := fetch.NewLocalChain(reversibleSize, blkDigestList)
 
 	remoteChainUpdateChannel := make(chan *types.RemoteChainUpdate, 100)
@@ -108,9 +107,9 @@ func newSyncer(clients []*rpc.Client, db *gorm.DB, storeChannelSize int, storeBa
 
 	maxUnorganizedBlockCount := 50 * len(clients)
 
-	fm := fetch.NewFetchManager(clients, localChain, maxUnorganizedBlockCount, remoteChainUpdateChannel, storeEventChannel)
-
-	event_center := event.NewEventCenter(publishEventChannel)
+	publishOperationChannel := make(chan *types.PublishOperation, 0)
+	fm := fetch.NewFetchManager(clients, localChain, maxUnorganizedBlockCount, remoteChainUpdateChannel, storeOperationChannel, publishOperationChannel)
+	event_center := event.NewEventCenter(publishOperationChannel)
 
 	return &Syncer{
 		dses:         dses,

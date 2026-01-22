@@ -1,7 +1,7 @@
 package types
 
 type RemoteChainUpdate struct {
-	Id        int
+	NodeId    int
 	Height    uint64
 	BlockHash string
 }
