@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	syslog "log"
@@ -102,15 +103,18 @@ func main() {
 	}
 
 	clients := make([]*rpc.Client, len(conf.Fetch.RpcNodes))
-	for i, node := range conf.Fetch.RpcNodes {
-		client, err := rpc.DialHTTPWithClient(node, &http.Client{
+	for i, url := range conf.Fetch.RpcNodes {
+
+		customClient := &http.Client{
 			Transport: &http.Transport{
 				DisableKeepAlives: true,
 			},
 			Timeout: conf.Fetch.Timeout,
-		})
+		}
+
+		client, err := rpc.DialOptions(context.Background(), url, rpc.WithHTTPClient(customClient))
 		if err != nil {
-			logrus.Error(err)
+			logrus.Errorf("dial failed idx:%d %v", i, err)
 			os.Exit(0)
 		}
 		clients[i] = client
