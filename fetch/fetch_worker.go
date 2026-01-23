@@ -153,11 +153,11 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		h := new(big.Int).SetUint64(height)
 		err := client.Call(blkJson, "eth_getBlockByNumber", util.ToBlockNumArg(h), true)
 		if err != nil {
-			logrus.Errorf("eth_getBlockByNumber failed. nodeId:%v taskId:%v error:%v height:%v", nodeId, taskId, err, height)
+			logrus.Errorf("fetch header failed. nodeId:%v taskId:%v error:%v height:%v", nodeId, taskId, err, height)
 			return nil
 		}
 
-		logrus.Debugf("eth_getBlockByNumber nodeId:%v taskId:%v txs:%v height:%v cost:%v", nodeId, taskId, len(blkJson.Txs), height, time.Since(startTime).String())
+		logrus.Debugf("fetch header success. nodeId:%v taskId:%v txs:%v height:%v cost:%v", nodeId, taskId, len(blkJson.Txs), height, time.Since(startTime).String())
 	}
 
 	gasUsed := hexutil.MustDecodeUint64(blkJson.GasUsed)
@@ -177,8 +177,10 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		baseFee = big.NewInt(0)
 	}
 
-	difficulty := hexutil.MustDecodeBig(blkJson.Difficulty)
-	totalDifficulty := hexutil.MustDecodeBig(blkJson.TotalDifficulty)
+	//difficulty := hexutil.MustDecodeBig(blkJson.Difficulty)
+	//totalDifficulty := hexutil.MustDecodeBig(blkJson.TotalDifficulty)
+	difficulty := big.NewInt(0)
+	totalDifficulty := big.NewInt(0)
 
 	modelBlock := &model.Block{
 		Height:         hexutil.MustDecodeUint64(blkJson.Number),
@@ -223,18 +225,18 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 
 		if len(elemsReceipts) > 0 {
 			if err := client.BatchCallContext(context.Background(), elemsReceipts); err != nil {
-				logrus.Errorf("rpc get receipts failed. nodeId:%v taskId:%v height:%v error:%v", nodeId, taskId, height, err)
+				logrus.Errorf("fetch receipts failed. nodeId:%v taskId:%v height:%v error:%v", nodeId, taskId, height, err)
 				return nil
 			}
 
 			for idx, elem := range elemsReceipts {
 				if elem.Error != nil {
-					logrus.Errorf("rpc get receipts elem failed. nodeId:%v taskId:%v height:%v elem(%v) error:%v", nodeId, taskId, height, idx, elem.Error)
+					logrus.Errorf("fetch receipts elem failed. nodeId:%v taskId:%v height:%v elem(%v) error:%v", nodeId, taskId, height, idx, elem.Error)
 					return nil
 				}
 			}
 		}
-		logrus.Debugf("eth_getTransactionReceipt nodeId:%v taskId:%v txs:%v height:%v cost:%v", nodeId, taskId, len(blkJson.Txs), height, time.Since(startTime).String())
+		logrus.Debugf("fetch receipts success. nodeId:%v taskId:%v txs:%v height:%v cost:%v", nodeId, taskId, len(blkJson.Txs), height, time.Since(startTime).String())
 	}
 
 	// fetch internal tx
