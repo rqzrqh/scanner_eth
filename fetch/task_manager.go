@@ -1,10 +1,10 @@
 package fetch
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/elliotchance/orderedmap/v3"
+	"github.com/sirupsen/logrus"
 	"golang.org/x/xerrors"
 )
 
@@ -92,7 +92,7 @@ func (tm *TaskManager) extendTask(startHeight uint64, endHeight uint64) error {
 func (tm *TaskManager) fetchSuccess(height uint64) {
 	_, exist := tm.inFetch[height]
 	if !exist {
-		fmt.Println("fetch success height not found", height)
+		logrus.Errorf("fetch success height:%v not found", height)
 		os.Exit(0)
 	}
 
@@ -104,7 +104,7 @@ func (tm *TaskManager) fetchSuccess(height uint64) {
 func (tm *TaskManager) fetchFailed(height uint64) {
 	_, exist := tm.inFetch[height]
 	if !exist {
-		fmt.Println("fetch success height not found", height)
+		logrus.Errorf("fetch success height:%v not found", height)
 		os.Exit(0)
 	}
 
@@ -116,7 +116,7 @@ func (tm *TaskManager) fetchFailed(height uint64) {
 func (tm *TaskManager) processSuccess(height uint64) {
 	_, exist := tm.inStage[height]
 	if !exist {
-		fmt.Println("process success height not found", height)
+		logrus.Errorf("process success height:%v not found", height)
 		os.Exit(0)
 	}
 

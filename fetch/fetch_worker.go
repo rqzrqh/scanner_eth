@@ -116,16 +116,11 @@ func (fw *FetchWorker) fetch(height uint64) *types.FullBlock {
 	return FetchFullBlock(fw.nodeId, fw.taskId, fw.client, height)
 }
 
-func isErc20Tx(topic0, topic1, topic2, topic3 string) bool {
-	topicOk := false
-	if topic0 != "" && topic1 != "" && topic2 != "" && topic3 == "" {
-		topicOk = true
-	}
-
-	return topicOk && topic0 == erc20Transfer
+func isErc20TransferTx(topic0, topic1, topic2, topic3 string) bool {
+	return topic0 == erc20Transfer && topic1 != "" && topic2 != "" && topic3 == ""
 }
 
-func isErc721Tx(topic0, topic1, topic2, topic3 string) bool {
+func isErc721TransferTx(topic0, topic1, topic2, topic3 string) bool {
 	return topic0 == erc721Transfer && topic1 != "" && topic2 != "" && topic3 != ""
 }
 
@@ -246,8 +241,8 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		arg := map[string]interface{}{}
 		method := "debug_traceActionByBlockNumber"
 		if err := client.CallContext(context.Background(), &txInternalJsonList, method, util.ToBlockNumArg(new(big.Int).SetUint64(height)), arg); err != nil {
-			logrus.Errorf("fetch internal tx failed. nodeId:%v taskId:%v err:%v height:%v", nodeId, taskId, err, height)
-			os.Exit(0)
+			logrus.Warnf("fetch internal tx failed. nodeId:%v taskId:%v err:%v height:%v", nodeId, taskId, err, height)
+			return nil
 		}
 	}
 	*/
@@ -265,7 +260,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	modelContractList = append(modelContractList, modelTxContractList...)
 	modelContractList = append(modelContractList, modelTxInternalContractList...)
 
-	// merge balance set
+	// get all native token balance changed accounts
 	for k := range txBalanceAddress {
 		balanceAddress[k] = struct{}{}
 	}
@@ -273,7 +268,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		balanceAddress[k] = struct{}{}
 	}
 
-	// merge erc20 balance set
+	// get all erc20 token balance changed accounts
 	for k, v := range txBalanceErc20Address {
 		for c := range v {
 			if _, ok := balanceErc20Address[k]; !ok {
@@ -291,6 +286,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		}
 	}
 
+	// fetch native token balance changed account's balance
 	modelBalanceList := make([]*model.Balance, 0)
 	{
 		balances := make([]*types.Balance, 0)
@@ -301,8 +297,8 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		}
 
 		if err := fetchBalances(client, balances, height); err != nil {
-			logrus.Errorf("fetch balance failed. nodeId:%v taskId:%v height:%v err:%v", nodeId, taskId, height, err)
-			os.Exit(0)
+			logrus.Warnf("fetch balance failed. nodeId:%v taskId:%v height:%v err:%v", nodeId, taskId, height, err)
+			return nil
 		}
 
 		for _, v := range balances {
@@ -315,6 +311,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		}
 	}
 
+	// fetch erc20 token balance changed account's erc20 balance
 	modelBalanceErc20List := make([]*model.BalanceErc20, 0)
 	{
 		balancesErc20 := make([]*types.BalanceErc20, 0)
@@ -328,8 +325,8 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		}
 
 		if err := fetchErc20BalancesBatch(client, balancesErc20, height); err != nil {
-			logrus.Errorf("fetch balance failed. nodeId:%v taskId:%v height:%v err:%v", nodeId, taskId, height, err)
-			os.Exit(0)
+			logrus.Warnf("fetch balance failed. nodeId:%v taskId:%v height:%v err:%v", nodeId, taskId, height, err)
+			return nil
 		}
 
 		for _, v := range balancesErc20 {
@@ -343,25 +340,27 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		}
 	}
 
+	// get new erc20 contract info
 	modelContractErc20List := make([]*model.ContractErc20, 0)
 	{
 		for k := range erc20ContractAddrs {
 			addr := common.HexToAddress(k)
 			modelContractErc20, err := fetchContractErc20(client, &addr, height)
 			if err != nil {
-				os.Exit(0)
+				return nil
 			}
 			modelContractErc20List = append(modelContractErc20List, modelContractErc20)
 		}
 	}
 
+	// get new erc721 contract info
 	modelContractErc721List := make([]*model.ContractErc721, 0)
 	{
 		for k := range erc721ContractAddrs {
 			addr := common.HexToAddress(k)
 			modelContractErc721, err := fetchContractErc721(client, &addr, height)
 			if err != nil {
-				os.Exit(0)
+				return nil
 			}
 			modelContractErc721List = append(modelContractErc721List, modelContractErc721)
 		}
@@ -425,6 +424,7 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 		fromAddr := strings.ToLower(txJson.From)
 		toAddr := strings.ToLower(txJson.To)
 
+		// get new create contract
 		if toHex == "" || toHex == "0x" || receipt.ContractAddress.Hex() != util.ZeroAddress {
 			if receipt.Status == 1 {
 				isCreateContract = true
@@ -501,6 +501,7 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 		balanceAddress[toAddr] = struct{}{}
 
 		for _, txLog := range receipt.Logs {
+			// first one is event signature, left is indexed field, up to 3
 			var topic0, topic1, topic2, topic3 string
 			switch len(txLog.Topics) {
 			case 1:
@@ -535,7 +536,7 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 			}
 			modelEventLogList = append(modelEventLogList, modelEventLog)
 
-			if isErc20Tx(topic0, topic1, topic2, topic3) {
+			if isErc20TransferTx(topic0, topic1, topic2, topic3) {
 				sender := topic1
 				receiver := topic2
 				tokenAmount := new(big.Int)
@@ -579,12 +580,9 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 				if contractAddr != util.ZeroAddress && isCreateContract {
 					erc20ContractAddrs[contractAddr] = struct{}{}
 				}
-			}
-
-			// erc721
-			if isErc721Tx(topic0, topic1, topic2, topic3) {
-				sender := strings.ToLower(string(common.HexToAddress(topic1).Hex()))
-				receiver := strings.ToLower(string(common.HexToAddress(topic2).Hex()))
+			} else if isErc721TransferTx(topic0, topic1, topic2, topic3) {
+				sender := strings.ToLower(common.HexToAddress(topic1).Hex())
+				receiver := strings.ToLower(common.HexToAddress(topic2).Hex())
 				tokenId := common.HexToHash(topic3).Big().String()
 
 				// tx erc721
@@ -614,9 +612,7 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 				if contractAddr != util.ZeroAddress && isCreateContract {
 					erc721ContractAddrs[contractAddr] = struct{}{}
 				}
-			}
-
-			if isErc1155SingleTx(topic0, topic1, topic2, topic3) {
+			} else if isErc1155SingleTx(topic0, topic1, topic2, topic3) {
 				var transferSingleData struct {
 					Id    *big.Int
 					Value *big.Int
@@ -624,7 +620,7 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 
 				if err := erc1155ABI.UnpackIntoInterface(&transferSingleData, "TransferSingle", txLog.Data); err != nil {
 					logrus.Errorf("erc1155 single err:%v height:%v", err, height)
-					os.Exit(0)
+					continue
 				}
 
 				operator := strings.ToLower(common.HexToAddress(topic1).Hex())
@@ -660,9 +656,7 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 					Index:        int(txLog.Index),
 				}
 				modelTxErc1155List = append(modelTxErc1155List, modelTxErc1155)
-			}
-
-			if isErc1155BatchTx(topic0, topic1, topic2, topic3) {
+			} else if isErc1155BatchTx(topic0, topic1, topic2, topic3) {
 				var transferBatchData struct {
 					Ids    []*big.Int
 					Values []*big.Int
@@ -670,7 +664,7 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 
 				if err := erc1155ABI.UnpackIntoInterface(&transferBatchData, "TransferBatch", txLog.Data); err != nil {
 					logrus.Errorf("erc1155 batch UnpackIntoInterface err:%v height:%v", err, height)
-					os.Exit(0)
+					continue
 				}
 
 				ids := transferBatchData.Ids

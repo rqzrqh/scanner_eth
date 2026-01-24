@@ -1,7 +1,6 @@
 package fetch
 
 import (
-	"fmt"
 	"os"
 	"sort"
 
@@ -84,7 +83,7 @@ func (lc *LocalChain) Grow(height uint64, hash string, parentHash string) error 
 func (lc *LocalChain) Revert(height uint64) {
 
 	if height != lc.endHeight {
-		fmt.Println("memory revert failed")
+		logrus.Errorf("memory revert failed. height not equal %v %v", height, lc.endHeight)
 		os.Exit(0)
 	}
 
@@ -92,7 +91,7 @@ func (lc *LocalChain) Revert(height uint64) {
 	lc.endHeight--
 
 	if len(lc.reversibleSection) == 0 {
-		fmt.Println("memory revert out of limit")
+		logrus.Errorf("memory revert out of limit")
 		os.Exit(0)
 	}
 }
