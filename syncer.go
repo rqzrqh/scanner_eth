@@ -17,8 +17,6 @@ import (
 	"gorm.io/gorm"
 )
 
-var reversibleSize = 27
-
 type Syncer struct {
 	dses         []*fetch.DataSource
 	fm           *fetch.FetchManager
@@ -27,24 +25,12 @@ type Syncer struct {
 	event_center *event.EventCenter
 }
 
-func newSyncer(clients []*rpc.Client, db *gorm.DB, storeChannelSize int, storeBatchSize int, storeWorkerCount int, startHeight uint64, endHeight uint64) *Syncer {
+func newSyncer(clients []*rpc.Client, db *gorm.DB, reversibleBlocks int, storeChannelSize int, storeBatchSize int, storeWorkerCount int, startHeight uint64, endHeight uint64) *Syncer {
 
 	logrus.Infof("storeChannelSize:%v storeBatchSize:%v storeWorkerCount:%v startHeight:%v endHeight:%v",
 		storeChannelSize, storeBatchSize, storeWorkerCount, startHeight, endHeight)
 
 	fetch.InitAbi()
-
-	storeTaskChannel := make(chan *store.StoreTask, 10)
-	storeCompleteChannel := make(chan *store.StoreComplete, 10)
-
-	storeWorkers := make([]*store.StoreWorker, 0)
-	for i := 0; i < storeWorkerCount; i++ {
-		worker := store.NewStoreWorker(i, db, storeTaskChannel, storeCompleteChannel)
-		worker.Run()
-		storeWorkers = append(storeWorkers, worker)
-	}
-
-	// TODO get genesis block
 
 	if startHeight != math.MaxUint64 && endHeight != math.MaxUint64 {
 		if startHeight > endHeight {
@@ -74,7 +60,7 @@ func newSyncer(clients []*rpc.Client, db *gorm.DB, storeChannelSize int, storeBa
 
 	blkDigestList := make([]*fetch.BlockDigest, 0)
 	if startHeight == math.MaxUint64 {
-		lookbackBlockList := lookbackBlock(db, startBlockHeight, reversibleSize)
+		lookbackBlockList := lookbackBlock(db, startBlockHeight, reversibleBlocks)
 		for _, v := range lookbackBlockList {
 			blk := &fetch.BlockDigest{
 				Height:     v.Height,
@@ -95,8 +81,18 @@ func newSyncer(clients []*rpc.Client, db *gorm.DB, storeChannelSize int, storeBa
 
 	storeOperationChannel := make(chan *types.StoreOperation, storeChannelSize)
 
+	storeTaskChannel := make(chan *store.StoreTask, 10)
+	storeCompleteChannel := make(chan *store.StoreComplete, 10)
+
+	storeWorkers := make([]*store.StoreWorker, storeWorkerCount)
+	for i := 0; i < storeWorkerCount; i++ {
+		worker := store.NewStoreWorker(i, db, storeTaskChannel, storeCompleteChannel)
+		worker.Run()
+		storeWorkers[i] = worker
+	}
+
 	sm := store.NewStoreManager(db, storeBatchSize, storeOperationChannel, storeTaskChannel, storeCompleteChannel)
-	localChain := fetch.NewLocalChain(reversibleSize, blkDigestList)
+	localChain := fetch.NewLocalChain(reversibleBlocks, blkDigestList)
 
 	remoteChainUpdateChannel := make(chan *types.RemoteChainUpdate, 100)
 
@@ -137,11 +133,11 @@ func loadStartBlock(client *rpc.Client, db *gorm.DB, height uint64, batchSize in
 	return uint64(0), "", ""
 }
 
-func lookbackBlock(db *gorm.DB, height uint64, reversibleSize int) []*model.Block {
+func lookbackBlock(db *gorm.DB, height uint64, reversibleBlocks int) []*model.Block {
 	var modelBlockList []*model.Block
 	var heightList []uint64
 
-	for i := uint64(0); i <= uint64(reversibleSize); i++ {
+	for i := uint64(0); i <= uint64(reversibleBlocks); i++ {
 		h := height - i
 		if h < 0 {
 			break

@@ -10,6 +10,13 @@ import (
 	"github.com/spf13/viper"
 )
 
+type Chain struct {
+	Name             string `mapstructure:"name"`
+	ChainId          uint64 `mapstructure:"chain_id"`
+	GenesisBlockHash string `mapstructure:"genesis_block_hash"`
+	ReversibleBlocks int    `mapstructure:"reversible_blocks"`
+}
+
 type Fetch struct {
 	RpcNodes    []string      `mapstructure:"rpc_nodes"`
 	Timeout     time.Duration `mapstructure:"timeout"`
@@ -51,6 +58,7 @@ type Log struct {
 
 type Config struct {
 	AppName string `mapstructure:"stdout"`
+	Chain   Chain  `mapstructure:"chain"`
 	Fetch   Fetch  `mapstructure:"fetch"`
 	Store   Store  `mapstructure:"store"`
 	Log     Log    `mapstructure:"log"`
