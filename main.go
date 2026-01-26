@@ -20,6 +20,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 )
 
@@ -109,32 +110,9 @@ func main() {
 
 	logrus.Infof("database auto migrate success")
 
-	// check and init chain info
-	var chainInfos []model.ChainInfo
-	if err := db.Find(&chainInfos).Error; err != nil {
-		logrus.Errorf("load chain info from db failed. err:%v", err)
-		os.Exit(0)
-	}
-	if len(chainInfos) == 0 {
-		chainInfo := &model.ChainInfo{
-			ChainId:   conf.Chain.ChainId,
-			BlockHash: conf.Chain.GenesisBlockHash,
-		}
-		if err := db.Create(chainInfo).Error; err != nil {
-			logrus.Errorf("insert chain info to db failed. err:%v", err)
-			os.Exit(0)
-		}
-		logrus.Infof("insert chain info to db success. chain_id:%v hash:%v", conf.Chain.ChainId, conf.Chain.GenesisBlockHash)
-	} else if len(chainInfos) > 1 {
-		logrus.Errorf("chain info count more than 1 in db. count:%v", len(chainInfos))
-		os.Exit(0)
-	} else {
-		if chainInfos[0].ChainId != conf.Chain.ChainId || chainInfos[0].BlockHash != conf.Chain.GenesisBlockHash {
-			logrus.Errorf("chain info not equal with db. db:%v %v conf:%v %v",
-				chainInfos[0].ChainId, chainInfos[0].BlockHash, conf.Chain.ChainId, conf.Chain.GenesisBlockHash)
-			os.Exit(0)
-		}
-	}
+	initChainInfo(db, conf.Chain.ChainId, conf.Chain.GenesisBlockHash)
+
+	logrus.Infof("init chain info success")
 
 	rpcNodeCount := len(conf.Fetch.RpcNodes)
 	if rpcNodeCount == 0 {
@@ -166,6 +144,10 @@ func main() {
 
 	logrus.Infof("node chain info check passed")
 
+	initGenesisBlock(clients, db)
+
+	logrus.Infof("genesis block init success")
+
 	s := newSyncer(clients, db, conf.Store.ChannelSize, conf.Chain.ReversibleBlocks, conf.Store.BatchSize, conf.Store.WorkerCount, conf.Fetch.StartHeight, conf.Fetch.EndHeight)
 
 	leaseAlive()
@@ -192,6 +174,34 @@ func leaseAlive() {
 	}
 	now := time.Now().Unix()
 	fmt.Fprintf(f, "%d", now)
+}
+
+func initChainInfo(db *gorm.DB, chainId uint64, genesisBlockHash string) {
+	var chainInfos []model.ChainInfo
+	if err := db.Find(&chainInfos).Error; err != nil {
+		logrus.Errorf("load chain info from db failed. err:%v", err)
+		os.Exit(0)
+	}
+	if len(chainInfos) == 0 {
+		chainInfo := &model.ChainInfo{
+			ChainId:          chainId,
+			GenesisBlockHash: genesisBlockHash,
+		}
+		if err := db.Create(chainInfo).Error; err != nil {
+			logrus.Errorf("insert chain info to db failed. err:%v", err)
+			os.Exit(0)
+		}
+		logrus.Infof("insert chain info to db success. chain_id:%v hash:%v", chainId, genesisBlockHash)
+	} else if len(chainInfos) > 1 {
+		logrus.Errorf("chain info count more than 1 in db. count:%v", len(chainInfos))
+		os.Exit(0)
+	} else {
+		if chainInfos[0].ChainId != chainId || chainInfos[0].GenesisBlockHash != genesisBlockHash {
+			logrus.Errorf("chain info not equal with db. db:%v %v conf:%v %v",
+				chainInfos[0].ChainId, chainInfos[0].GenesisBlockHash, chainId, genesisBlockHash)
+			os.Exit(0)
+		}
+	}
 }
 
 func checkNodeChainInfo(clients []*rpc.Client, db *gorm.DB) {
@@ -222,9 +232,42 @@ func checkNodeChainInfo(clients []*rpc.Client, db *gorm.DB) {
 			os.Exit(0)
 		}
 
-		if blkJson.Hash != chainInfo.BlockHash {
-			logrus.Errorf("genesis block not equal with db. id:%v db:%v node:%v", i, chainInfo.BlockHash, blkJson.Hash)
+		if blkJson.Hash != chainInfo.GenesisBlockHash {
+			logrus.Errorf("genesis block not equal with db. id:%v db:%v node:%v", i, chainInfo.GenesisBlockHash, blkJson.Hash)
 			os.Exit(0)
 		}
 	}
+}
+
+func initGenesisBlock(clients []*rpc.Client, db *gorm.DB) {
+
+	// check height 0 block exist
+	var count int64
+	if err := db.Model(&model.Block{}).Where("height = ?", 0).Count(&count).Error; err != nil {
+		logrus.Errorf("check genesis block exist failed. err:%v", err)
+		os.Exit(0)
+	}
+
+	if count > 0 {
+		logrus.Infof("genesis block exist in db. skip init")
+		return
+	}
+
+	blkJson := &types.BlockHeaderJson{}
+	if err := clients[0].Call(blkJson, "eth_getBlockByNumber", "0x0", false); err != nil {
+		logrus.Errorf("get genesis block failed. err:%v", err)
+		os.Exit(0)
+	}
+
+	genesisBlock := &model.Block{
+		Height:    0,
+		BlockHash: blkJson.Hash,
+	}
+
+	if err := db.Clauses(clause.Insert{Modifier: "IGNORE"}).Create(genesisBlock).Error; err != nil {
+		logrus.Errorf("insert genesis block to db failed. err:%v", err)
+		os.Exit(0)
+	}
+
+	logrus.Infof("init genesis block to db success. hash:%v", blkJson.Hash)
 }

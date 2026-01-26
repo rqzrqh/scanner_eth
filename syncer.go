@@ -18,7 +18,7 @@ import (
 )
 
 type Syncer struct {
-	dses         []*fetch.DataSource
+	hns          []*fetch.HeaderNotifier
 	fm           *fetch.FetchManager
 	sm           *store.StoreManager
 	storeWorkers []*store.StoreWorker
@@ -32,52 +32,9 @@ func newSyncer(clients []*rpc.Client, db *gorm.DB, reversibleBlocks int, storeCh
 
 	fetch.InitAbi()
 
-	if startHeight != math.MaxUint64 && endHeight != math.MaxUint64 {
-		if startHeight > endHeight {
-			logrus.Errorf("start height and end height error %v %v", startHeight, endHeight)
-			os.Exit(0)
-		}
-	}
+	blkDigestList := loadStartBlock(clients, db, startHeight, reversibleBlocks)
 
-	blockNum := new(big.Int).SetUint64(startHeight)
-	blkJson := &types.BlockHeaderJson{}
-
-	if err := clients[0].Call(blkJson, "eth_getBlockByNumber", util.ToBlockNumArg(blockNum), false); err != nil {
-		logrus.Warnf("startup failed to get latest block. height:%v err:%v", blockNum.String(), err)
-		os.Exit(0)
-	}
-
-	if blkJson.Number == "" {
-		logrus.Warnf("startup get empty block height:%v", startHeight)
-		os.Exit(0)
-	}
-
-	startBlockHeight := hexutil.MustDecodeUint64(blkJson.Number)
-	startBlockHash := blkJson.Hash
-	startBlockParentHash := blkJson.ParentHash
-
-	//startBlockHeight, startBlockHash, startBlockParentHash := loadStartBlock(client, db, startHeight, storeBatchSize, storeTaskChannel, storeCompleteChannel)
-
-	blkDigestList := make([]*fetch.BlockDigest, 0)
-	if startHeight == math.MaxUint64 {
-		lookbackBlockList := lookbackBlock(db, startBlockHeight, reversibleBlocks)
-		for _, v := range lookbackBlockList {
-			blk := &fetch.BlockDigest{
-				Height:     v.Height,
-				Hash:       v.BlockHash,
-				ParentHash: v.ParentHash,
-			}
-			blkDigestList = append(blkDigestList, blk)
-		}
-	} else {
-		// use start block
-		blk := &fetch.BlockDigest{
-			Height:     startBlockHeight,
-			Hash:       startBlockHash,
-			ParentHash: startBlockParentHash,
-		}
-		blkDigestList = append(blkDigestList, blk)
-	}
+	localChain := fetch.NewLocalChain(reversibleBlocks, blkDigestList)
 
 	storeOperationChannel := make(chan *types.StoreOperation, storeChannelSize)
 
@@ -87,18 +44,16 @@ func newSyncer(clients []*rpc.Client, db *gorm.DB, reversibleBlocks int, storeCh
 	storeWorkers := make([]*store.StoreWorker, storeWorkerCount)
 	for i := 0; i < storeWorkerCount; i++ {
 		worker := store.NewStoreWorker(i, db, storeTaskChannel, storeCompleteChannel)
-		worker.Run()
 		storeWorkers[i] = worker
 	}
 
 	sm := store.NewStoreManager(db, storeBatchSize, storeOperationChannel, storeTaskChannel, storeCompleteChannel)
-	localChain := fetch.NewLocalChain(reversibleBlocks, blkDigestList)
 
 	remoteChainUpdateChannel := make(chan *types.RemoteChainUpdate, 100)
 
-	dses := make([]*fetch.DataSource, len(clients))
+	hns := make([]*fetch.HeaderNotifier, len(clients))
 	for i, client := range clients {
-		dses[i] = fetch.NewDataSource(i, client, remoteChainUpdateChannel)
+		hns[i] = fetch.NewHeaderNotifier(i, client, remoteChainUpdateChannel, endHeight)
 	}
 
 	maxUnorganizedBlockCount := 50 * len(clients)
@@ -108,7 +63,7 @@ func newSyncer(clients []*rpc.Client, db *gorm.DB, reversibleBlocks int, storeCh
 	event_center := event.NewEventCenter(publishOperationChannel)
 
 	return &Syncer{
-		dses:         dses,
+		hns:          hns,
 		sm:           sm,
 		fm:           fm,
 		storeWorkers: storeWorkers,
@@ -117,20 +72,66 @@ func newSyncer(clients []*rpc.Client, db *gorm.DB, reversibleBlocks int, storeCh
 }
 
 func (s *Syncer) Run() {
-	for _, ds := range s.dses {
-		ds.Run()
+	for _, hn := range s.hns {
+		hn.Run()
+	}
+
+	for _, sw := range s.storeWorkers {
+		sw.Run()
 	}
 
 	s.fm.Run()
 	s.sm.Run()
 
 	s.event_center.Run()
-
-	// storeWorkers run before
 }
 
-func loadStartBlock(client *rpc.Client, db *gorm.DB, height uint64, batchSize int, storeTaskChannel chan *store.StoreTask, storeCompleteChannel chan *store.StoreComplete) (uint64, string, string) {
-	return uint64(0), "", ""
+func loadStartBlock(clients []*rpc.Client, db *gorm.DB, startHeight uint64, reversibleBlocks int) []*fetch.BlockDigest {
+	blkDigestList := make([]*fetch.BlockDigest, 0)
+
+	if startHeight == math.MaxUint64 {
+		var latestBlock model.Block
+		if err := db.Select("height").Order("height desc").Limit(1).Find(&latestBlock).Error; err != nil {
+			logrus.Errorf("failed to get max block height from db %v", err)
+			os.Exit(0)
+		}
+
+		lookbackBlockList := lookbackBlock(db, latestBlock.Height, reversibleBlocks)
+		for _, v := range lookbackBlockList {
+			blk := &fetch.BlockDigest{
+				Height:     v.Height,
+				Hash:       v.BlockHash,
+				ParentHash: v.ParentHash,
+			}
+			blkDigestList = append(blkDigestList, blk)
+		}
+	} else {
+
+		blockNum := new(big.Int).SetUint64(startHeight - 1)
+		blkJson := &types.BlockHeaderJson{}
+
+		if err := clients[0].Call(blkJson, "eth_getBlockByNumber", util.ToBlockNumArg(blockNum), false); err != nil {
+			logrus.Warnf("startup failed to get specific block. height:%v err:%v", blockNum.String(), err)
+			os.Exit(0)
+		}
+
+		if blkJson.Number == "" {
+			logrus.Warnf("startup get empty block. height:%v", startHeight)
+			os.Exit(0)
+		}
+
+		startBlockHeight := hexutil.MustDecodeUint64(blkJson.Number)
+		startBlockHash := blkJson.Hash
+		startBlockParentHash := blkJson.ParentHash
+
+		blk := &fetch.BlockDigest{
+			Height:     startBlockHeight,
+			Hash:       startBlockHash,
+			ParentHash: startBlockParentHash,
+		}
+		blkDigestList = append(blkDigestList, blk)
+	}
+	return blkDigestList
 }
 
 func lookbackBlock(db *gorm.DB, height uint64, reversibleBlocks int) []*model.Block {
@@ -139,7 +140,7 @@ func lookbackBlock(db *gorm.DB, height uint64, reversibleBlocks int) []*model.Bl
 
 	for i := uint64(0); i <= uint64(reversibleBlocks); i++ {
 		h := height - i
-		if h < 0 {
+		if h > height {
 			break
 		}
 		heightList = append(heightList, 0)
