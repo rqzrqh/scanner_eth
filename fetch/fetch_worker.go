@@ -87,6 +87,7 @@ func (fw *FetchWorker) Run() {
 
 		for {
 			tryCount++
+			logrus.Infof("start fetch. nodeId:%v taskId:%v height:%v fork_version:%v try_count:%v", fw.nodeId, fw.taskId, height, forkVersion, tryCount)
 			startTime := time.Now()
 			fullblock := fw.fetch(height)
 			costTime := time.Since(startTime)
@@ -148,7 +149,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		h := new(big.Int).SetUint64(height)
 		err := client.Call(blkJson, "eth_getBlockByNumber", util.ToBlockNumArg(h), true)
 		if err != nil {
-			logrus.Errorf("fetch header failed. nodeId:%v taskId:%v error:%v height:%v", nodeId, taskId, err, height)
+			logrus.Warnf("fetch header failed. nodeId:%v taskId:%v error:%v height:%v", nodeId, taskId, err, height)
 			return nil
 		}
 
@@ -220,13 +221,13 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 
 		if len(elemsReceipts) > 0 {
 			if err := client.BatchCallContext(context.Background(), elemsReceipts); err != nil {
-				logrus.Errorf("fetch receipts failed. nodeId:%v taskId:%v height:%v error:%v", nodeId, taskId, height, err)
+				logrus.Warnf("fetch receipts failed. nodeId:%v taskId:%v height:%v error:%v", nodeId, taskId, height, err)
 				return nil
 			}
 
 			for idx, elem := range elemsReceipts {
 				if elem.Error != nil {
-					logrus.Errorf("fetch receipts elem failed. nodeId:%v taskId:%v height:%v elem(%v) error:%v", nodeId, taskId, height, idx, elem.Error)
+					logrus.Warnf("fetch receipts elem failed. nodeId:%v taskId:%v height:%v elem(%v) error:%v", nodeId, taskId, height, idx, elem.Error)
 					return nil
 				}
 			}
@@ -325,7 +326,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		}
 
 		if err := fetchErc20BalancesBatch(client, balancesErc20, height); err != nil {
-			logrus.Warnf("fetch balance failed. nodeId:%v taskId:%v height:%v err:%v", nodeId, taskId, height, err)
+			logrus.Warnf("fetch erc20balance failed. nodeId:%v taskId:%v height:%v err:%v", nodeId, taskId, height, err)
 			return nil
 		}
 
