@@ -11,9 +11,11 @@ import (
 	"sync_eth/config"
 	"sync_eth/log"
 	"sync_eth/model"
+	"sync_eth/types"
 	"syscall"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/sirupsen/logrus"
 	"gorm.io/driver/mysql"
@@ -68,6 +70,8 @@ func main() {
 		os.Exit(0)
 	}
 
+	logrus.Infof("connect database success")
+
 	sqlDB, err := db.DB()
 	if err != nil {
 		logrus.Errorf("failed to get database instance %v", err)
@@ -79,9 +83,10 @@ func main() {
 		os.Exit(0)
 	}
 
-	fmt.Println("sql ping success")
+	logrus.Infof("database ping success")
 
 	if err := db.AutoMigrate(
+		&model.ChainInfo{},
 		&model.Block{},
 		&model.Tx{},
 		&model.TxInternal{},
@@ -102,7 +107,42 @@ func main() {
 		os.Exit(0)
 	}
 
-	clients := make([]*rpc.Client, len(conf.Fetch.RpcNodes))
+	logrus.Infof("database auto migrate success")
+
+	// check and init chain info
+	var chainInfos []model.ChainInfo
+	if err := db.Find(&chainInfos).Error; err != nil {
+		logrus.Errorf("load chain info from db failed. err:%v", err)
+		os.Exit(0)
+	}
+	if len(chainInfos) == 0 {
+		chainInfo := &model.ChainInfo{
+			ChainId:   conf.Chain.ChainId,
+			BlockHash: conf.Chain.GenesisBlockHash,
+		}
+		if err := db.Create(chainInfo).Error; err != nil {
+			logrus.Errorf("insert chain info to db failed. err:%v", err)
+			os.Exit(0)
+		}
+		logrus.Infof("insert chain info to db success. chain_id:%v hash:%v", conf.Chain.ChainId, conf.Chain.GenesisBlockHash)
+	} else if len(chainInfos) > 1 {
+		logrus.Errorf("chain info count more than 1 in db. count:%v", len(chainInfos))
+		os.Exit(0)
+	} else {
+		if chainInfos[0].ChainId != conf.Chain.ChainId || chainInfos[0].BlockHash != conf.Chain.GenesisBlockHash {
+			logrus.Errorf("chain info not equal with db. db:%v %v conf:%v %v",
+				chainInfos[0].ChainId, chainInfos[0].BlockHash, conf.Chain.ChainId, conf.Chain.GenesisBlockHash)
+			os.Exit(0)
+		}
+	}
+
+	rpcNodeCount := len(conf.Fetch.RpcNodes)
+	if rpcNodeCount == 0 {
+		logrus.Errorf("rpc node count is zero")
+		os.Exit(0)
+	}
+
+	clients := make([]*rpc.Client, rpcNodeCount)
 	for i, url := range conf.Fetch.RpcNodes {
 
 		customClient := &http.Client{
@@ -114,15 +154,19 @@ func main() {
 
 		client, err := rpc.DialOptions(context.Background(), url, rpc.WithHTTPClient(customClient))
 		if err != nil {
-			logrus.Errorf("dial failed idx:%d %v", i, err)
+			logrus.Errorf("rpc dial failed idx:%d %v", i, err)
 			os.Exit(0)
 		}
 		clients[i] = client
 	}
 
-	logrus.Info("create eth client success")
+	logrus.Infof("create rpc client success")
 
-	s := newSyncer(clients, db, conf.Store.ChannelSize, conf.Store.BatchSize, conf.Store.WorkerCount, conf.Fetch.StartHeight, conf.Fetch.EndHeight)
+	checkNodeChainInfo(clients, db)
+
+	logrus.Infof("node chain info check passed")
+
+	s := newSyncer(clients, db, conf.Store.ChannelSize, conf.Chain.ReversibleBlocks, conf.Store.BatchSize, conf.Store.WorkerCount, conf.Fetch.StartHeight, conf.Fetch.EndHeight)
 
 	leaseAlive()
 	s.Run()
@@ -148,4 +192,39 @@ func leaseAlive() {
 	}
 	now := time.Now().Unix()
 	fmt.Fprintf(f, "%d", now)
+}
+
+func checkNodeChainInfo(clients []*rpc.Client, db *gorm.DB) {
+	var chainInfo model.ChainInfo
+	if err := db.First(&chainInfo).Error; err != nil {
+		logrus.Errorf("load chain info from db failed. err:%v", err)
+		os.Exit(0)
+	}
+
+	// compare node chain info with db
+	for i, client := range clients {
+		strChainId := ""
+		if err := client.Call(&strChainId, "eth_chainId"); err != nil {
+			logrus.Errorf("get chain id failed. id:%v err:%v", i, err)
+			os.Exit(0)
+		}
+
+		chainId := hexutil.MustDecodeUint64(strChainId)
+
+		if chainId != chainInfo.ChainId {
+			logrus.Errorf("chain id not equal with db. id:%v db:%v node:%v", i, chainInfo.ChainId, chainId)
+			os.Exit(0)
+		}
+
+		blkJson := &types.BlockHeaderJson{}
+		if err := client.Call(blkJson, "eth_getBlockByNumber", "0x0", false); err != nil {
+			logrus.Errorf("get genesis block failed. id:%v err:%v", i, err)
+			os.Exit(0)
+		}
+
+		if blkJson.Hash != chainInfo.BlockHash {
+			logrus.Errorf("genesis block not equal with db. id:%v db:%v node:%v", i, chainInfo.BlockHash, blkJson.Hash)
+			os.Exit(0)
+		}
+	}
 }

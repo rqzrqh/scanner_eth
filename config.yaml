@@ -1,15 +1,24 @@
 app_name: sync-chain-eth
 
+chain:
+  name: "bsc_testnet"
+  chain_id: 97
+  genesis_block_hash: "0x6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe34"
+  reversible_blocks: 5
+
 fetch:
-  host: "https://mainnet.infura.io/v3/72a1c8f3063949e98aaf947fd54b0c4e"
+  rpc_nodes:
+     - "wss://bnb-testnet.g.alchemy.com/v2/fTJySYmIh0pJR0J_-_Q9z60YqerqYf6i"
+    #- "https://bnb-testnet.g.alchemy.com/v2/fTJySYmIh0pJR0J_-_Q9z60YqerqYf6i"
+    #- "wss://sepolia.infura.io/ws/v3/e7c3204e24c449ed8ab35075cb1a251a"
+    # - "https://sepolia.infura.io/v3/e7c3204e24c449ed8ab35075cb1a251a"
+    #- "wss://eth-mainnet.g.alchemy.com/v2/fTJySYmIh0pJR0J_-_Q9z60YqerqYf6i"
   timeout: 5s
-  task_window_size: 40
-  worker: 2
-  start_height : -1
+  start_height : 24290007
   end_height : -1
 
 store:
-  host: "root:123456@tcp(127.0.0.1:3306)/chain_eth?charset=utf8mb4"
+  host: "root:123456@tcp(127.0.0.1:3306)/chain_bsc_testnet?charset=utf8mb4"
   channel_size: 100
   batch_size: 20
   auto_create_tables: true # prd environment set false
@@ -19,7 +28,7 @@ log:
     enable: true
     level: 5
   file:
-    enable: false
+    enable: true
     path: "./log/app.log"
     level: 5
   kafka:
