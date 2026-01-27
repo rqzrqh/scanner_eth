@@ -9,14 +9,15 @@ import (
 )
 
 type FullBlock struct {
-	Block           *model.Block
-	TxList          []*model.Tx
-	TxInternalList  []*model.TxInternal
-	EventLogList    []*model.EventLog
-	TxErc20List     []*model.TxErc20
-	TxErc721List    []*model.TxErc721
+	Block                    *model.Block
+	TxList                   []*model.Tx
+	TxInternalList           []*model.TxInternal
+	EventLogList             []*model.EventLog
+	EventErc20TransferList   []*model.EventErc20Transfer
+	EventErc721TransferList  []*model.EventErc721Transfer
+	EventErc1155TransferList []*model.EventErc1155Transfer
+
 	TokenErc721List []*model.TokenErc721
-	TxErc1155List   []*model.TxErc1155
 
 	ContractList       []*model.Contract
 	ContractErc20List  []*model.ContractErc20

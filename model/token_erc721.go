@@ -15,5 +15,5 @@ type TokenErc721 struct {
 }
 
 func (TokenErc721) TableName() string {
-	return "contract_erc721"
+	return "token_erc721"
 }

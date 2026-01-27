@@ -2,7 +2,7 @@ package model
 
 import "github.com/shopspring/decimal"
 
-type TxErc1155 struct {
+type EventErc1155Transfer struct {
 	Id           uint64          `gorm:"primaryKey:autoIncrement;comment:auto_inc_id"`
 	Height       uint64          `gorm:"index;type:bigint unsigned;comment:block_height"`
 	TxHash       string          `gorm:"index;type:varchar(255);comment:tx_hash"`
@@ -15,6 +15,6 @@ type TxErc1155 struct {
 	Index        int             `gorm:"type:int;comment:index"`
 }
 
-func (TxErc1155) TableName() string {
-	return "tx_erc1155"
+func (EventErc1155Transfer) TableName() string {
+	return "event_erc1155_transfer"
 }
