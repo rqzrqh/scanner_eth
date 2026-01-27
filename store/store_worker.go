@@ -124,7 +124,7 @@ func StoreFullBlock(db *gorm.DB, fullblock *types.FullBlock, batchSize int, stor
 	}
 
 	startTime2 := time.Now()
-	if err := db.Create(fullblock.Block).Error; err != nil {
+	if err := db.Clauses(clause.OnConflict{UpdateAll: true}).Create(fullblock.Block).Error; err != nil {
 		logrus.Errorf("store chain block failed %v", err)
 		return err
 	}
@@ -311,37 +311,37 @@ func (sw *StoreWorker) Run() {
 					for _, v := range tsk.data {
 						data = append(data, v.(*model.Tx))
 					}
-					err = sw.db.Create(data).Error
+					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
 				case EventLog:
 					data := make([]*model.EventLog, 0)
 					for _, v := range tsk.data {
 						data = append(data, v.(*model.EventLog))
 					}
-					err = sw.db.Create(data).Error
+					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
 				case TxErc20:
 					data := make([]*model.TxErc20, 0)
 					for _, v := range tsk.data {
 						data = append(data, v.(*model.TxErc20))
 					}
-					err = sw.db.Create(data).Error
+					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
 				case TxErc721:
 					data := make([]*model.TxErc721, 0)
 					for _, v := range tsk.data {
 						data = append(data, v.(*model.TxErc721))
 					}
-					err = sw.db.Create(data).Error
+					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
 				case TxErc1155:
 					data := make([]*model.TxErc1155, 0)
 					for _, v := range tsk.data {
 						data = append(data, v.(*model.TxErc1155))
 					}
-					err = sw.db.Create(data).Error
+					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
 				case Balance:
 					data := make([]*model.Balance, 0)
 					for _, v := range tsk.data {
 						data = append(data, v.(*model.Balance))
 					}
-					err = sw.db.Clauses(clause.Insert{Modifier: "IGNORE"}).Create(data).Error
+					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
 				default:
 					panic("unknown task type")
 				}
