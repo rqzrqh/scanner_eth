@@ -62,9 +62,9 @@ func StoreFullBlock(db *gorm.DB, fullblock *types.FullBlock, batchSize int, stor
 		taskSet := make(map[uint64]struct{})
 		splitTx(fullblock.TxList, batchSize, height, storeTaskChannel, taskSet)
 		splitEventLog(fullblock.EventLogList, batchSize, height, storeTaskChannel, taskSet)
-		splitTxErc20(fullblock.TxErc20List, batchSize, height, storeTaskChannel, taskSet)
-		splitTxErc721(fullblock.TxErc721List, batchSize, height, storeTaskChannel, taskSet)
-		splitTxErc1155(fullblock.TxErc1155List, batchSize, height, storeTaskChannel, taskSet)
+		splitEventErc20Transfer(fullblock.EventErc20TransferList, batchSize, height, storeTaskChannel, taskSet)
+		splitEventErc721Transfer(fullblock.EventErc721TransferList, batchSize, height, storeTaskChannel, taskSet)
+		splitEventErc1155Transfer(fullblock.EventErc1155TransferList, batchSize, height, storeTaskChannel, taskSet)
 		splitBalance(fullblock.BalanceList, batchSize, height, storeTaskChannel, taskSet)
 
 		dispatchComplete <- taskSet
@@ -199,7 +199,7 @@ func splitEventLog(modelList []*model.EventLog, batchSize int, height uint64, st
 	logrus.Debugf("split event log. height:%v count:%v", height, count)
 }
 
-func splitTxErc20(modelList []*model.TxErc20, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
+func splitEventErc20Transfer(modelList []*model.EventErc20Transfer, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
 	count := len(modelList)
 
 	list := make([]interface{}, 0)
@@ -207,12 +207,12 @@ func splitTxErc20(modelList []*model.TxErc20, batchSize int, height uint64, stor
 		list = append(list, v)
 	}
 
-	splitTask(TxErc20, list, batchSize, height, storeTaskChannel, taskSet)
+	splitTask(EventErc20Transfer, list, batchSize, height, storeTaskChannel, taskSet)
 
-	logrus.Debugf("split tx erc20. height:%v count:%v", height, count)
+	logrus.Debugf("split event erc20 transfer. height:%v count:%v", height, count)
 }
 
-func splitTxErc721(modelList []*model.TxErc721, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
+func splitEventErc721Transfer(modelList []*model.EventErc721Transfer, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
 	count := len(modelList)
 
 	list := make([]interface{}, 0)
@@ -220,12 +220,12 @@ func splitTxErc721(modelList []*model.TxErc721, batchSize int, height uint64, st
 		list = append(list, v)
 	}
 
-	splitTask(TxErc721, list, batchSize, height, storeTaskChannel, taskSet)
+	splitTask(EventErc721Transfer, list, batchSize, height, storeTaskChannel, taskSet)
 
-	logrus.Debugf("split tx erc721. height:%v count:%v", height, count)
+	logrus.Debugf("split event erc721 transfer. height:%v count:%v", height, count)
 }
 
-func splitTxErc1155(modelList []*model.TxErc1155, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
+func splitEventErc1155Transfer(modelList []*model.EventErc1155Transfer, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
 	count := len(modelList)
 
 	list := make([]interface{}, 0)
@@ -233,9 +233,9 @@ func splitTxErc1155(modelList []*model.TxErc1155, batchSize int, height uint64, 
 		list = append(list, v)
 	}
 
-	splitTask(TxErc1155, list, batchSize, height, storeTaskChannel, taskSet)
+	splitTask(EventErc1155Transfer, list, batchSize, height, storeTaskChannel, taskSet)
 
-	logrus.Debugf("split tx erc1155. height:%v count:%v", height, count)
+	logrus.Debugf("split event erc1155 transfer. height:%v count:%v", height, count)
 }
 
 func splitBalance(modelList []*model.Balance, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
@@ -258,9 +258,9 @@ const (
 	Tx StoreTaskType = iota
 	EventLog
 	Balance
-	TxErc20
-	TxErc721
-	TxErc1155
+	EventErc20Transfer
+	EventErc721Transfer
+	EventErc1155Transfer
 )
 
 type StoreTask struct {
@@ -318,22 +318,22 @@ func (sw *StoreWorker) Run() {
 						data = append(data, v.(*model.EventLog))
 					}
 					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
-				case TxErc20:
-					data := make([]*model.TxErc20, 0)
+				case EventErc20Transfer:
+					data := make([]*model.EventErc20Transfer, 0)
 					for _, v := range tsk.data {
-						data = append(data, v.(*model.TxErc20))
+						data = append(data, v.(*model.EventErc20Transfer))
 					}
 					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
-				case TxErc721:
-					data := make([]*model.TxErc721, 0)
+				case EventErc721Transfer:
+					data := make([]*model.EventErc721Transfer, 0)
 					for _, v := range tsk.data {
-						data = append(data, v.(*model.TxErc721))
+						data = append(data, v.(*model.EventErc721Transfer))
 					}
 					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
-				case TxErc1155:
-					data := make([]*model.TxErc1155, 0)
+				case EventErc1155Transfer:
+					data := make([]*model.EventErc1155Transfer, 0)
 					for _, v := range tsk.data {
-						data = append(data, v.(*model.TxErc1155))
+						data = append(data, v.(*model.EventErc1155Transfer))
 					}
 					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
 				case Balance:

@@ -22,8 +22,8 @@ import (
 )
 
 const erc20Transfer = `0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef`
-const erc1155SingleHash = `0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62`
-const erc1155BatchHash = `0x4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb`
+const erc1155SingleTransfer = `0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62`
+const erc1155BatchTransfer = `0x4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb`
 const erc721Transfer = erc20Transfer
 
 const jsonStrErc20ABI = `[{"constant":true,"inputs":[],"name":"name","outputs":[{"name":"","type":"string"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"guy","type":"address"},{"name":"wad","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[],"name":"totalSupply","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"src","type":"address"},{"name":"dst","type":"address"},{"name":"wad","type":"uint256"}],"name":"transferFrom","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":false,"inputs":[{"name":"wad","type":"uint256"}],"name":"withdraw","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[{"name":"","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[],"name":"symbol","outputs":[{"name":"","type":"string"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"dst","type":"address"},{"name":"wad","type":"uint256"}],"name":"transfer","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":false,"inputs":[],"name":"deposit","outputs":[],"payable":true,"stateMutability":"payable","type":"function"},{"constant":true,"inputs":[{"name":"","type":"address"},{"name":"","type":"address"}],"name":"allowance","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"payable":true,"stateMutability":"payable","type":"fallback"},{"anonymous":false,"inputs":[{"indexed":true,"name":"src","type":"address"},{"indexed":true,"name":"guy","type":"address"},{"indexed":false,"name":"wad","type":"uint256"}],"name":"Approval","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"name":"src","type":"address"},{"indexed":true,"name":"dst","type":"address"},{"indexed":false,"name":"wad","type":"uint256"}],"name":"Transfer","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"name":"dst","type":"address"},{"indexed":false,"name":"wad","type":"uint256"}],"name":"Deposit","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"name":"src","type":"address"},{"indexed":false,"name":"wad","type":"uint256"}],"name":"Withdrawal","type":"event"}]`
@@ -120,20 +120,20 @@ func (fw *FetchWorker) fetch(height uint64) *types.FullBlock {
 	return FetchFullBlock(fw.nodeId, fw.taskId, fw.client, height)
 }
 
-func isErc20TransferTx(topic0, topic1, topic2, topic3 string) bool {
+func isErc20TransferEvent(topic0, topic1, topic2, topic3 string) bool {
 	return topic0 == erc20Transfer && topic1 != "" && topic2 != "" && topic3 == ""
 }
 
-func isErc721TransferTx(topic0, topic1, topic2, topic3 string) bool {
+func isErc721TransferEvent(topic0, topic1, topic2, topic3 string) bool {
 	return topic0 == erc721Transfer && topic1 != "" && topic2 != "" && topic3 != ""
 }
 
-func isErc1155SingleTx(topic0, topic1, topic2, topic3 string) bool {
-	return topic0 == erc1155SingleHash && topic1 != "" && topic2 != "" && topic3 != ""
+func isErc1155SingleTransferEvent(topic0, topic1, topic2, topic3 string) bool {
+	return topic0 == erc1155SingleTransfer && topic1 != "" && topic2 != "" && topic3 != ""
 }
 
-func isErc1155BatchTx(topic0, topic1, topic2, topic3 string) bool {
-	return topic0 == erc1155BatchHash && topic1 != "" && topic2 != "" && topic3 != ""
+func isErc1155BatchTransferEvent(topic0, topic1, topic2, topic3 string) bool {
+	return topic0 == erc1155BatchTransfer && topic1 != "" && topic2 != "" && topic3 != ""
 }
 
 func transTraceAddressToString(opcode string, traceAddress []uint64) string {
@@ -252,7 +252,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	*/
 
 	// parse txs
-	modelTxList, modelEventLogList, modelTxErc20List, modelTxErc721List, modelTokenErc721List, modelTxErc1155List, modelTxContractList, txBalanceAddress, txBalanceErc20Address, txBalanceErc1155Address, erc20ContractAddrs, erc721ContractAddrs := parseTx(blkJson.Txs, receipts, height, baseFee)
+	modelTxList, modelEventLogList, modelEventErc20TransferList, modelEventErc721TransferList, modelTokenErc721List, modelEventErc1155TransferList, modelTxContractList, txBalanceAddress, txBalanceErc20Address, txBalanceErc1155Address, erc20ContractAddrs, erc721ContractAddrs := parseTx(blkJson.Txs, receipts, height, baseFee)
 
 	// parse internal txs
 	modelTxInternalList, modelTxInternalContractList, txInternalBalanceAddress, txInternalBalanceErc20Address := parseTxInternal(txInternalJsonList, height)
@@ -375,15 +375,15 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	modelBalanceErc1155List := make([]*model.BalanceErc1155, 0)
 
 	fullblock := &types.FullBlock{
-		Block:           modelBlock,
-		TxList:          modelTxList,
-		TxInternalList:  modelTxInternalList,
-		EventLogList:    modelEventLogList,
-		TxErc20List:     modelTxErc20List,
-		TxErc721List:    modelTxErc721List,
-		TokenErc721List: modelTokenErc721List,
+		Block:                   modelBlock,
+		TxList:                  modelTxList,
+		TxInternalList:          modelTxInternalList,
+		EventLogList:            modelEventLogList,
+		EventErc20TransferList:  modelEventErc20TransferList,
+		EventErc721TransferList: modelEventErc721TransferList,
+		TokenErc721List:         modelTokenErc721List,
 
-		TxErc1155List: modelTxErc1155List,
+		EventErc1155TransferList: modelEventErc1155TransferList,
 
 		ContractList:       modelContractList,
 		ContractErc20List:  modelContractErc20List,
@@ -398,15 +398,15 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 }
 
 func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt, height uint64, baseFee *big.Int) (
-	[]*model.Tx, []*model.EventLog, []*model.TxErc20, []*model.TxErc721, []*model.TokenErc721, []*model.TxErc1155, []*model.Contract,
+	[]*model.Tx, []*model.EventLog, []*model.EventErc20Transfer, []*model.EventErc721Transfer, []*model.TokenErc721, []*model.EventErc1155Transfer, []*model.Contract,
 	map[string]struct{}, map[string]map[string]struct{}, map[string]map[string]map[string]struct{}, map[string]struct{}, map[string]struct{}) {
 	modelTxList := make([]*model.Tx, 0)
 	modelEventLogList := make([]*model.EventLog, 0)
 
-	modelTxErc20List := make([]*model.TxErc20, 0)
-	modelTxErc721List := make([]*model.TxErc721, 0)
+	modelEventErc20TransferList := make([]*model.EventErc20Transfer, 0)
+	modelEventErc721TransferList := make([]*model.EventErc721Transfer, 0)
 	modelTokenErc721List := make([]*model.TokenErc721, 0)
-	modelTxErc1155List := make([]*model.TxErc1155, 0)
+	modelEventErc1155TransferList := make([]*model.EventErc1155Transfer, 0)
 
 	modelContractList := make([]*model.Contract, 0)
 
@@ -540,7 +540,7 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 			}
 			modelEventLogList = append(modelEventLogList, modelEventLog)
 
-			if isErc20TransferTx(topic0, topic1, topic2, topic3) {
+			if isErc20TransferEvent(topic0, topic1, topic2, topic3) {
 				sender := topic1
 				receiver := topic2
 				tokenAmount := new(big.Int)
@@ -568,7 +568,7 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 				}
 				amount, _ := decimal.NewFromString(tokenCnt)
 
-				modelTxErc20 := &model.TxErc20{
+				modelEventErc20Transfer := &model.EventErc20Transfer{
 					Height:       height,
 					TxHash:       txHash,
 					ContractAddr: contractAddr,
@@ -578,19 +578,19 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 					AmountOrigin: tokenCntOrigin,
 					Index:        int(txLog.Index),
 				}
-				modelTxErc20List = append(modelTxErc20List, modelTxErc20)
+				modelEventErc20TransferList = append(modelEventErc20TransferList, modelEventErc20Transfer)
 
 				// consider success
 				if contractAddr != util.ZeroAddress && isCreateContract {
 					erc20ContractAddrs[contractAddr] = struct{}{}
 				}
-			} else if isErc721TransferTx(topic0, topic1, topic2, topic3) {
+			} else if isErc721TransferEvent(topic0, topic1, topic2, topic3) {
 				sender := strings.ToLower(common.HexToAddress(topic1).Hex())
 				receiver := strings.ToLower(common.HexToAddress(topic2).Hex())
 				tokenId := common.HexToHash(topic3).Big().String()
 
 				// tx erc721
-				modelTxErc721 := &model.TxErc721{
+				modelEventErc721Transfer := &model.EventErc721Transfer{
 					Height:       height,
 					TxHash:       txHash,
 					ContractAddr: contractAddr,
@@ -599,8 +599,7 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 					TokenId:      tokenId,
 					Index:        int(txLog.Index),
 				}
-				modelTxErc721List = append(modelTxErc721List, modelTxErc721)
-
+				modelEventErc721TransferList = append(modelEventErc721TransferList, modelEventErc721Transfer)
 				// token erc721
 				modelTokenErc721 := &model.TokenErc721{
 					ContractAddr:  contractAddr,
@@ -616,7 +615,7 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 				if contractAddr != util.ZeroAddress && isCreateContract {
 					erc721ContractAddrs[contractAddr] = struct{}{}
 				}
-			} else if isErc1155SingleTx(topic0, topic1, topic2, topic3) {
+			} else if isErc1155SingleTransferEvent(topic0, topic1, topic2, topic3) {
 				var transferSingleData struct {
 					Id    *big.Int
 					Value *big.Int
@@ -648,7 +647,7 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 				}
 				amount, _ := decimal.NewFromString(tokenCnt)
 
-				modelTxErc1155 := &model.TxErc1155{
+				modelEventErc1155Transfer := &model.EventErc1155Transfer{
 					Height:       height,
 					TxHash:       txHash,
 					ContractAddr: contractAddr,
@@ -659,8 +658,8 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 					Amount:       amount,
 					Index:        int(txLog.Index),
 				}
-				modelTxErc1155List = append(modelTxErc1155List, modelTxErc1155)
-			} else if isErc1155BatchTx(topic0, topic1, topic2, topic3) {
+				modelEventErc1155TransferList = append(modelEventErc1155TransferList, modelEventErc1155Transfer)
+			} else if isErc1155BatchTransferEvent(topic0, topic1, topic2, topic3) {
 				var transferBatchData struct {
 					Ids    []*big.Int
 					Values []*big.Int
@@ -699,7 +698,7 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 					}
 					amount, _ := decimal.NewFromString(tokenCnt)
 
-					modelTxErc1155 := &model.TxErc1155{
+					modelEventErc1155Transfer := &model.EventErc1155Transfer{
 						Height:       height,
 						TxHash:       txHash,
 						ContractAddr: contractAddr,
@@ -710,13 +709,13 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 						Amount:       amount,
 						Index:        int(txLog.Index),
 					}
-					modelTxErc1155List = append(modelTxErc1155List, modelTxErc1155)
+					modelEventErc1155TransferList = append(modelEventErc1155TransferList, modelEventErc1155Transfer)
 				}
 			}
 		}
 	}
 
-	return modelTxList, modelEventLogList, modelTxErc20List, modelTxErc721List, modelTokenErc721List, modelTxErc1155List, modelContractList, balanceAddress, balanceErc20Address, balanceErc1155Address, erc20ContractAddrs, erc721ContractAddrs
+	return modelTxList, modelEventLogList, modelEventErc20TransferList, modelEventErc721TransferList, modelTokenErc721List, modelEventErc1155TransferList, modelContractList, balanceAddress, balanceErc20Address, balanceErc1155Address, erc20ContractAddrs, erc721ContractAddrs
 }
 
 func parseTxInternal(jsonTxInternalList []*types.TxInternalJson, height uint64) ([]*model.TxInternal, []*model.Contract, map[string]struct{}, map[string]map[string]struct{}) {

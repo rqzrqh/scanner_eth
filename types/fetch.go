@@ -8,5 +8,11 @@ type FetchResult struct {
 	ForkVersion uint64
 	Height      uint64
 	FullBlock   *FullBlock
+	Events      []EventItem
 	CostTime    time.Duration
+}
+
+type EventItem struct {
+	eventType string
+	data      map[string]interface{}
 }

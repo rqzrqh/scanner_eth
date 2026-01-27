@@ -102,7 +102,7 @@ func (fm *FetchManager) addBlock(data *types.FullBlock, forkVersion uint64) {
 			publishOperation := &types.PublishOperation{
 				Type: types.PublishApply,
 				Data: &types.PublishApplyData{
-					FullBlock: fullblock,
+					Events: make([]types.EventItem, 0),
 				},
 			}
 			fm.publishOperationChannel <- publishOperation

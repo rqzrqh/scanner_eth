@@ -92,9 +92,9 @@ func main() {
 		&model.Tx{},
 		&model.TxInternal{},
 		&model.EventLog{},
-		&model.TxErc20{},
-		&model.TxErc721{},
-		&model.TxErc1155{},
+		&model.EventErc20Transfer{},
+		&model.EventErc721Transfer{},
+		&model.EventErc1155Transfer{},
 
 		&model.Contract{},
 		&model.ContractErc20{},

@@ -1,6 +1,6 @@
 package model
 
-type TxErc721 struct {
+type EventErc721Transfer struct {
 	Id           uint64 `gorm:"primaryKey:autoIncrement;comment:auto_inc_id"`
 	Height       uint64 `gorm:"index;type:bigint unsigned;comment:block_height"`
 	TxHash       string `gorm:"index;type:varchar(255);comment:tx_hash"`
@@ -11,6 +11,6 @@ type TxErc721 struct {
 	Index        int    `gorm:"type:int;comment:index"`
 }
 
-func (TxErc721) TableName() string {
-	return "tx_erc721"
+func (EventErc721Transfer) TableName() string {
+	return "event_erc721_transfer"
 }
