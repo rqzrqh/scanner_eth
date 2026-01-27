@@ -4,7 +4,7 @@ import "github.com/shopspring/decimal"
 
 type Block struct {
 	Id             uint64 `gorm:"primaryKey:autoIncrement;comment:auto_inc_id"`
-	Height         uint64 `gorm:"index;type:bigint unsigned;comment:block_height"`
+	Height         uint64 `gorm:"index:uniq_height,unique;type:bigint unsigned;comment:block_height"`
 	BlockHash      string `gorm:"index:uniq_blockhash,unique;type:varchar(255);comment:block_hash"`
 	ParentHash     string `gorm:"index;type:varchar(255);comment:parent_block_hash"`
 	BlockTimestamp int64  `gorm:"index;type:bigint;comment:block_timestamp"`

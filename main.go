@@ -187,7 +187,7 @@ func initChainInfo(db *gorm.DB, chainId uint64, genesisBlockHash string) {
 			ChainId:          chainId,
 			GenesisBlockHash: genesisBlockHash,
 		}
-		if err := db.Create(chainInfo).Error; err != nil {
+		if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(chainInfo).Error; err != nil {
 			logrus.Errorf("insert chain info to db failed. err:%v", err)
 			os.Exit(0)
 		}
