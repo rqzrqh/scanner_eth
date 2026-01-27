@@ -294,8 +294,7 @@ func NewStoreWorker(id int, db *gorm.DB, storeTaskChannel chan *StoreTask, store
 func (sw *StoreWorker) Run() {
 	go func() {
 		for {
-			select {
-			case tsk := <-sw.storeTaskChannel:
+			for tsk := range sw.storeTaskChannel {
 				tryCount := 0
 			Retry:
 				tryCount++

@@ -127,6 +127,7 @@ func (fm *FetchManager) Run() {
 				} else {
 					fm.nodeManager.UpdateNodeMetric(fetchResult.NodeId, fetchResult.CostTime.Microseconds())
 					fm.nodeManager.SetNodeInvalid(fetchResult.NodeId)
+					fm.taskManager.fetchFailed(fetchResult.Height)
 				}
 
 				fm.updateTask()

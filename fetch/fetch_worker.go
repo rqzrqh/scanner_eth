@@ -87,22 +87,25 @@ func (fw *FetchWorker) Run() {
 
 		for {
 			tryCount++
-			logrus.Infof("start fetch. nodeId:%v taskId:%v height:%v fork_version:%v try_count:%v", fw.nodeId, fw.taskId, height, forkVersion, tryCount)
+			logrus.Debugf("start fetch. nodeId:%v taskId:%v height:%v fork_version:%v try_count:%v", fw.nodeId, fw.taskId, height, forkVersion, tryCount)
 			startTime := time.Now()
 			fullblock := fw.fetch(height)
 			costTime := time.Since(startTime)
-			if fullblock != nil {
-				logrus.Infof("fetch success. nodeId:%v taskId:%v height:%v fork_version:%v hash:%v parent_hash:%v cost:%v",
-					fw.nodeId, fw.taskId, height, forkVersion, fullblock.Block.BlockHash, fullblock.Block.ParentHash, costTime.String())
-			} else {
-				logrus.Warnf("fetch failed. nodeId:%v taskId:%v height:%v fork_version:%v try_count:%v", fw.nodeId, fw.taskId, height, forkVersion, tryCount)
-			}
 
 			if tryCount >= 3 || fullblock != nil {
+
+				if fullblock != nil {
+					logrus.Infof("fetch task success. nodeId:%v taskId:%v height:%v fork_version:%v hash:%v parent_hash:%v cost:%v",
+						fw.nodeId, fw.taskId, height, forkVersion, fullblock.Block.BlockHash, fullblock.Block.ParentHash, costTime.String())
+				} else {
+					logrus.Warnf("fetch task failed. nodeId:%v taskId:%v height:%v fork_version:%v try_count:%v", fw.nodeId, fw.taskId, height, forkVersion, tryCount)
+				}
+
 				fetchResult := &types.FetchResult{
 					NodeId:      fw.nodeId,
 					TaskId:      fw.taskId,
 					ForkVersion: forkVersion,
+					Height:      height,
 					FullBlock:   fullblock,
 					CostTime:    costTime,
 				}

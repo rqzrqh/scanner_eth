@@ -148,7 +148,7 @@ func main() {
 
 	logrus.Infof("genesis block init success")
 
-	s := newSyncer(clients, db, conf.Store.ChannelSize, conf.Chain.ReversibleBlocks, conf.Store.BatchSize, conf.Store.WorkerCount, conf.Fetch.StartHeight, conf.Fetch.EndHeight)
+	s := newSyncer(clients, db, conf.Chain.ReversibleBlocks, conf.Store.ChannelSize, conf.Store.BatchSize, conf.Store.WorkerCount, conf.Fetch.StartHeight, conf.Fetch.EndHeight)
 
 	leaseAlive()
 	s.Run()
@@ -156,7 +156,7 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
 	<-sigCh
-	logrus.Info("stop sync eth")
+	logrus.Infof("stop sync eth")
 
 	removeFile()
 }
@@ -268,6 +268,4 @@ func initGenesisBlock(clients []*rpc.Client, db *gorm.DB) {
 		logrus.Errorf("insert genesis block to db failed. err:%v", err)
 		os.Exit(0)
 	}
-
-	logrus.Infof("init genesis block to db success. hash:%v", blkJson.Hash)
 }
