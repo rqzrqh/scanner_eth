@@ -27,8 +27,8 @@ type Syncer struct {
 
 func newSyncer(clients []*rpc.Client, db *gorm.DB, reversibleBlocks int, storeChannelSize int, storeBatchSize int, storeWorkerCount int, startHeight uint64, endHeight uint64) *Syncer {
 
-	logrus.Infof("storeChannelSize:%v storeBatchSize:%v storeWorkerCount:%v startHeight:%v endHeight:%v",
-		storeChannelSize, storeBatchSize, storeWorkerCount, startHeight, endHeight)
+	logrus.Infof("reversibleBlocks:%v storeChannelSize:%v storeBatchSize:%v storeWorkerCount:%v startHeight:%v endHeight:%v",
+		reversibleBlocks, storeChannelSize, storeBatchSize, storeWorkerCount, startHeight, endHeight)
 
 	fetch.InitAbi()
 
@@ -96,6 +96,8 @@ func loadStartBlock(clients []*rpc.Client, db *gorm.DB, startHeight uint64, reve
 			os.Exit(0)
 		}
 
+		logrus.Infof("startup load lookback blocks from db. height:%v", latestBlock.Height)
+
 		lookbackBlockList := lookbackBlock(db, latestBlock.Height, reversibleBlocks)
 		for _, v := range lookbackBlockList {
 			blk := &fetch.BlockDigest{
@@ -110,13 +112,15 @@ func loadStartBlock(clients []*rpc.Client, db *gorm.DB, startHeight uint64, reve
 		blockNum := new(big.Int).SetUint64(startHeight - 1)
 		blkJson := &types.BlockHeaderJson{}
 
+		logrus.Infof("startup load latest block from rpc. height:%v", blockNum.Uint64())
+
 		if err := clients[0].Call(blkJson, "eth_getBlockByNumber", util.ToBlockNumArg(blockNum), false); err != nil {
 			logrus.Warnf("startup failed to get specific block. height:%v err:%v", blockNum.String(), err)
 			os.Exit(0)
 		}
 
 		if blkJson.Number == "" {
-			logrus.Warnf("startup get empty block. height:%v", startHeight)
+			logrus.Warnf("startup get empty block. height:%v", blockNum.Uint64())
 			os.Exit(0)
 		}
 
@@ -143,11 +147,13 @@ func lookbackBlock(db *gorm.DB, height uint64, reversibleBlocks int) []*model.Bl
 		if h > height {
 			break
 		}
-		heightList = append(heightList, 0)
+		heightList = append(heightList, h)
 	}
 
+	logrus.Infof("lookback block heights: %v", heightList)
+
 	if err := db.Where("height in ?", heightList).Order("height asc").Find(&modelBlockList).Error; err != nil {
-		logrus.Errorf("lookback block failed")
+		logrus.Errorf("lookback block failed: %v", err)
 		os.Exit(0)
 	}
 

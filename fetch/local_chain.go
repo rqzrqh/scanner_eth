@@ -22,6 +22,7 @@ type LocalChain struct {
 	endHeight         uint64
 }
 
+// TODO check hash chain
 func NewLocalChain(reversibleSize int, blkDigestList []*BlockDigest) *LocalChain {
 	if len(blkDigestList) == 0 {
 		logrus.Errorf("memory incoming empty block digest list")
