@@ -116,9 +116,9 @@ func (ds *HeaderNotifier) useHttp() {
 			height := hexutil.MustDecodeUint64(blkJson.Number)
 			blockHash := blkJson.Hash
 			weight := uint64(0)
-			if blkJson.TotalDifficulty != "" {
-				weight = hexutil.MustDecodeUint64(blkJson.TotalDifficulty)
-			}
+			// if blkJson.TotalDifficulty != "" {
+			// 	weight = hexutil.MustDecodeUint64(blkJson.TotalDifficulty)
+			// }
 
 			ds.remote.Update(height, blockHash)
 
