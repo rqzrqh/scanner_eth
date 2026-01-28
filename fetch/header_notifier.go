@@ -23,16 +23,14 @@ type HeaderNotifier struct {
 	client                   *rpc.Client
 	remote                   *RemoteChain
 	remoteChainUpdateChannel chan<- *types.RemoteChainUpdate
-	endHeight                uint64
 }
 
-func NewHeaderNotifier(id int, client *rpc.Client, remoteChainUpdateChannel chan<- *types.RemoteChainUpdate, endHeight uint64) *HeaderNotifier {
+func NewHeaderNotifier(id int, client *rpc.Client, remoteChainUpdateChannel chan<- *types.RemoteChainUpdate) *HeaderNotifier {
 	return &HeaderNotifier{
 		id:                       id,
 		client:                   client,
 		remote:                   NewRemoteChain(),
 		remoteChainUpdateChannel: remoteChainUpdateChannel,
-		endHeight:                endHeight,
 	}
 }
 
@@ -83,11 +81,6 @@ func (ds *HeaderNotifier) useWebsocket() {
 
 					logrus.Infof("header notifier new header. id:%d height:%v hash:%v", ds.id, height, blockHash)
 
-					if height > ds.endHeight {
-						logrus.Infof("header notifier reach end height. id:%d height:%v endHeight:%v", ds.id, height, ds.endHeight)
-						return
-					}
-
 					ds.remote.Update(height, blockHash)
 					ds.remoteChainUpdateChannel <- &types.RemoteChainUpdate{
 						NodeId:    ds.id,
@@ -125,11 +118,6 @@ func (ds *HeaderNotifier) useHttp() {
 			weight := uint64(0)
 			if blkJson.TotalDifficulty != "" {
 				weight = hexutil.MustDecodeUint64(blkJson.TotalDifficulty)
-			}
-
-			if height > ds.endHeight {
-				logrus.Infof("header notifier reach end height. id:%d height:%v endHeight:%v", ds.id, height, ds.endHeight)
-				return
 			}
 
 			ds.remote.Update(height, blockHash)
