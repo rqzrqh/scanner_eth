@@ -100,7 +100,7 @@ func main() {
 		&model.ContractErc20{},
 		&model.ContractErc721{},
 		&model.TokenErc721{},
-		&model.Balance{},
+		&model.BalanceNative{},
 		&model.BalanceErc20{},
 		&model.BalanceErc1155{},
 	); err != nil {

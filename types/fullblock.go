@@ -23,7 +23,7 @@ type FullBlock struct {
 	ContractErc20List  []*model.ContractErc20
 	ContractErc721List []*model.ContractErc721
 
-	BalanceList        []*model.Balance
+	BalanceNativeList  []*model.BalanceNative
 	BalanceErc20List   []*model.BalanceErc20
 	BalanceErc1155List []*model.BalanceErc1155
 }
@@ -152,7 +152,7 @@ type TokenPair struct {
 }
 */
 
-type Balance struct {
+type BalanceNative struct {
 	Addr        common.Address
 	ValueHexBig hexutil.Big
 	Height      *big.Int

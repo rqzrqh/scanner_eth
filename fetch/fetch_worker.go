@@ -252,12 +252,12 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	*/
 
 	// parse txs
-	txSet, txBalanceAddress, txBalanceErc20Address, txBalanceErc1155Address, erc20ContractAddrs, erc721ContractAddrs, modelTxList, modelEventLogList, modelEventErc20TransferList, modelEventErc721TransferList, modelTokenErc721List, modelEventErc1155TransferList, modelTxContractList := parseTx(blkJson.Txs, receipts, height, baseFee)
+	txSet, txBalanceNativeAddress, txBalanceErc20Address, txBalanceErc1155Address, erc20ContractAddrs, erc721ContractAddrs, modelTxList, modelEventLogList, modelEventErc20TransferList, modelEventErc721TransferList, modelTokenErc721List, modelEventErc1155TransferList, modelTxContractList := parseTx(blkJson.Txs, receipts, height, baseFee)
 
 	// parse internal txs
 	modelTxInternalList, modelTxInternalContractList, txInternalBalanceAddress, txInternalBalanceErc20Address := parseTxInternal(txInternalJsonList, height)
 
-	balanceAddress := make(map[string]struct{}, 0)
+	balanceNativeAddress := make(map[string]struct{}, 0)
 	balanceErc20Address := make(map[string]map[string]struct{}, 0)
 
 	modelContractList := make([]*model.Contract, 0)
@@ -265,11 +265,11 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	modelContractList = append(modelContractList, modelTxInternalContractList...)
 
 	// get all native token balance changed accounts
-	for k := range txBalanceAddress {
-		balanceAddress[k] = struct{}{}
+	for k := range txBalanceNativeAddress {
+		balanceNativeAddress[k] = struct{}{}
 	}
 	for k := range txInternalBalanceAddress {
-		balanceAddress[k] = struct{}{}
+		balanceNativeAddress[k] = struct{}{}
 	}
 
 	// get all erc20 token balance changed accounts
@@ -291,27 +291,27 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	}
 
 	// fetch native token balance changed account's balance
-	modelBalanceList := make([]*model.Balance, 0)
+	modelBalanceNativeList := make([]*model.BalanceNative, 0)
 	{
-		balances := make([]*types.Balance, 0)
-		for addr := range balanceAddress {
-			balances = append(balances, &types.Balance{
+		balances := make([]*types.BalanceNative, 0)
+		for addr := range balanceNativeAddress {
+			balances = append(balances, &types.BalanceNative{
 				Addr: common.HexToAddress(addr),
 			})
 		}
 
-		if err := fetchBalances(client, balances, height); err != nil {
+		if err := fetchBalanceNative(client, balances, height); err != nil {
 			logrus.Warnf("fetch balance failed. nodeId:%v taskId:%v height:%v err:%v", nodeId, taskId, height, err)
 			return nil
 		}
 
 		for _, v := range balances {
-			modelBalance := &model.Balance{
+			modelBalanceNative := &model.BalanceNative{
 				Addr:         v.Addr.Hex(),
 				Balance:      decimal.NewFromBigInt(v.ValueHexBig.ToInt(), 0),
 				UpdateHeight: v.Height.Uint64(),
 			}
-			modelBalanceList = append(modelBalanceList, modelBalance)
+			modelBalanceNativeList = append(modelBalanceNativeList, modelBalanceNative)
 		}
 	}
 
@@ -404,7 +404,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		ContractErc20List:  modelContractErc20List,
 		ContractErc721List: modelContractErc721List,
 
-		BalanceList:        modelBalanceList,
+		BalanceNativeList:  modelBalanceNativeList,
 		BalanceErc20List:   modelBalanceErc20List,
 		BalanceErc1155List: modelBalanceErc1155List,
 	}
@@ -418,7 +418,7 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 ) {
 
 	txSet := make(map[string]*types.TxJson, 0)
-	balanceAddress := make(map[string]struct{}, 0)
+	balanceNativeAddress := make(map[string]struct{}, 0)
 	balanceErc20Address := make(map[string]map[string]struct{}, 0)
 	balanceErc1155Address := make(map[string]map[string]map[string]struct{}, 0)
 
@@ -521,8 +521,8 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 		modelTxList = append(modelTxList, modelTx)
 
 		// balance
-		balanceAddress[fromAddr] = struct{}{}
-		balanceAddress[toAddr] = struct{}{}
+		balanceNativeAddress[fromAddr] = struct{}{}
+		balanceNativeAddress[toAddr] = struct{}{}
 
 		for _, txLog := range receipt.Logs {
 			// first one is event signature, left is indexed field, up to 3
@@ -746,7 +746,7 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 		}
 	}
 
-	return txSet, balanceAddress, balanceErc20Address, balanceErc1155Address, erc20ContractAddrs, erc721ContractAddrs, modelTxList, modelEventLogList, modelEventErc20TransferList, modelEventErc721TransferList, modelTokenErc721List, modelEventErc1155TransferList, modelContractList
+	return txSet, balanceNativeAddress, balanceErc20Address, balanceErc1155Address, erc20ContractAddrs, erc721ContractAddrs, modelTxList, modelEventLogList, modelEventErc20TransferList, modelEventErc721TransferList, modelTokenErc721List, modelEventErc1155TransferList, modelContractList
 }
 
 func parseTxInternal(jsonTxInternalList []*types.TxInternalJson, height uint64) ([]*model.TxInternal, []*model.Contract, map[string]struct{}, map[string]map[string]struct{}) {
@@ -807,9 +807,9 @@ func parseTxInternal(jsonTxInternalList []*types.TxInternalJson, height uint64) 
 	return modelTxInternalList, modelContractList, balanceAddress, balanceErc20Address
 }
 
-func fetchBalances(client *rpc.Client, balances []*types.Balance, height uint64) error {
+func fetchBalanceNative(client *rpc.Client, balancesNative []*types.BalanceNative, height uint64) error {
 	elems := make([]rpc.BatchElem, 0)
-	for _, ba := range balances {
+	for _, ba := range balancesNative {
 		elem := rpc.BatchElem{
 			Method: "eth_getBalance",
 			Args:   []interface{}{ba.Addr, "latest"},
@@ -845,7 +845,7 @@ func fetchBalances(client *rpc.Client, balances []*types.Balance, height uint64)
 			return fmt.Errorf("latest height:%v got cur chain height:%v", height, uint64(blockNumber))
 		}
 
-		for _, ba := range balances {
+		for _, ba := range balancesNative {
 			ba.Height = big.NewInt(int64(blockNumber))
 		}
 
