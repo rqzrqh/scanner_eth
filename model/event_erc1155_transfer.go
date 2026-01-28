@@ -13,6 +13,7 @@ type EventErc1155Transfer struct {
 	TokenId      string          `gorm:"index;type:varchar(255);comment:token_id"`
 	Amount       decimal.Decimal `gorm:"type:DECIMAL(65,0);comment:amount"`
 	Index        int             `gorm:"type:int;comment:index"`
+	IndexInBatch int             `gorm:"type:int;comment:index_in_batch"`
 }
 
 func (EventErc1155Transfer) TableName() string {
