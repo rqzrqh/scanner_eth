@@ -9,6 +9,7 @@ import (
 )
 
 type TaskManager struct {
+	endHeight                uint64
 	maxUnorganizedBlockCount int
 	taskId                   int
 	pendingFetch             *orderedmap.OrderedMap[uint64, struct{}]
@@ -16,8 +17,9 @@ type TaskManager struct {
 	inStage                  map[uint64]struct{}
 }
 
-func NewTaskManager(maxUnorganizedBlockCount int) *TaskManager {
+func NewTaskManager(endHeight uint64, maxUnorganizedBlockCount int) *TaskManager {
 	return &TaskManager{
+		endHeight:                endHeight,
 		maxUnorganizedBlockCount: maxUnorganizedBlockCount,
 		taskId:                   0,
 		pendingFetch:             orderedmap.NewOrderedMap[uint64, struct{}](),
@@ -51,6 +53,15 @@ func (tm *TaskManager) popTask() (int, uint64, error) {
 }
 
 func (tm *TaskManager) extendTask(startHeight uint64, endHeight uint64) error {
+
+	if endHeight > tm.endHeight {
+		endHeight = tm.endHeight
+	}
+
+	if startHeight >= endHeight {
+		return xerrors.New("out of end height")
+	}
+
 	currentTaskCount := tm.pendingFetch.Len() + len(tm.inFetch) + len(tm.inStage)
 	if currentTaskCount >= tm.maxUnorganizedBlockCount {
 		return xerrors.New("out of maxTaskCount")

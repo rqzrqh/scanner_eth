@@ -53,13 +53,13 @@ func newSyncer(clients []*rpc.Client, db *gorm.DB, reversibleBlocks int, storeCh
 
 	hns := make([]*fetch.HeaderNotifier, len(clients))
 	for i, client := range clients {
-		hns[i] = fetch.NewHeaderNotifier(i, client, remoteChainUpdateChannel, endHeight)
+		hns[i] = fetch.NewHeaderNotifier(i, client, remoteChainUpdateChannel)
 	}
 
 	maxUnorganizedBlockCount := 50 * len(clients)
 
 	publishOperationChannel := make(chan *types.PublishOperation, 0)
-	fm := fetch.NewFetchManager(clients, localChain, maxUnorganizedBlockCount, remoteChainUpdateChannel, storeOperationChannel, publishOperationChannel)
+	fm := fetch.NewFetchManager(clients, localChain, endHeight, maxUnorganizedBlockCount, remoteChainUpdateChannel, storeOperationChannel, publishOperationChannel)
 	event_center := event.NewEventCenter(publishOperationChannel)
 
 	return &Syncer{

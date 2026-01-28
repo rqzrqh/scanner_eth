@@ -20,7 +20,7 @@ type FetchManager struct {
 	publishOperationChannel  chan<- *types.PublishOperation
 }
 
-func NewFetchManager(clients []*rpc.Client, localChain *LocalChain, maxUnorganizedBlockCount int, remoteChainUpdateChannel <-chan *types.RemoteChainUpdate,
+func NewFetchManager(clients []*rpc.Client, localChain *LocalChain, endHeight uint64, maxUnorganizedBlockCount int, remoteChainUpdateChannel <-chan *types.RemoteChainUpdate,
 	storeOperationChannel chan<- *types.StoreOperation, publishOperationChannel chan<- *types.PublishOperation) *FetchManager {
 	fetchResultNotifyChannel := make(chan *types.FetchResult, 100)
 
@@ -28,7 +28,7 @@ func NewFetchManager(clients []*rpc.Client, localChain *LocalChain, maxUnorganiz
 		nodeManager:              NewNodeManager(clients),
 		localChain:               localChain,
 		pendingBlocks:            NewPendingBlocks(),
-		taskManager:              NewTaskManager(maxUnorganizedBlockCount),
+		taskManager:              NewTaskManager(endHeight, maxUnorganizedBlockCount),
 		forkVersion:              0,
 		eventID:                  0,
 		remoteChainUpdateChannel: remoteChainUpdateChannel,
