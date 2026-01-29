@@ -5,8 +5,8 @@ type EventErc721Transfer struct {
 	Height       uint64 `gorm:"index;type:bigint unsigned;comment:block_height"`
 	TxHash       string `gorm:"index;type:varchar(255);comment:tx_hash"`
 	ContractAddr string `gorm:"index;type:varchar(255);comment:contract_addr"`
-	Sender       string `gorm:"index;type:varchar(255);comment:sender"`
-	Receiver     string `gorm:"index;type:varchar(255);comment:receiver"`
+	From         string `gorm:"index;type:varchar(255);comment:from"`
+	To           string `gorm:"index;type:varchar(255);comment:to"`
 	TokenId      string `gorm:"index;type:varchar(255);comment:token_id"`
 	Index        int    `gorm:"type:int;comment:index"`
 }
