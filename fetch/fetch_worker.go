@@ -453,11 +453,11 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 			if receipt.Status == 1 {
 				isCreateContract = true
 				modelContract := &model.Contract{
-					Height:      height,
-					TxHash:      txHash,
-					Addr:        strings.ToLower(receipt.ContractAddress.Hex()),
-					CreatorAddr: fromAddr,
-					ExecStatus:  receipt.Status,
+					Height:       height,
+					TxHash:       txHash,
+					ContractAddr: strings.ToLower(receipt.ContractAddress.Hex()),
+					CreatorAddr:  fromAddr,
+					ExecStatus:   receipt.Status,
 				}
 				modelContractList = append(modelContractList, modelContract)
 			}
@@ -619,8 +619,8 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 					Height:       height,
 					TxHash:       txHash,
 					ContractAddr: contractAddr,
-					Sender:       sender,
-					Receiver:     receiver,
+					From:         sender,
+					To:           receiver,
 					TokenId:      tokenId,
 					Index:        int(txLog.Index),
 				}
@@ -681,8 +681,8 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 					TxHash:       txHash,
 					ContractAddr: contractAddr,
 					Operator:     operator,
-					Sender:       sender,
-					Receiver:     receiver,
+					From:         sender,
+					To:           receiver,
 					TokenId:      tokenId,
 					Amount:       amount,
 					Index:        int(txLog.Index),
@@ -733,8 +733,8 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 						TxHash:       txHash,
 						ContractAddr: contractAddr,
 						Operator:     operator,
-						Sender:       sender,
-						Receiver:     receiver,
+						From:         sender,
+						To:           receiver,
 						TokenId:      tokenId,
 						Amount:       amount,
 						Index:        int(txLog.Index),
@@ -769,11 +769,11 @@ func parseTxInternal(jsonTxInternalList []*types.TxInternalJson, height uint64) 
 						logrus.Fatal("internal tx empty txhash:%v from:%v to:%v", txHash, fromAddr, toAddr)
 					}
 					modelContract := &model.Contract{
-						Height:      height,
-						TxHash:      txHash,
-						Addr:        toAddr,
-						CreatorAddr: fromAddr,
-						ExecStatus:  status,
+						Height:       height,
+						TxHash:       txHash,
+						ContractAddr: toAddr,
+						CreatorAddr:  fromAddr,
+						ExecStatus:   status,
 					}
 					modelContractList = append(modelContractList, modelContract)
 				}
@@ -986,7 +986,7 @@ func fetchContractErc20(client *rpc.Client, addr *common.Address, height uint64)
 	}
 
 	modelContractErc20 := &model.ContractErc20{}
-	modelContractErc20.Addr = strings.ToLower(addr.Hex())
+	modelContractErc20.ContractAddr = strings.ToLower(addr.Hex())
 
 	for i, elem := range elems {
 		if elem.Method == "eth_blockNumber" {
@@ -1092,7 +1092,7 @@ func fetchContractErc721(client *rpc.Client, addr *common.Address) (*model.Contr
 	}
 
 	modelContractErc721 := &model.ContractErc721{}
-	modelContractErc721.Addr = strings.ToLower(addr.Hex())
+	modelContractErc721.ContractAddr = strings.ToLower(addr.Hex())
 
 	for i, elem := range elems {
 		if elem.Error != nil {
