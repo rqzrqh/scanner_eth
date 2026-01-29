@@ -11,7 +11,6 @@ import (
 	"sync_eth/config"
 	"sync_eth/log"
 	"sync_eth/model"
-	"sync_eth/types"
 	"syscall"
 	"time"
 
@@ -114,6 +113,10 @@ func main() {
 
 	logrus.Infof("init chain info success")
 
+	initGenesisBlock(db, conf.Chain.GenesisBlockHash)
+
+	logrus.Infof("init genesis block success")
+
 	rpcNodeCount := len(conf.Fetch.RpcNodes)
 	if rpcNodeCount == 0 {
 		logrus.Errorf("rpc node count is zero")
@@ -144,14 +147,12 @@ func main() {
 
 	logrus.Infof("node chain info check passed")
 
-	initGenesisBlock(clients, db)
-
-	logrus.Infof("genesis block init success")
-
 	s := newSyncer(clients, db, conf.Chain.ReversibleBlocks, conf.Store.ChannelSize, conf.Store.BatchSize, conf.Store.WorkerCount, conf.Fetch.StartHeight, conf.Fetch.EndHeight)
 
 	leaseAlive()
 	s.Run()
+
+	logrus.Infof("start success")
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
@@ -204,6 +205,19 @@ func initChainInfo(db *gorm.DB, chainId uint64, genesisBlockHash string) {
 	}
 }
 
+func initGenesisBlock(db *gorm.DB, genesisBlockHash string) {
+
+	genesisBlock := &model.Block{
+		Height:    0,
+		BlockHash: genesisBlockHash,
+	}
+
+	if err := db.Clauses(clause.Insert{Modifier: "IGNORE"}).Create(genesisBlock).Error; err != nil {
+		logrus.Errorf("insert genesis block to db failed. err:%v", err)
+		os.Exit(0)
+	}
+}
+
 func checkNodeChainInfo(clients []*rpc.Client, db *gorm.DB) {
 	var chainInfo model.ChainInfo
 	if err := db.First(&chainInfo).Error; err != nil {
@@ -226,7 +240,7 @@ func checkNodeChainInfo(clients []*rpc.Client, db *gorm.DB) {
 			os.Exit(0)
 		}
 
-		blkJson := &types.BlockHeaderJson{}
+		blkJson := &SimpleBlockHeaderJson{}
 		if err := client.Call(blkJson, "eth_getBlockByNumber", "0x0", false); err != nil {
 			logrus.Errorf("get genesis block failed. id:%v err:%v", i, err)
 			os.Exit(0)
@@ -236,36 +250,5 @@ func checkNodeChainInfo(clients []*rpc.Client, db *gorm.DB) {
 			logrus.Errorf("genesis block not equal with db. id:%v db:%v node:%v", i, chainInfo.GenesisBlockHash, blkJson.Hash)
 			os.Exit(0)
 		}
-	}
-}
-
-func initGenesisBlock(clients []*rpc.Client, db *gorm.DB) {
-
-	// check height 0 block exist
-	var count int64
-	if err := db.Model(&model.Block{}).Where("height = ?", 0).Count(&count).Error; err != nil {
-		logrus.Errorf("check genesis block exist failed. err:%v", err)
-		os.Exit(0)
-	}
-
-	if count > 0 {
-		logrus.Infof("genesis block exist in db. skip init")
-		return
-	}
-
-	blkJson := &types.BlockHeaderJson{}
-	if err := clients[0].Call(blkJson, "eth_getBlockByNumber", "0x0", false); err != nil {
-		logrus.Errorf("get genesis block failed. err:%v", err)
-		os.Exit(0)
-	}
-
-	genesisBlock := &model.Block{
-		Height:    0,
-		BlockHash: blkJson.Hash,
-	}
-
-	if err := db.Clauses(clause.Insert{Modifier: "IGNORE"}).Create(genesisBlock).Error; err != nil {
-		logrus.Errorf("insert genesis block to db failed. err:%v", err)
-		os.Exit(0)
 	}
 }
