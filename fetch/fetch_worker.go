@@ -144,8 +144,73 @@ func transTraceAddressToString(opcode string, traceAddress []uint64) string {
 	return res
 }
 
+type BlockHeaderJson struct {
+	BaseFeePerGas   string        `json:"baseFeePerGas"`
+	Difficulty      string        `json:"difficulty"`
+	ExtraData       string        `json:"extraData"`
+	GasLimit        string        `json:"gasLimit"`
+	GasUsed         string        `json:"gasUsed"`
+	Hash            string        `json:"hash"`
+	Miner           string        `json:"miner"`
+	Nonce           string        `json:"nonce"`
+	Number          string        `json:"number"`
+	ParentHash      string        `json:"parentHash"`
+	ReceiptsRoot    string        `json:"receiptsRoot"`
+	Sha3Uncles      string        `json:"sha3Uncles"`
+	Size            string        `json:"size"`
+	StateRoot       string        `json:"stateRoot"`
+	TimeStamp       string        `json:"timestamp"`
+	TotalDifficulty string        `json:"totalDifficulty"`
+	TransactionRoot string        `json:"transactionsRoot"`
+	Uncles          []interface{} `json:"uncles"`
+}
+
+type BlockJson struct {
+	BlockHeaderJson
+	Txs []*TxJson `json:"transactions"`
+}
+
+type TxJson struct {
+	Hash                 string `json:"hash"`
+	From                 string `json:"from"`
+	To                   string `json:"to"`
+	Gas                  string `json:"gas"`
+	GasPrice             string `json:"gasPrice"`
+	Input                string `json:"input"`
+	MaxFeePerGas         string `json:"maxFeePerGas"`
+	MaxPriorityFeePerGas string `json:"maxPriorityFeePerGas"`
+	Nonce                string `json:"nonce"`
+	R                    string `json:"r"`
+	S                    string `json:"s"`
+	V                    string `json:"v"`
+	TransactionIndex     string `json:"transactionIndex"`
+	Type                 string `json:"type"`
+	Value                string `json:"value"`
+}
+
+type TxInternalJson struct {
+	TxHash      string               `json:"transactionHash"`
+	BlockHash   string               `json:"blockHash,omitempty"`
+	BlockNumber uint64               `json:"blockNumber,omitempty"`
+	Logs        []*TxInternalLogJson `json:"logs"`
+}
+
+type TxInternalLogJson struct {
+	From         string   `json:"From"`
+	To           string   `json:"to,omitempty"`
+	Value        *big.Int `json:"value,omitempty"`
+	Success      bool     `json:"success"`
+	OpCode       string   `json:"opcode"`
+	Depth        int      `json:"depth"`
+	Gas          uint64   `json:"gas"`
+	GasUsed      uint64   `json:"gas_used"`
+	Input        string   `json:"input"`
+	Output       string   `json:"output,omitempty"`
+	TraceAddress []uint64 `json:"trace_address"`
+}
+
 func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *types.FullBlock {
-	blkJson := &types.BlockJson{}
+	blkJson := &BlockJson{}
 	// fetch block with txs
 	{
 		startTime := time.Now()
@@ -239,7 +304,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	}
 
 	// fetch internal tx
-	txInternalJsonList := make([]*types.TxInternalJson, 0)
+	txInternalJsonList := make([]*TxInternalJson, 0)
 	/* need to change evm code
 	{
 		arg := map[string]interface{}{}
@@ -412,12 +477,12 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	return fullblock
 }
 
-func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt, height uint64, baseFee *big.Int) (
-	map[string]*types.TxJson, map[string]struct{}, map[string]map[string]struct{}, map[string]map[string]map[string]struct{}, map[string]string, map[string]string,
+func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, height uint64, baseFee *big.Int) (
+	map[string]*TxJson, map[string]struct{}, map[string]map[string]struct{}, map[string]map[string]map[string]struct{}, map[string]string, map[string]string,
 	[]*model.Tx, []*model.EventLog, []*model.EventErc20Transfer, []*model.EventErc721Transfer, []*model.TokenErc721, []*model.EventErc1155Transfer, []*model.Contract,
 ) {
 
-	txSet := make(map[string]*types.TxJson, 0)
+	txSet := make(map[string]*TxJson, 0)
 	balanceNativeAddress := make(map[string]struct{}, 0)
 	balanceErc20Address := make(map[string]map[string]struct{}, 0)
 	balanceErc1155Address := make(map[string]map[string]map[string]struct{}, 0)
@@ -749,7 +814,7 @@ func parseTx(jsonTxList []*types.TxJson, receipts map[string]*eth_types.Receipt,
 	return txSet, balanceNativeAddress, balanceErc20Address, balanceErc1155Address, erc20ContractAddrs, erc721ContractAddrs, modelTxList, modelEventLogList, modelEventErc20TransferList, modelEventErc721TransferList, modelTokenErc721List, modelEventErc1155TransferList, modelContractList
 }
 
-func parseTxInternal(jsonTxInternalList []*types.TxInternalJson, height uint64) ([]*model.TxInternal, []*model.Contract, map[string]struct{}, map[string]map[string]struct{}) {
+func parseTxInternal(jsonTxInternalList []*TxInternalJson, height uint64) ([]*model.TxInternal, []*model.Contract, map[string]struct{}, map[string]map[string]struct{}) {
 	modelTxInternalList := make([]*model.TxInternal, 0)
 	modelContractList := make([]*model.Contract, 0)
 

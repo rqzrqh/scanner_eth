@@ -12,12 +12,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type BlockDigestJson struct {
-	Hash            string `json:"hash"`
-	Number          string `json:"number"`
-	TotalDifficulty string `json:"totalDifficulty,omitempty"`
-}
-
 type HeaderNotifier struct {
 	id                       int
 	client                   *rpc.Client
@@ -100,7 +94,7 @@ func (ds *HeaderNotifier) useHttp() {
 		for {
 			time.Sleep(5000 * time.Millisecond)
 
-			blkJson := &BlockDigestJson{}
+			blkJson := &BlockHeaderJson{}
 
 			err := ds.client.Call(blkJson, "eth_getBlockByNumber", util.ToBlockNumArg(nil), false)
 			if err != nil {

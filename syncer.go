@@ -17,6 +17,12 @@ import (
 	"gorm.io/gorm"
 )
 
+type SimpleBlockHeaderJson struct {
+	Hash       string `json:"hash"`
+	Number     string `json:"number"`
+	ParentHash string `json:"parentHash"`
+}
+
 type Syncer struct {
 	hns          []*fetch.HeaderNotifier
 	fm           *fetch.FetchManager
@@ -110,7 +116,7 @@ func loadStartBlock(clients []*rpc.Client, db *gorm.DB, startHeight uint64, reve
 	} else {
 
 		blockNum := new(big.Int).SetUint64(startHeight - 1)
-		blkJson := &types.BlockHeaderJson{}
+		blkJson := &SimpleBlockHeaderJson{}
 
 		logrus.Infof("startup load latest block from rpc. height:%v", blockNum.Uint64())
 
