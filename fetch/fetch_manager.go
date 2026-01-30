@@ -15,14 +15,14 @@ type FetchManager struct {
 	forkVersion              uint64
 	eventID                  uint64
 	remoteChainUpdateChannel <-chan *types.RemoteChainUpdate
-	fetchResultNotifyChannel chan *types.FetchResult
+	fetchResultNotifyChannel chan *FetchResult
 	storeOperationChannel    chan<- *types.StoreOperation
 	publishOperationChannel  chan<- *types.PublishOperation
 }
 
 func NewFetchManager(clients []*rpc.Client, localChain *LocalChain, endHeight uint64, maxUnorganizedBlockCount int, remoteChainUpdateChannel <-chan *types.RemoteChainUpdate,
 	storeOperationChannel chan<- *types.StoreOperation, publishOperationChannel chan<- *types.PublishOperation) *FetchManager {
-	fetchResultNotifyChannel := make(chan *types.FetchResult, 100)
+	fetchResultNotifyChannel := make(chan *FetchResult, 100)
 
 	return &FetchManager{
 		nodeManager:              NewNodeManager(clients),
@@ -102,7 +102,7 @@ func (fm *FetchManager) addBlock(data *types.FullBlock, forkVersion uint64) {
 			publishOperation := &types.PublishOperation{
 				Type: types.PublishApply,
 				Data: &types.PublishApplyData{
-					Events: make([]types.EventItem, 0),
+					FullBlock: fullblock,
 				},
 			}
 			fm.publishOperationChannel <- publishOperation

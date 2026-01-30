@@ -2,6 +2,8 @@ package fetch
 
 import (
 	"math/big"
+	"sync_eth/types"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -143,4 +145,13 @@ type BalanceErc20 struct {
 	ValueBytes   hexutil.Bytes
 	Value        *big.Int
 	Height       *big.Int
+}
+
+type FetchResult struct {
+	NodeId      int
+	TaskId      int
+	ForkVersion uint64
+	Height      uint64
+	FullBlock   *types.FullBlock
+	CostTime    time.Duration
 }

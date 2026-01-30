@@ -13,7 +13,7 @@ type PublishOperation struct {
 }
 
 type PublishApplyData struct {
-	Events []EventItem
+	FullBlock *FullBlock
 }
 
 type PublishRollbackData struct {
