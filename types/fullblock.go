@@ -1,25 +1,25 @@
 package types
 
 import (
-	"sync_eth/model"
+	"sync_eth/protocol"
 )
 
 type FullBlock struct {
-	Block                    *model.Block
-	TxList                   []*model.Tx
-	TxInternalList           []*model.TxInternal
-	EventLogList             []*model.EventLog
-	EventErc20TransferList   []*model.EventErc20Transfer
-	EventErc721TransferList  []*model.EventErc721Transfer
-	EventErc1155TransferList []*model.EventErc1155Transfer
+	Block                    *protocol.Block
+	TxList                   []*protocol.Tx
+	TxInternalList           []*protocol.TxInternal
+	EventLogList             []*protocol.EventLog
+	EventErc20TransferList   []*protocol.EventErc20Transfer
+	EventErc721TransferList  []*protocol.EventErc721Transfer
+	EventErc1155TransferList []*protocol.EventErc1155Transfer
 
-	TokenErc721List []*model.TokenErc721
+	TokenErc721List []*protocol.TokenErc721
 
-	ContractList       []*model.Contract
-	ContractErc20List  []*model.ContractErc20
-	ContractErc721List []*model.ContractErc721
+	ContractList       []*protocol.Contract
+	ContractErc20List  []*protocol.ContractErc20
+	ContractErc721List []*protocol.ContractErc721
 
-	BalanceNativeList  []*model.BalanceNative
-	BalanceErc20List   []*model.BalanceErc20
-	BalanceErc1155List []*model.BalanceErc1155
+	BalanceNativeList  []*protocol.BalanceNative
+	BalanceErc20List   []*protocol.BalanceErc20
+	BalanceErc1155List []*protocol.BalanceErc1155
 }

@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"sync_eth/model"
-	"sync_eth/types"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -49,7 +48,7 @@ func Revert(db *gorm.DB, height uint64) error {
 	return nil
 }
 
-func StoreFullBlock(db *gorm.DB, fullblock *types.FullBlock, batchSize int, storeTaskChannel chan *StoreTask, storeCompleteChannel chan *StoreComplete) error {
+func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, batchSize int, storeTaskChannel chan *StoreTask, storeCompleteChannel chan *StoreComplete) error {
 	startTime := time.Now()
 
 	height := fullblock.Block.Height
