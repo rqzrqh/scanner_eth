@@ -15,7 +15,7 @@ import (
 var taskCounter = uint64(0)
 
 func deleteData(db *gorm.DB, height uint64) error {
-	result := db.Where("height = ?", height).Delete(&model.Block{})
+	result := db.Where("height = ?", height).Delete(model.Block{})
 	if result.Error != nil {
 		logrus.Errorf("deleteData delete block failed %v %v", result.Error, height)
 		return result.Error
@@ -128,7 +128,7 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, batchSize int, sto
 	}
 
 	startTime2 := time.Now()
-	if err := db.Clauses(clause.OnConflict{UpdateAll: true}).Create(fullblock.Block).Error; err != nil {
+	if err := db.Clauses(clause.OnConflict{UpdateAll: true}).Create(&fullblock.Block).Error; err != nil {
 		logrus.Errorf("store chain block failed %v", err)
 		return err
 	}
@@ -177,7 +177,7 @@ func splitTask(taskType StoreTaskType, modelList []interface{}, batchSize int, h
 	}
 }
 
-func splitTx(modelList []*model.Tx, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
+func splitTx(modelList []model.Tx, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
 	count := len(modelList)
 
 	list := make([]interface{}, 0)
@@ -190,7 +190,7 @@ func splitTx(modelList []*model.Tx, batchSize int, height uint64, storeTaskChann
 	logrus.Debugf("split tx. height:%v count:%v", height, count)
 }
 
-func splitEventLog(modelList []*model.EventLog, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
+func splitEventLog(modelList []model.EventLog, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
 	count := len(modelList)
 
 	list := make([]interface{}, 0)
@@ -203,7 +203,7 @@ func splitEventLog(modelList []*model.EventLog, batchSize int, height uint64, st
 	logrus.Debugf("split event log. height:%v count:%v", height, count)
 }
 
-func splitEventErc20Transfer(modelList []*model.EventErc20Transfer, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
+func splitEventErc20Transfer(modelList []model.EventErc20Transfer, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
 	count := len(modelList)
 
 	list := make([]interface{}, 0)
@@ -216,7 +216,7 @@ func splitEventErc20Transfer(modelList []*model.EventErc20Transfer, batchSize in
 	logrus.Debugf("split event erc20 transfer. height:%v count:%v", height, count)
 }
 
-func splitEventErc721Transfer(modelList []*model.EventErc721Transfer, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
+func splitEventErc721Transfer(modelList []model.EventErc721Transfer, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
 	count := len(modelList)
 
 	list := make([]interface{}, 0)
@@ -229,7 +229,7 @@ func splitEventErc721Transfer(modelList []*model.EventErc721Transfer, batchSize 
 	logrus.Debugf("split event erc721 transfer. height:%v count:%v", height, count)
 }
 
-func splitEventErc1155Transfer(modelList []*model.EventErc1155Transfer, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
+func splitEventErc1155Transfer(modelList []model.EventErc1155Transfer, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
 	count := len(modelList)
 
 	list := make([]interface{}, 0)
@@ -242,7 +242,7 @@ func splitEventErc1155Transfer(modelList []*model.EventErc1155Transfer, batchSiz
 	logrus.Debugf("split event erc1155 transfer. height:%v count:%v", height, count)
 }
 
-func splitBalanceNative(modelList []*model.BalanceNative, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
+func splitBalanceNative(modelList []model.BalanceNative, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
 	count := len(modelList)
 
 	list := make([]interface{}, 0)
@@ -256,7 +256,7 @@ func splitBalanceNative(modelList []*model.BalanceNative, batchSize int, height 
 	logrus.Debugf("split balance native. height:%v count:%v", height, count)
 }
 
-func splitBalanceErc20(modelList []*model.BalanceErc20, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
+func splitBalanceErc20(modelList []model.BalanceErc20, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
 	count := len(modelList)
 
 	list := make([]interface{}, 0)
@@ -270,7 +270,7 @@ func splitBalanceErc20(modelList []*model.BalanceErc20, batchSize int, height ui
 	logrus.Debugf("split balance erc20. height:%v count:%v", height, count)
 }
 
-func splitContract(modelList []*model.Contract, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
+func splitContract(modelList []model.Contract, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
 	count := len(modelList)
 
 	list := make([]interface{}, 0)
@@ -283,7 +283,7 @@ func splitContract(modelList []*model.Contract, batchSize int, height uint64, st
 	logrus.Debugf("split contract. height:%v count:%v", height, count)
 }
 
-func splitContractErc20(modelList []*model.ContractErc20, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
+func splitContractErc20(modelList []model.ContractErc20, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
 	count := len(modelList)
 
 	list := make([]interface{}, 0)
@@ -296,7 +296,7 @@ func splitContractErc20(modelList []*model.ContractErc20, batchSize int, height 
 	logrus.Debugf("split contract erc20. height:%v count:%v", height, count)
 }
 
-func splitContractErc721(modelList []*model.ContractErc721, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
+func splitContractErc721(modelList []model.ContractErc721, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
 	count := len(modelList)
 
 	list := make([]interface{}, 0)
@@ -309,7 +309,7 @@ func splitContractErc721(modelList []*model.ContractErc721, batchSize int, heigh
 	logrus.Debugf("split contract erc721. height:%v count:%v", height, count)
 }
 
-func splitTokenErc721(modelList []*model.TokenErc721, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
+func splitTokenErc721(modelList []model.TokenErc721, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
 	count := len(modelList)
 
 	list := make([]interface{}, 0)
@@ -382,71 +382,71 @@ func (sw *StoreWorker) Run() {
 
 				switch taskType {
 				case Tx:
-					data := make([]*model.Tx, 0)
+					data := make([]model.Tx, 0)
 					for _, v := range tsk.data {
-						data = append(data, v.(*model.Tx))
+						data = append(data, v.(model.Tx))
 					}
 					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
 				case EventLog:
-					data := make([]*model.EventLog, 0)
+					data := make([]model.EventLog, 0)
 					for _, v := range tsk.data {
-						data = append(data, v.(*model.EventLog))
+						data = append(data, v.(model.EventLog))
 					}
 					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
 				case EventErc20Transfer:
-					data := make([]*model.EventErc20Transfer, 0)
+					data := make([]model.EventErc20Transfer, 0)
 					for _, v := range tsk.data {
-						data = append(data, v.(*model.EventErc20Transfer))
+						data = append(data, v.(model.EventErc20Transfer))
 					}
 					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
 				case EventErc721Transfer:
-					data := make([]*model.EventErc721Transfer, 0)
+					data := make([]model.EventErc721Transfer, 0)
 					for _, v := range tsk.data {
-						data = append(data, v.(*model.EventErc721Transfer))
+						data = append(data, v.(model.EventErc721Transfer))
 					}
 					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
 				case EventErc1155Transfer:
-					data := make([]*model.EventErc1155Transfer, 0)
+					data := make([]model.EventErc1155Transfer, 0)
 					for _, v := range tsk.data {
-						data = append(data, v.(*model.EventErc1155Transfer))
+						data = append(data, v.(model.EventErc1155Transfer))
 					}
 					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
 				case BalanceNative:
-					data := make([]*model.BalanceNative, 0)
+					data := make([]model.BalanceNative, 0)
 					for _, v := range tsk.data {
-						data = append(data, v.(*model.BalanceNative))
+						data = append(data, v.(model.BalanceNative))
 					}
 					// update
 					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
 				case BalanceErc20:
-					data := make([]*model.BalanceErc20, 0)
+					data := make([]model.BalanceErc20, 0)
 					for _, v := range tsk.data {
-						data = append(data, v.(*model.BalanceErc20))
+						data = append(data, v.(model.BalanceErc20))
 					}
 					// update
 					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
 				case Contract:
-					data := make([]*model.Contract, 0)
+					data := make([]model.Contract, 0)
 					for _, v := range tsk.data {
-						data = append(data, v.(*model.Contract))
+						data = append(data, v.(model.Contract))
 					}
 					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
 				case ContractErc20:
-					data := make([]*model.ContractErc20, 0)
+					data := make([]model.ContractErc20, 0)
 					for _, v := range tsk.data {
-						data = append(data, v.(*model.ContractErc20))
+						data = append(data, v.(model.ContractErc20))
 					}
 					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
 				case ContractErc721:
-					data := make([]*model.ContractErc721, 0)
+					data := make([]model.ContractErc721, 0)
 					for _, v := range tsk.data {
-						data = append(data, v.(*model.ContractErc721))
+						data = append(data, v.(model.ContractErc721))
 					}
 					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
 				case TokenErc721:
-					data := make([]*model.TokenErc721, 0)
+					data := make([]model.TokenErc721, 0)
 					for _, v := range tsk.data {
-						data = append(data, v.(*model.TokenErc721))
+						data = append(data, v.(model.TokenErc721))
 					}
 					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
 				default:

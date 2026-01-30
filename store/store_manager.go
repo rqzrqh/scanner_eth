@@ -11,23 +11,22 @@ import (
 )
 
 type StorageFullBlock struct {
-	Block                    *model.Block
-	TxList                   []*model.Tx
-	TxInternalList           []*model.TxInternal
-	EventLogList             []*model.EventLog
-	EventErc20TransferList   []*model.EventErc20Transfer
-	EventErc721TransferList  []*model.EventErc721Transfer
-	EventErc1155TransferList []*model.EventErc1155Transfer
+	Block                    model.Block
+	TxList                   []model.Tx
+	TxInternalList           []model.TxInternal
+	EventLogList             []model.EventLog
+	EventErc20TransferList   []model.EventErc20Transfer
+	EventErc721TransferList  []model.EventErc721Transfer
+	EventErc1155TransferList []model.EventErc1155Transfer
+	TokenErc721List          []model.TokenErc721
 
-	TokenErc721List []*model.TokenErc721
+	ContractList       []model.Contract
+	ContractErc20List  []model.ContractErc20
+	ContractErc721List []model.ContractErc721
 
-	ContractList       []*model.Contract
-	ContractErc20List  []*model.ContractErc20
-	ContractErc721List []*model.ContractErc721
-
-	BalanceNativeList  []*model.BalanceNative
-	BalanceErc20List   []*model.BalanceErc20
-	BalanceErc1155List []*model.BalanceErc1155
+	BalanceNativeList  []model.BalanceNative
+	BalanceErc20List   []model.BalanceErc20
+	BalanceErc1155List []model.BalanceErc1155
 }
 
 type StoreManager struct {
@@ -122,7 +121,7 @@ func (sm *StoreManager) Run() {
 
 func convertFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 	blockHeight := fullblock.Block.Height
-	modelBlock := &model.Block{
+	modelBlock := model.Block{
 		Height:          fullblock.Block.Height,
 		BlockHash:       fullblock.Block.BlockHash,
 		ParentHash:      fullblock.Block.ParentHash,
@@ -144,9 +143,9 @@ func convertFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 		ExtraData:       fullblock.Block.ExtraData,
 	}
 
-	txList := make([]*model.Tx, 0, len(fullblock.TxList))
+	txList := make([]model.Tx, 0, len(fullblock.TxList))
 	for _, tx := range fullblock.TxList {
-		modelTx := &model.Tx{
+		modelTx := model.Tx{
 			Height:               blockHeight,
 			TxHash:               tx.TxHash,
 			TxIndex:              tx.TxIndex,
@@ -171,10 +170,10 @@ func convertFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 	}
 
 	// TxInternalList conversion (if exists in types.FullBlock)
-	txInternalList := make([]*model.TxInternal, 0)
+	txInternalList := make([]model.TxInternal, 0)
 	// Uncomment and adjust if TxInternalList exists in fullblock:
 	// for _, txInternal := range fullblock.TxInternalList {
-	// 	modelTxInternal := &model.TxInternal{
+	// 	modelTxInternal := model.TxInternal{
 	// 		Height:    blockHeight,
 	// 		BlockHash: blockHash,
 	// 		// ... map other fields
@@ -182,9 +181,9 @@ func convertFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 	// 	txInternalList = append(txInternalList, modelTxInternal)
 	// }
 
-	eventLogList := make([]*model.EventLog, 0, len(fullblock.EventLogList))
+	eventLogList := make([]model.EventLog, 0, len(fullblock.EventLogList))
 	for _, log := range fullblock.EventLogList {
-		modelLog := &model.EventLog{
+		modelLog := model.EventLog{
 			Height:       blockHeight,
 			TxHash:       log.TxHash,
 			ContractAddr: log.ContractAddr,
@@ -199,9 +198,9 @@ func convertFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 		eventLogList = append(eventLogList, modelLog)
 	}
 
-	eventErc20TransferList := make([]*model.EventErc20Transfer, 0, len(fullblock.EventErc20TransferList))
+	eventErc20TransferList := make([]model.EventErc20Transfer, 0, len(fullblock.EventErc20TransferList))
 	for _, transfer := range fullblock.EventErc20TransferList {
-		modelTransfer := &model.EventErc20Transfer{
+		modelTransfer := model.EventErc20Transfer{
 			Height:       blockHeight,
 			TxHash:       transfer.TxHash,
 			ContractAddr: transfer.ContractAddr,
@@ -214,9 +213,9 @@ func convertFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 		eventErc20TransferList = append(eventErc20TransferList, modelTransfer)
 	}
 
-	eventErc721TransferList := make([]*model.EventErc721Transfer, 0, len(fullblock.EventErc721TransferList))
+	eventErc721TransferList := make([]model.EventErc721Transfer, 0, len(fullblock.EventErc721TransferList))
 	for _, transfer := range fullblock.EventErc721TransferList {
-		modelTransfer := &model.EventErc721Transfer{
+		modelTransfer := model.EventErc721Transfer{
 			Height:       blockHeight,
 			TxHash:       transfer.TxHash,
 			ContractAddr: transfer.ContractAddr,
@@ -228,9 +227,9 @@ func convertFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 		eventErc721TransferList = append(eventErc721TransferList, modelTransfer)
 	}
 
-	eventErc1155TransferList := make([]*model.EventErc1155Transfer, 0, len(fullblock.EventErc1155TransferList))
+	eventErc1155TransferList := make([]model.EventErc1155Transfer, 0, len(fullblock.EventErc1155TransferList))
 	for _, transfer := range fullblock.EventErc1155TransferList {
-		modelTransfer := &model.EventErc1155Transfer{
+		modelTransfer := model.EventErc1155Transfer{
 			Height:       blockHeight,
 			TxHash:       transfer.TxHash,
 			ContractAddr: transfer.ContractAddr,
@@ -245,9 +244,9 @@ func convertFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 		eventErc1155TransferList = append(eventErc1155TransferList, modelTransfer)
 	}
 
-	tokenErc721List := make([]*model.TokenErc721, 0, len(fullblock.TokenErc721List))
+	tokenErc721List := make([]model.TokenErc721, 0, len(fullblock.TokenErc721List))
 	for _, token := range fullblock.TokenErc721List {
-		modelToken := &model.TokenErc721{
+		modelToken := model.TokenErc721{
 			Height:        blockHeight,
 			ContractAddr:  token.ContractAddr,
 			TokenId:       token.TokenId,
@@ -259,9 +258,9 @@ func convertFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 		tokenErc721List = append(tokenErc721List, modelToken)
 	}
 
-	contractList := make([]*model.Contract, 0, len(fullblock.ContractList))
+	contractList := make([]model.Contract, 0, len(fullblock.ContractList))
 	for _, contract := range fullblock.ContractList {
-		modelContract := &model.Contract{
+		modelContract := model.Contract{
 			Height:       blockHeight,
 			TxHash:       contract.TxHash,
 			ContractAddr: contract.ContractAddr,
@@ -271,9 +270,9 @@ func convertFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 		contractList = append(contractList, modelContract)
 	}
 
-	contractErc20List := make([]*model.ContractErc20, 0, len(fullblock.ContractErc20List))
+	contractErc20List := make([]model.ContractErc20, 0, len(fullblock.ContractErc20List))
 	for _, contract := range fullblock.ContractErc20List {
-		modelContract := &model.ContractErc20{
+		modelContract := model.ContractErc20{
 			Height:            blockHeight,
 			TxHash:            contract.TxHash,
 			ContractAddr:      contract.ContractAddr,
@@ -287,9 +286,9 @@ func convertFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 		contractErc20List = append(contractErc20List, modelContract)
 	}
 
-	contractErc721List := make([]*model.ContractErc721, 0, len(fullblock.ContractErc721List))
+	contractErc721List := make([]model.ContractErc721, 0, len(fullblock.ContractErc721List))
 	for _, contract := range fullblock.ContractErc721List {
-		modelContract := &model.ContractErc721{
+		modelContract := model.ContractErc721{
 			Height:       blockHeight,
 			TxHash:       contract.TxHash,
 			ContractAddr: contract.ContractAddr,
@@ -300,9 +299,9 @@ func convertFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 		contractErc721List = append(contractErc721List, modelContract)
 	}
 
-	balanceNativeList := make([]*model.BalanceNative, 0, len(fullblock.BalanceNativeList))
+	balanceNativeList := make([]model.BalanceNative, 0, len(fullblock.BalanceNativeList))
 	for _, balance := range fullblock.BalanceNativeList {
-		modelBalance := &model.BalanceNative{
+		modelBalance := model.BalanceNative{
 			Addr:         balance.Addr,
 			Balance:      balance.Balance,
 			UpdateHeight: blockHeight,
@@ -310,9 +309,9 @@ func convertFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 		balanceNativeList = append(balanceNativeList, modelBalance)
 	}
 
-	balanceErc20List := make([]*model.BalanceErc20, 0, len(fullblock.BalanceErc20List))
+	balanceErc20List := make([]model.BalanceErc20, 0, len(fullblock.BalanceErc20List))
 	for _, balance := range fullblock.BalanceErc20List {
-		modelBalance := &model.BalanceErc20{
+		modelBalance := model.BalanceErc20{
 			Addr:         balance.Addr,
 			ContractAddr: balance.ContractAddr,
 			Balance:      balance.Balance,
@@ -321,9 +320,9 @@ func convertFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 		balanceErc20List = append(balanceErc20List, modelBalance)
 	}
 
-	balanceErc1155List := make([]*model.BalanceErc1155, 0, len(fullblock.BalanceErc1155List))
+	balanceErc1155List := make([]model.BalanceErc1155, 0, len(fullblock.BalanceErc1155List))
 	for _, balance := range fullblock.BalanceErc1155List {
-		modelBalance := &model.BalanceErc1155{
+		modelBalance := model.BalanceErc1155{
 			Addr:         balance.Addr,
 			ContractAddr: balance.ContractAddr,
 			TokenId:      balance.TokenId,
