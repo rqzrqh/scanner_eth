@@ -144,71 +144,6 @@ func transTraceAddressToString(opcode string, traceAddress []uint64) string {
 	return res
 }
 
-type BlockHeaderJson struct {
-	BaseFeePerGas   string        `json:"baseFeePerGas"`
-	Difficulty      string        `json:"difficulty"`
-	ExtraData       string        `json:"extraData"`
-	GasLimit        string        `json:"gasLimit"`
-	GasUsed         string        `json:"gasUsed"`
-	Hash            string        `json:"hash"`
-	Miner           string        `json:"miner"`
-	Nonce           string        `json:"nonce"`
-	Number          string        `json:"number"`
-	ParentHash      string        `json:"parentHash"`
-	ReceiptsRoot    string        `json:"receiptsRoot"`
-	Sha3Uncles      string        `json:"sha3Uncles"`
-	Size            string        `json:"size"`
-	StateRoot       string        `json:"stateRoot"`
-	TimeStamp       string        `json:"timestamp"`
-	TotalDifficulty string        `json:"totalDifficulty"`
-	TransactionRoot string        `json:"transactionsRoot"`
-	Uncles          []interface{} `json:"uncles"`
-}
-
-type BlockJson struct {
-	BlockHeaderJson
-	Txs []*TxJson `json:"transactions"`
-}
-
-type TxJson struct {
-	Hash                 string `json:"hash"`
-	From                 string `json:"from"`
-	To                   string `json:"to"`
-	Gas                  string `json:"gas"`
-	GasPrice             string `json:"gasPrice"`
-	Input                string `json:"input"`
-	MaxFeePerGas         string `json:"maxFeePerGas"`
-	MaxPriorityFeePerGas string `json:"maxPriorityFeePerGas"`
-	Nonce                string `json:"nonce"`
-	R                    string `json:"r"`
-	S                    string `json:"s"`
-	V                    string `json:"v"`
-	TransactionIndex     string `json:"transactionIndex"`
-	Type                 string `json:"type"`
-	Value                string `json:"value"`
-}
-
-type TxInternalJson struct {
-	TxHash      string               `json:"transactionHash"`
-	BlockHash   string               `json:"blockHash,omitempty"`
-	BlockNumber uint64               `json:"blockNumber,omitempty"`
-	Logs        []*TxInternalLogJson `json:"logs"`
-}
-
-type TxInternalLogJson struct {
-	From         string   `json:"From"`
-	To           string   `json:"to,omitempty"`
-	Value        *big.Int `json:"value,omitempty"`
-	Success      bool     `json:"success"`
-	OpCode       string   `json:"opcode"`
-	Depth        int      `json:"depth"`
-	Gas          uint64   `json:"gas"`
-	GasUsed      uint64   `json:"gas_used"`
-	Input        string   `json:"input"`
-	Output       string   `json:"output,omitempty"`
-	TraceAddress []uint64 `json:"trace_address"`
-}
-
 func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *types.FullBlock {
 	blkJson := &BlockJson{}
 	// fetch block with txs
@@ -355,12 +290,12 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		}
 	}
 
-	// fetch native token balance changed account's balance
+	// fetch native token balance whose balance is changed
 	modelBalanceNativeList := make([]*model.BalanceNative, 0)
 	{
-		balances := make([]*types.BalanceNative, 0)
+		balances := make([]*BalanceNative, 0)
 		for addr := range balanceNativeAddress {
-			balances = append(balances, &types.BalanceNative{
+			balances = append(balances, &BalanceNative{
 				Addr: common.HexToAddress(addr),
 			})
 		}
@@ -380,13 +315,13 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		}
 	}
 
-	// fetch erc20 token balance changed account's erc20 balance
+	// fetch erc20 token balance whose balance is changed
 	modelBalanceErc20List := make([]*model.BalanceErc20, 0)
 	{
-		balancesErc20 := make([]*types.BalanceErc20, 0)
+		balancesErc20 := make([]*BalanceErc20, 0)
 		for addr, v := range balanceErc20Address {
 			for contractAddr := range v {
-				balancesErc20 = append(balancesErc20, &types.BalanceErc20{
+				balancesErc20 = append(balancesErc20, &BalanceErc20{
 					Addr:         common.HexToAddress(addr),
 					ContractAddr: common.HexToAddress(contractAddr),
 				})
@@ -872,7 +807,7 @@ func parseTxInternal(jsonTxInternalList []*TxInternalJson, height uint64) ([]*mo
 	return modelTxInternalList, modelContractList, balanceAddress, balanceErc20Address
 }
 
-func fetchBalanceNative(client *rpc.Client, balancesNative []*types.BalanceNative, height uint64) error {
+func fetchBalanceNative(client *rpc.Client, balancesNative []*BalanceNative, height uint64) error {
 	elems := make([]rpc.BatchElem, 0)
 	for _, ba := range balancesNative {
 		elem := rpc.BatchElem{
@@ -924,7 +859,7 @@ func fetchBalanceNative(client *rpc.Client, balancesNative []*types.BalanceNativ
 	return err
 }
 
-func fetchErc20BalancesBatch(client *rpc.Client, bs []*types.BalanceErc20, height uint64) error {
+func fetchErc20BalancesBatch(client *rpc.Client, bs []*BalanceErc20, height uint64) error {
 	elems := make([]rpc.BatchElem, 0, len(bs))
 	for _, v := range bs {
 		b := v

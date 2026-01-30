@@ -20,7 +20,7 @@ func NewPendingBlocks() *PendingBlocks {
 func (pb *PendingBlocks) addBlock(fullblock *types.FullBlock) error {
 	height := fullblock.Block.Height
 	if _, exist := pb.dataSet[height]; exist {
-		errlog := fmt.Sprintf("datamanager add block is exist")
+		errlog := fmt.Sprintf("PendingBlocks add block is exist")
 		return xerrors.New(errlog)
 	}
 
