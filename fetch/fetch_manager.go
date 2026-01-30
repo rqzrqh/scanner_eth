@@ -17,11 +17,10 @@ type FetchManager struct {
 	remoteChainUpdateChannel <-chan *types.RemoteChainUpdate
 	fetchResultNotifyChannel chan *FetchResult
 	storeOperationChannel    chan<- *types.StoreOperation
-	publishOperationChannel  chan<- *types.PublishOperation
 }
 
 func NewFetchManager(clients []*rpc.Client, localChain *LocalChain, endHeight uint64, maxUnorganizedBlockCount int, remoteChainUpdateChannel <-chan *types.RemoteChainUpdate,
-	storeOperationChannel chan<- *types.StoreOperation, publishOperationChannel chan<- *types.PublishOperation) *FetchManager {
+	storeOperationChannel chan<- *types.StoreOperation) *FetchManager {
 	fetchResultNotifyChannel := make(chan *FetchResult, 100)
 
 	return &FetchManager{
@@ -34,7 +33,6 @@ func NewFetchManager(clients []*rpc.Client, localChain *LocalChain, endHeight ui
 		remoteChainUpdateChannel: remoteChainUpdateChannel,
 		fetchResultNotifyChannel: fetchResultNotifyChannel,
 		storeOperationChannel:    storeOperationChannel,
-		publishOperationChannel:  publishOperationChannel,
 	}
 }
 
@@ -78,14 +76,6 @@ func (fm *FetchManager) addBlock(data *types.FullBlock, forkVersion uint64) {
 			}
 			fm.storeOperationChannel <- storeOperation
 
-			publishOperation := &types.PublishOperation{
-				Type: types.PublishRollback,
-				Data: &types.PublishRollbackData{
-					Height: currentHeight,
-				},
-			}
-			fm.publishOperationChannel <- publishOperation
-
 			break
 		} else {
 			fm.taskManager.processSuccess(nextHeight)
@@ -98,14 +88,6 @@ func (fm *FetchManager) addBlock(data *types.FullBlock, forkVersion uint64) {
 				},
 			}
 			fm.storeOperationChannel <- storeOperation
-
-			publishOperation := &types.PublishOperation{
-				Type: types.PublishApply,
-				Data: &types.PublishApplyData{
-					FullBlock: fullblock,
-				},
-			}
-			fm.publishOperationChannel <- publishOperation
 		}
 	}
 }

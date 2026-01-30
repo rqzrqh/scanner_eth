@@ -10,26 +10,43 @@ import (
 )
 
 type StoreManager struct {
-	db                    *gorm.DB
-	batchSize             int
-	storeOperationChannel chan *types.StoreOperation
-	storeTaskChannel      chan *StoreTask
-	storeCompleteChannel  chan *StoreComplete
+	db                      *gorm.DB
+	batchSize               int
+	storeOperationChannel   chan *types.StoreOperation
+	storeTaskChannel        chan *StoreTask
+	storeCompleteChannel    chan *StoreComplete
+	publishOperationChannel chan<- *types.PublishOperation
+	storeWorkers            []*StoreWorker
 }
 
-func NewStoreManager(db *gorm.DB, batchSize int, storeOperationChannel chan *types.StoreOperation,
-	storeTaskChannel chan *StoreTask, storeCompleteChannel chan *StoreComplete) *StoreManager {
+func NewStoreManager(db *gorm.DB, batchSize int, storeWorkerCount int, storeOperationChannel chan *types.StoreOperation,
+	publishOperationChannel chan<- *types.PublishOperation) *StoreManager {
+
+	storeTaskChannel := make(chan *StoreTask, 10)
+	storeCompleteChannel := make(chan *StoreComplete, 10)
+
+	storeWorkers := make([]*StoreWorker, storeWorkerCount)
+	for i := 0; i < storeWorkerCount; i++ {
+		worker := NewStoreWorker(i, db, storeTaskChannel, storeCompleteChannel)
+		storeWorkers[i] = worker
+	}
 
 	return &StoreManager{
-		db:                    db,
-		batchSize:             batchSize,
-		storeOperationChannel: storeOperationChannel,
-		storeTaskChannel:      storeTaskChannel,
-		storeCompleteChannel:  storeCompleteChannel,
+		db:                      db,
+		batchSize:               batchSize,
+		storeOperationChannel:   storeOperationChannel,
+		storeTaskChannel:        storeTaskChannel,
+		storeCompleteChannel:    storeCompleteChannel,
+		publishOperationChannel: publishOperationChannel,
+		storeWorkers:            storeWorkers,
 	}
 }
 
 func (sm *StoreManager) Run() {
+	for _, sw := range sm.storeWorkers {
+		sw.Run()
+	}
+
 	go func() {
 		for op := range sm.storeOperationChannel {
 			if op.Type == types.StoreApply {
@@ -40,6 +57,15 @@ func (sm *StoreManager) Run() {
 					logrus.Errorf("write fullblock failed. height:%v err:%v", height, err)
 					os.Exit(0)
 				}
+
+				publishOperation := &types.PublishOperation{
+					Type: types.PublishApply,
+					Data: &types.PublishApplyData{
+						FullBlock: data.FullBlock,
+					},
+				}
+				sm.publishOperationChannel <- publishOperation
+
 			} else if op.Type == types.StoreRollback {
 				data := op.Data.(*types.StoreRollbackData)
 				height := data.Height
@@ -58,6 +84,14 @@ func (sm *StoreManager) Run() {
 						os.Exit(0)
 					}
 				}
+
+				publishOperation := &types.PublishOperation{
+					Type: types.PublishRollback,
+					Data: &types.PublishRollbackData{
+						Height: height,
+					},
+				}
+				sm.publishOperationChannel <- publishOperation
 			}
 		}
 	}()
