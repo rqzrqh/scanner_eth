@@ -63,10 +63,10 @@ type FetchWorker struct {
 	client                   *rpc.Client
 	height                   uint64
 	forkVersion              uint64
-	fetchResultNotifyChannel chan<- *types.FetchResult
+	fetchResultNotifyChannel chan<- *FetchResult
 }
 
-func NewFetchWorker(nodeId int, taskId int, client *rpc.Client, height uint64, forkVersion uint64, fetchResultNotifyChannel chan<- *types.FetchResult) *FetchWorker {
+func NewFetchWorker(nodeId int, taskId int, client *rpc.Client, height uint64, forkVersion uint64, fetchResultNotifyChannel chan<- *FetchResult) *FetchWorker {
 	return &FetchWorker{
 		nodeId:                   nodeId,
 		taskId:                   taskId,
@@ -101,7 +101,7 @@ func (fw *FetchWorker) Run() {
 					logrus.Warnf("fetch task failed. nodeId:%v taskId:%v height:%v fork_version:%v try_count:%v", fw.nodeId, fw.taskId, height, forkVersion, tryCount)
 				}
 
-				fetchResult := &types.FetchResult{
+				fetchResult := &FetchResult{
 					NodeId:      fw.nodeId,
 					TaskId:      fw.taskId,
 					ForkVersion: forkVersion,

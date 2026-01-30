@@ -92,18 +92,17 @@ func (ds *HeaderNotifier) useHttp() {
 	go func() {
 
 		for {
-			time.Sleep(5000 * time.Millisecond)
-
 			blkJson := &BlockHeaderJson{}
-
 			err := ds.client.Call(blkJson, "eth_getBlockByNumber", util.ToBlockNumArg(nil), false)
 			if err != nil {
 				logrus.Warnf("header notifier failed to get latest block. id:%d error:%v", ds.id, err)
+				time.Sleep(5000 * time.Millisecond)
 				continue
 			}
 
 			if blkJson.Number == "" {
 				logrus.Warnf("header notifier get empty block. id:%d", ds.id)
+				time.Sleep(5000 * time.Millisecond)
 				continue
 			}
 
