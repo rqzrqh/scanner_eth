@@ -27,7 +27,6 @@ type Syncer struct {
 	hns          []*fetch.HeaderNotifier
 	fm           *fetch.FetchManager
 	sm           *store.StoreManager
-	storeWorkers []*store.StoreWorker
 	event_center *event.EventCenter
 }
 
@@ -36,60 +35,42 @@ func newSyncer(clients []*rpc.Client, db *gorm.DB, reversibleBlocks int, storeCh
 	logrus.Infof("reversibleBlocks:%v storeChannelSize:%v storeBatchSize:%v storeWorkerCount:%v startHeight:%v endHeight:%v",
 		reversibleBlocks, storeChannelSize, storeBatchSize, storeWorkerCount, startHeight, endHeight)
 
-	fetch.InitAbi()
-
-	blkDigestList := loadStartBlock(clients, db, startHeight, reversibleBlocks)
-
-	localChain := fetch.NewLocalChain(reversibleBlocks, blkDigestList)
+	publishOperationChannel := make(chan *types.PublishOperation, 100)
+	event_center := event.NewEventCenter(publishOperationChannel)
 
 	storeOperationChannel := make(chan *types.StoreOperation, storeChannelSize)
-
-	storeTaskChannel := make(chan *store.StoreTask, 10)
-	storeCompleteChannel := make(chan *store.StoreComplete, 10)
-
-	storeWorkers := make([]*store.StoreWorker, storeWorkerCount)
-	for i := 0; i < storeWorkerCount; i++ {
-		worker := store.NewStoreWorker(i, db, storeTaskChannel, storeCompleteChannel)
-		storeWorkers[i] = worker
-	}
-
-	sm := store.NewStoreManager(db, storeBatchSize, storeOperationChannel, storeTaskChannel, storeCompleteChannel)
+	sm := store.NewStoreManager(db, storeBatchSize, storeWorkerCount, storeOperationChannel, publishOperationChannel)
 
 	remoteChainUpdateChannel := make(chan *types.RemoteChainUpdate, 100)
+	maxUnorganizedBlockCount := 50 * len(clients)
+	blkDigestList := loadStartBlock(clients, db, startHeight, reversibleBlocks)
+	localChain := fetch.NewLocalChain(reversibleBlocks, blkDigestList)
+	fm := fetch.NewFetchManager(clients, localChain, endHeight, maxUnorganizedBlockCount, remoteChainUpdateChannel, storeOperationChannel)
 
 	hns := make([]*fetch.HeaderNotifier, len(clients))
 	for i, client := range clients {
 		hns[i] = fetch.NewHeaderNotifier(i, client, remoteChainUpdateChannel)
 	}
 
-	maxUnorganizedBlockCount := 50 * len(clients)
-
-	publishOperationChannel := make(chan *types.PublishOperation, 0)
-	fm := fetch.NewFetchManager(clients, localChain, endHeight, maxUnorganizedBlockCount, remoteChainUpdateChannel, storeOperationChannel, publishOperationChannel)
-	event_center := event.NewEventCenter(publishOperationChannel)
+	fetch.InitAbi()
 
 	return &Syncer{
 		hns:          hns,
-		sm:           sm,
 		fm:           fm,
-		storeWorkers: storeWorkers,
+		sm:           sm,
 		event_center: event_center,
 	}
 }
 
 func (s *Syncer) Run() {
+
+	s.event_center.Run()
+	s.sm.Run()
+	s.fm.Run()
+
 	for _, hn := range s.hns {
 		hn.Run()
 	}
-
-	for _, sw := range s.storeWorkers {
-		sw.Run()
-	}
-
-	s.fm.Run()
-	s.sm.Run()
-
-	s.event_center.Run()
 }
 
 func loadStartBlock(clients []*rpc.Client, db *gorm.DB, startHeight uint64, reversibleBlocks int) []*fetch.BlockDigest {
