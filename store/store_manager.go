@@ -1,8 +1,9 @@
 package store
 
 import (
-	"os"
+	"encoding/json"
 	"sync_eth/model"
+	"sync_eth/protocol"
 	"sync_eth/types"
 	"time"
 
@@ -69,57 +70,99 @@ func (sm *StoreManager) Run() {
 
 	go func() {
 		for op := range sm.storeOperationChannel {
-			if op.Type == types.StoreApply {
+			switch op.Type {
+			case types.StoreApply:
 				data := op.Data.(*types.StoreApplyData)
 				height := data.FullBlock.Block.Height
 
-				storageFullBlock := convertFullBlock(data.FullBlock)
+				storageFullBlock := convertStorageFullBlock(data.FullBlock)
+				protocolFullBlock := convertProtocolFullBlock(data.FullBlock)
 
-				if err := StoreFullBlock(sm.db, storageFullBlock, sm.batchSize, sm.storeTaskChannel, sm.storeCompleteChannel); err != nil {
-					logrus.Errorf("write fullblock failed. height:%v err:%v", height, err)
-					os.Exit(0)
+				var id uint64
+				tryCount := 0
+				var err error
+				for {
+					tryCount++
+					startTime := time.Now()
+
+					if id, err = StoreFullBlock(sm.db, storageFullBlock, protocolFullBlock, sm.batchSize, sm.storeTaskChannel, sm.storeCompleteChannel); err != nil {
+						logrus.Errorf("db revert failed. wait retry. height:%v err:%v tryCount:%v", height, err, tryCount)
+						time.Sleep(3 * time.Second)
+						continue
+					}
+
+					prevHash := data.FullBlock.Block.ParentHash
+					blockHash := data.FullBlock.Block.BlockHash
+
+					logrus.Infof("store fullblock success. height:%v hash:%v prev_hash:%v cost:%v",
+						height, blockHash, prevHash, time.Since(startTime).String())
+
+					publishOperation := &types.PublishOperation{
+						Type: types.PublishApply,
+						Data: &types.PublishApplyData{
+							Id:                id,
+							Height:            height,
+							ProtocolFullBlock: protocolFullBlock,
+						},
+					}
+					sm.publishOperationChannel <- publishOperation
+					break
 				}
 
-				publishOperation := &types.PublishOperation{
-					Type: types.PublishApply,
-					Data: &types.PublishApplyData{
-						FullBlock: data.FullBlock,
-					},
-				}
-				sm.publishOperationChannel <- publishOperation
-
-			} else if op.Type == types.StoreRollback {
+			case types.StoreRollback:
 				data := op.Data.(*types.StoreRollbackData)
 				height := data.Height
 
 				tryCount := 0
 				for {
 					tryCount++
+					startTime := time.Now()
 
-					if err := Revert(sm.db, height); err == nil {
-						break
+					if err := Revert(sm.db, height); err != nil {
+						logrus.Errorf("db revert failed. wait retry. height:%v err:%v tryCount:%v", height, err, tryCount)
+						time.Sleep(3 * time.Second)
+						continue
 					}
 
-					time.Sleep(1 * time.Second)
-					if tryCount >= 2 {
-						logrus.Errorf("db revert out of try count. height:%v", height)
-						os.Exit(0)
+					logrus.Infof("store revert success. height:%v cost:%v",
+						height, time.Since(startTime).String())
+
+					publishOperation := &types.PublishOperation{
+						Type: types.PublishRollback,
+						Data: &types.PublishRollbackData{
+							Height: height,
+						},
 					}
+					sm.publishOperationChannel <- publishOperation
+					break
 				}
 
-				publishOperation := &types.PublishOperation{
-					Type: types.PublishRollback,
-					Data: &types.PublishRollbackData{
-						Height: height,
-					},
+			case types.StorePublishSuccess:
+				data := op.Data.(*types.StorePublishSuccessData)
+				id := data.Id
+				height := data.Height
+
+				tryCount := 0
+				for {
+					tryCount++
+					startTime := time.Now()
+
+					if err := sm.db.Delete(&model.PublishAction{}, id).Error; err != nil {
+						logrus.Errorf("delete publish action failed. id:%v err:%v tryCount:%v", id, err, tryCount)
+						time.Sleep(3 * time.Second)
+						continue
+					}
+
+					logrus.Infof("delete publish action success. height:%v cost:%v",
+						height, time.Since(startTime).String())
+					break
 				}
-				sm.publishOperationChannel <- publishOperation
 			}
 		}
 	}()
 }
 
-func convertFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
+func convertStorageFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 	blockHeight := fullblock.Block.Height
 	modelBlock := model.Block{
 		Height:          fullblock.Block.Height,
@@ -348,4 +391,91 @@ func convertFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 		BalanceErc20List:         balanceErc20List,
 		BalanceErc1155List:       balanceErc1155List,
 	}
+}
+
+func convertProtocolFullBlock(fullblock *types.FullBlock) []byte {
+	txList := make([]*protocol.Tx, 0, len(fullblock.TxList))
+	for _, tx := range fullblock.TxList {
+		txList = append(txList, (*protocol.Tx)(tx))
+	}
+
+	txInternalList := make([]*protocol.TxInternal, 0, len(fullblock.TxInternalList))
+	for _, txInternal := range fullblock.TxInternalList {
+		txInternalList = append(txInternalList, (*protocol.TxInternal)(txInternal))
+	}
+
+	eventLogList := make([]*protocol.EventLog, 0, len(fullblock.EventLogList))
+	for _, log := range fullblock.EventLogList {
+		eventLogList = append(eventLogList, (*protocol.EventLog)(log))
+	}
+
+	eventErc20TransferList := make([]*protocol.EventErc20Transfer, 0, len(fullblock.EventErc20TransferList))
+	for _, transfer := range fullblock.EventErc20TransferList {
+		eventErc20TransferList = append(eventErc20TransferList, (*protocol.EventErc20Transfer)(transfer))
+	}
+
+	eventErc721TransferList := make([]*protocol.EventErc721Transfer, 0, len(fullblock.EventErc721TransferList))
+	for _, transfer := range fullblock.EventErc721TransferList {
+		eventErc721TransferList = append(eventErc721TransferList, (*protocol.EventErc721Transfer)(transfer))
+	}
+
+	eventErc1155TransferList := make([]*protocol.EventErc1155Transfer, 0, len(fullblock.EventErc1155TransferList))
+	for _, transfer := range fullblock.EventErc1155TransferList {
+		eventErc1155TransferList = append(eventErc1155TransferList, (*protocol.EventErc1155Transfer)(transfer))
+	}
+
+	tokenErc721List := make([]*protocol.TokenErc721, 0, len(fullblock.TokenErc721List))
+	for _, token := range fullblock.TokenErc721List {
+		tokenErc721List = append(tokenErc721List, (*protocol.TokenErc721)(token))
+	}
+
+	contractList := make([]*protocol.Contract, 0, len(fullblock.ContractList))
+	for _, contract := range fullblock.ContractList {
+		contractList = append(contractList, (*protocol.Contract)(contract))
+	}
+
+	contractErc20List := make([]*protocol.ContractErc20, 0, len(fullblock.ContractErc20List))
+	for _, contract := range fullblock.ContractErc20List {
+		contractErc20List = append(contractErc20List, (*protocol.ContractErc20)(contract))
+	}
+
+	contractErc721List := make([]*protocol.ContractErc721, 0, len(fullblock.ContractErc721List))
+	for _, contract := range fullblock.ContractErc721List {
+		contractErc721List = append(contractErc721List, (*protocol.ContractErc721)(contract))
+	}
+
+	balanceNativeList := make([]*protocol.BalanceNative, 0, len(fullblock.BalanceNativeList))
+	for _, balance := range fullblock.BalanceNativeList {
+		balanceNativeList = append(balanceNativeList, (*protocol.BalanceNative)(balance))
+	}
+
+	balanceErc20List := make([]*protocol.BalanceErc20, 0, len(fullblock.BalanceErc20List))
+	for _, balance := range fullblock.BalanceErc20List {
+		balanceErc20List = append(balanceErc20List, (*protocol.BalanceErc20)(balance))
+	}
+
+	balanceErc1155List := make([]*protocol.BalanceErc1155, 0, len(fullblock.BalanceErc1155List))
+	for _, balance := range fullblock.BalanceErc1155List {
+		balanceErc1155List = append(balanceErc1155List, (*protocol.BalanceErc1155)(balance))
+	}
+
+	protocolFullBlock := &protocol.FullBlock{
+		Block:                    (*protocol.Block)(fullblock.Block),
+		TxList:                   txList,
+		TxInternalList:           txInternalList,
+		EventLogList:             eventLogList,
+		EventErc20TransferList:   eventErc20TransferList,
+		EventErc721TransferList:  eventErc721TransferList,
+		EventErc1155TransferList: eventErc1155TransferList,
+		TokenErc721List:          tokenErc721List,
+		ContractList:             contractList,
+		ContractErc20List:        contractErc20List,
+		ContractErc721List:       contractErc721List,
+		BalanceNativeList:        balanceNativeList,
+		BalanceErc20List:         balanceErc20List,
+		BalanceErc1155List:       balanceErc1155List,
+	}
+
+	data, _ := json.Marshal(protocolFullBlock)
+	return data
 }

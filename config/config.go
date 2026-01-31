@@ -32,6 +32,13 @@ type Store struct {
 	AutoCreateTables bool   `mapstructure:"auto_create_tables"`
 }
 
+type Publish struct {
+	Enable       bool     `mapstructure:"enable"`
+	KafkaBrokers []string `mapstructure:"kafka_servers"`
+	Topic        string   `mapstructure:"topic"`
+	ChannelSize  int      `mapstructure:"channel_size"`
+}
+
 type stdout struct {
 	Enable bool `mapstructure:"enable"`
 	Level  int  `mapstructure:"level"`
@@ -57,11 +64,12 @@ type Log struct {
 }
 
 type Config struct {
-	AppName string `mapstructure:"stdout"`
-	Chain   Chain  `mapstructure:"chain"`
-	Fetch   Fetch  `mapstructure:"fetch"`
-	Store   Store  `mapstructure:"store"`
-	Log     Log    `mapstructure:"log"`
+	AppName string  `mapstructure:"stdout"`
+	Chain   Chain   `mapstructure:"chain"`
+	Fetch   Fetch   `mapstructure:"fetch"`
+	Store   Store   `mapstructure:"store"`
+	Publish Publish `mapstructure:"publish"`
+	Log     Log     `mapstructure:"log"`
 }
 
 func readConfig(filename string, v *viper.Viper) error {

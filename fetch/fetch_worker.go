@@ -6,7 +6,6 @@ import (
 	"math/big"
 	"os"
 	"strings"
-	"sync_eth/protocol"
 	"sync_eth/types"
 	"sync_eth/util"
 	"time"
@@ -181,7 +180,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	difficulty := big.NewInt(0)
 	totalDifficulty := big.NewInt(0)
 
-	blk := &protocol.Block{
+	blk := &types.Block{
 		Height:         hexutil.MustDecodeUint64(blkJson.Number),
 		BlockHash:      blkJson.Hash,
 		ParentHash:     blkJson.ParentHash,
@@ -260,7 +259,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	balanceNativeAddress := make(map[string]struct{}, 0)
 	balanceErc20Address := make(map[string]map[string]struct{}, 0)
 
-	contractList := make([]*protocol.Contract, 0, len(txContractList)+len(txInternalContractList))
+	contractList := make([]*types.Contract, 0, len(txContractList)+len(txInternalContractList))
 	contractList = append(contractList, txContractList...)
 	contractList = append(contractList, txInternalContractList...)
 
@@ -291,7 +290,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	}
 
 	// fetch native token balance whose balance is changed
-	var balanceNativeList []*protocol.BalanceNative = nil
+	var balanceNativeList []*types.BalanceNative = nil
 	{
 		balances := make([]*BalanceNative, 0)
 		for addr := range balanceNativeAddress {
@@ -305,9 +304,9 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 			return nil
 		}
 
-		balanceNativeList = make([]*protocol.BalanceNative, 0, len(balances))
+		balanceNativeList = make([]*types.BalanceNative, 0, len(balances))
 		for _, v := range balances {
-			balanceNative := &protocol.BalanceNative{
+			balanceNative := &types.BalanceNative{
 				Addr:    v.Addr.Hex(),
 				Balance: decimal.NewFromBigInt(v.ValueHexBig.ToInt(), 0),
 			}
@@ -316,7 +315,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	}
 
 	// fetch erc20 token balance whose balance is changed
-	var balanceErc20List []*protocol.BalanceErc20 = nil
+	var balanceErc20List []*types.BalanceErc20 = nil
 	{
 		balancesErc20 := make([]*BalanceErc20, 0)
 		for addr, v := range balanceErc20Address {
@@ -333,10 +332,10 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 			return nil
 		}
 
-		balanceErc20List = make([]*protocol.BalanceErc20, 0, len(balancesErc20))
+		balanceErc20List = make([]*types.BalanceErc20, 0, len(balancesErc20))
 
 		for _, v := range balancesErc20 {
-			balanceErc20 := &protocol.BalanceErc20{
+			balanceErc20 := &types.BalanceErc20{
 				Addr:         v.Addr.Hex(),
 				ContractAddr: v.ContractAddr.Hex(),
 				Balance:      decimal.NewFromBigInt(v.Value, 0),
@@ -346,7 +345,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	}
 
 	// get new erc20 contract info
-	contractErc20List := make([]*protocol.ContractErc20, 0, len(erc20ContractAddrs))
+	contractErc20List := make([]*types.ContractErc20, 0, len(erc20ContractAddrs))
 	{
 		// TODO check if in database
 		for k, txHash := range erc20ContractAddrs {
@@ -365,7 +364,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	}
 
 	// get new erc721 contract info
-	contractErc721List := make([]*protocol.ContractErc721, 0, len(erc721ContractAddrs))
+	contractErc721List := make([]*types.ContractErc721, 0, len(erc721ContractAddrs))
 	{
 		// TODO check if in database
 
@@ -386,7 +385,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 
 	fmt.Println("erc1155 contract count:", len(txBalanceErc1155Address))
 
-	balanceErc1155List := make([]*protocol.BalanceErc1155, 0)
+	balanceErc1155List := make([]*types.BalanceErc1155, 0)
 
 	fullblock := &types.FullBlock{
 		Block:                    blk,
@@ -411,17 +410,17 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 }
 
 func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, height uint64, baseFee *big.Int) (
-	[]*protocol.Tx, []*protocol.EventLog, []*protocol.EventErc20Transfer, []*protocol.EventErc721Transfer, []*protocol.EventErc1155Transfer, []*protocol.TokenErc721, []*protocol.Contract,
+	[]*types.Tx, []*types.EventLog, []*types.EventErc20Transfer, []*types.EventErc721Transfer, []*types.EventErc1155Transfer, []*types.TokenErc721, []*types.Contract,
 	map[string]*TxJson, map[string]struct{}, map[string]map[string]struct{}, map[string]map[string]map[string]struct{}, map[string]string, map[string]string,
 ) {
 
-	txList := make([]*protocol.Tx, 0, len(jsonTxList))
-	eventLogList := make([]*protocol.EventLog, 0)
-	eventErc20TransferList := make([]*protocol.EventErc20Transfer, 0)
-	eventErc721TransferList := make([]*protocol.EventErc721Transfer, 0)
-	eventErc1155TransferList := make([]*protocol.EventErc1155Transfer, 0)
-	tokenErc721List := make([]*protocol.TokenErc721, 0)
-	contractList := make([]*protocol.Contract, 0)
+	txList := make([]*types.Tx, 0, len(jsonTxList))
+	eventLogList := make([]*types.EventLog, 0)
+	eventErc20TransferList := make([]*types.EventErc20Transfer, 0)
+	eventErc721TransferList := make([]*types.EventErc721Transfer, 0)
+	eventErc1155TransferList := make([]*types.EventErc1155Transfer, 0)
+	tokenErc721List := make([]*types.TokenErc721, 0)
+	contractList := make([]*types.Contract, 0)
 
 	txSet := make(map[string]*TxJson, 0)
 	balanceNativeAddress := make(map[string]struct{}, 0)
@@ -448,7 +447,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 		if toHex == "" || toHex == "0x" || receipt.ContractAddress.Hex() != util.ZeroAddress {
 			if receipt.Status == 1 {
 				isCreateContract = true
-				contract := &protocol.Contract{
+				contract := &types.Contract{
 					TxHash:       txHash,
 					ContractAddr: strings.ToLower(receipt.ContractAddress.Hex()),
 					CreatorAddr:  fromAddr,
@@ -492,7 +491,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 		}
 
 		// tx
-		tx := &protocol.Tx{
+		tx := &types.Tx{
 			TxType:               int(txType),
 			TxHash:               txHash,
 			TxIndex:              int(txIndex),
@@ -540,7 +539,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 			contractAddr := strings.ToLower(txLog.Address.Hex())
 
 			// event log
-			eventLog := &protocol.EventLog{
+			eventLog := &types.EventLog{
 				TxHash:       txHash,
 				TopicCount:   len(txLog.Topics),
 				Topic0:       topic0,
@@ -581,7 +580,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 				}
 				amount, _ := decimal.NewFromString(tokenCnt)
 
-				eventErc20Transfer := &protocol.EventErc20Transfer{
+				eventErc20Transfer := &types.EventErc20Transfer{
 					TxHash:       txHash,
 					ContractAddr: contractAddr,
 					From:         sender,
@@ -607,7 +606,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 				tokenId := common.HexToHash(topic3).Big().String()
 
 				// tx erc721
-				eventErc721Transfer := &protocol.EventErc721Transfer{
+				eventErc721Transfer := &types.EventErc721Transfer{
 					TxHash:       txHash,
 					ContractAddr: contractAddr,
 					From:         sender,
@@ -618,7 +617,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 				eventErc721TransferList = append(eventErc721TransferList, eventErc721Transfer)
 
 				// token erc721
-				tokenErc721 := &protocol.TokenErc721{
+				tokenErc721 := &types.TokenErc721{
 					ContractAddr:  contractAddr,
 					TokenId:       tokenId,
 					OwnerAddr:     receiver,
@@ -667,7 +666,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 				}
 				amount, _ := decimal.NewFromString(tokenCnt)
 
-				eventErc1155Transfer := &protocol.EventErc1155Transfer{
+				eventErc1155Transfer := &types.EventErc1155Transfer{
 					TxHash:       txHash,
 					ContractAddr: contractAddr,
 					Operator:     operator,
@@ -718,7 +717,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 					}
 					amount, _ := decimal.NewFromString(tokenCnt)
 
-					eventErc1155Transfer := &protocol.EventErc1155Transfer{
+					eventErc1155Transfer := &types.EventErc1155Transfer{
 						TxHash:       txHash,
 						ContractAddr: contractAddr,
 						Operator:     operator,
@@ -738,9 +737,9 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 	return txList, eventLogList, eventErc20TransferList, eventErc721TransferList, eventErc1155TransferList, tokenErc721List, contractList, txSet, balanceNativeAddress, balanceErc20Address, balanceErc1155Address, erc20ContractAddrs, erc721ContractAddrs
 }
 
-func parseTxInternal(jsonTxInternalList []*TxInternalJson, height uint64) ([]*protocol.TxInternal, []*protocol.Contract, map[string]struct{}, map[string]map[string]struct{}) {
-	txInternalList := make([]*protocol.TxInternal, 0)
-	contractList := make([]*protocol.Contract, 0)
+func parseTxInternal(jsonTxInternalList []*TxInternalJson, height uint64) ([]*types.TxInternal, []*types.Contract, map[string]struct{}, map[string]map[string]struct{}) {
+	txInternalList := make([]*types.TxInternal, 0)
+	contractList := make([]*types.Contract, 0)
 
 	balanceAddress := make(map[string]struct{}, 0)
 	balanceErc20Address := make(map[string]map[string]struct{}, 0)
@@ -757,7 +756,7 @@ func parseTxInternal(jsonTxInternalList []*TxInternalJson, height uint64) ([]*pr
 					if tiLog.To == util.ZeroAddress {
 						logrus.Fatal("internal tx empty txhash:%v from:%v to:%v", txHash, fromAddr, toAddr)
 					}
-					contract := &protocol.Contract{
+					contract := &types.Contract{
 						TxHash:       txHash,
 						ContractAddr: toAddr,
 						CreatorAddr:  fromAddr,
@@ -767,7 +766,7 @@ func parseTxInternal(jsonTxInternalList []*TxInternalJson, height uint64) ([]*pr
 				}
 			}
 
-			modelTxInternal := &protocol.TxInternal{
+			modelTxInternal := &types.TxInternal{
 				TxHash:       txHash,
 				Index:        tiIdx,
 				From:         fromAddr,
@@ -937,7 +936,7 @@ func toCallArg(msg ethereum.CallMsg) interface{} {
 	return arg
 }
 
-func fetchContractErc20(client *rpc.Client, addr *common.Address, height uint64) (*protocol.ContractErc20, error) {
+func fetchContractErc20(client *rpc.Client, addr *common.Address, height uint64) (*types.ContractErc20, error) {
 	methods := []string{"name", "symbol", "decimals", "totalSupply"}
 	elems := make([]rpc.BatchElem, 0)
 	for _, method := range methods {
@@ -972,7 +971,7 @@ func fetchContractErc20(client *rpc.Client, addr *common.Address, height uint64)
 		return nil, fmt.Errorf("get erc20 info height too low")
 	}
 
-	contractErc20 := &protocol.ContractErc20{}
+	contractErc20 := &types.ContractErc20{}
 	contractErc20.ContractAddr = strings.ToLower(addr.Hex())
 
 	for i, elem := range elems {
@@ -1055,7 +1054,7 @@ func toCallArg2(msg ethereum.CallMsg) interface{} {
 	return arg
 }
 
-func fetchContractErc721(client *rpc.Client, addr *common.Address) (*protocol.ContractErc721, error) {
+func fetchContractErc721(client *rpc.Client, addr *common.Address) (*types.ContractErc721, error) {
 	methods := []string{"name", "symbol"}
 	elems := make([]rpc.BatchElem, 0)
 	for _, method := range methods {
@@ -1078,7 +1077,7 @@ func fetchContractErc721(client *rpc.Client, addr *common.Address) (*protocol.Co
 		return nil, fmt.Errorf("batch call get erc721 info failed. err:%v addr:%v", err, addr.Hex())
 	}
 
-	contractErc721 := &protocol.ContractErc721{}
+	contractErc721 := &types.ContractErc721{}
 	contractErc721.ContractAddr = strings.ToLower(addr.Hex())
 
 	for i, elem := range elems {

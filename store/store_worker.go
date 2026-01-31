@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"sync_eth/model"
+	"sync_eth/types"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -48,8 +49,7 @@ func Revert(db *gorm.DB, height uint64) error {
 	return nil
 }
 
-func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, batchSize int, storeTaskChannel chan *StoreTask, storeCompleteChannel chan *StoreComplete) error {
-	startTime := time.Now()
+func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, protocolFullBlock []byte, batchSize int, storeTaskChannel chan *StoreTask, storeCompleteChannel chan *StoreComplete) (uint64, error) {
 
 	height := fullblock.Block.Height
 
@@ -119,29 +119,43 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, batchSize int, sto
 	if err := grp.Wait(); err != nil {
 		logrus.Errorf("store fullblock failed %v %v", err, height)
 		panic("grp unknown error")
-		return err
+		return 0, err
 	}
 
 	if storeFailed {
 		logrus.Errorf("store fullblock failed %v", height)
-		return xerrors.New("store fullblock failed")
+		return 0, xerrors.New("store fullblock failed")
 	}
 
 	startTime2 := time.Now()
-	if err := db.Clauses(clause.OnConflict{UpdateAll: true}).Create(&fullblock.Block).Error; err != nil {
-		logrus.Errorf("store chain block failed %v", err)
-		return err
+
+	modelPublishAction := &model.PublishAction{
+		ActionType: int(types.PublishApply),
+		Data:       string(protocolFullBlock),
+		Height:     fullblock.Block.Height,
 	}
 
-	logrus.Debugf("store block. height:%v cost:%v", height, time.Since(startTime2).String())
+	if err := db.Transaction(func(tx *gorm.DB) error {
 
-	prevHash := fullblock.Block.ParentHash
-	blockHash := fullblock.Block.BlockHash
+		if err := db.Clauses(clause.OnConflict{UpdateAll: true}).Create(&fullblock.Block).Error; err != nil {
+			logrus.Errorf("store chain block failed %v", err)
+			return err
+		}
 
-	logrus.Infof("store success. height:%v hash:%v prev_hash:%v cost:%v",
-		height, blockHash, prevHash, time.Since(startTime).String())
+		if err := db.Create(modelPublishAction).Error; err != nil {
+			logrus.Errorf("store publish action failed %v", err)
+			return err
+		}
 
-	return nil
+		return nil
+	}); err != nil {
+		logrus.Errorf("store chain block failed %v", err)
+		return 0, err
+	}
+
+	logrus.Debugf("store block. height:%v cost:%v id:%v", height, time.Since(startTime2).String(), modelPublishAction.Id)
+
+	return modelPublishAction.Id, nil
 }
 
 func splitTask(taskType StoreTaskType, modelList []interface{}, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
