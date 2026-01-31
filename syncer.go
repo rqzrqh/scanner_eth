@@ -13,6 +13,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/segmentio/kafka-go"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
@@ -30,15 +31,16 @@ type Syncer struct {
 	event_center *event.EventCenter
 }
 
-func newSyncer(clients []*rpc.Client, db *gorm.DB, reversibleBlocks int, storeChannelSize int, storeBatchSize int, storeWorkerCount int, startHeight uint64, endHeight uint64) *Syncer {
+func newSyncer(clients []*rpc.Client, db *gorm.DB, w *kafka.Writer, reversibleBlocks int, storeChannelSize int, storeBatchSize int, storeWorkerCount int, startHeight uint64, endHeight uint64) *Syncer {
 
 	logrus.Infof("reversibleBlocks:%v storeChannelSize:%v storeBatchSize:%v storeWorkerCount:%v startHeight:%v endHeight:%v",
 		reversibleBlocks, storeChannelSize, storeBatchSize, storeWorkerCount, startHeight, endHeight)
 
-	publishOperationChannel := make(chan *types.PublishOperation, 100)
-	event_center := event.NewEventCenter(publishOperationChannel)
-
 	storeOperationChannel := make(chan *types.StoreOperation, storeChannelSize)
+
+	publishOperationChannel := make(chan *types.PublishOperation, 100)
+	event_center := event.NewEventCenter(w, publishOperationChannel, storeOperationChannel)
+
 	sm := store.NewStoreManager(db, storeBatchSize, storeWorkerCount, storeOperationChannel, publishOperationChannel)
 
 	remoteChainUpdateChannel := make(chan *types.RemoteChainUpdate, 100)
@@ -51,8 +53,6 @@ func newSyncer(clients []*rpc.Client, db *gorm.DB, reversibleBlocks int, storeCh
 	for i, client := range clients {
 		hns[i] = fetch.NewHeaderNotifier(i, client, remoteChainUpdateChannel)
 	}
-
-	fetch.InitAbi()
 
 	return &Syncer{
 		hns:          hns,

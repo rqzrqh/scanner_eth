@@ -16,6 +16,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/segmentio/kafka-go"
 	"github.com/sirupsen/logrus"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -87,6 +88,7 @@ func main() {
 
 	if err := db.AutoMigrate(
 		&model.ChainInfo{},
+		&model.PublishAction{},
 		&model.Block{},
 		&model.Tx{},
 		&model.TxInternal{},
@@ -147,7 +149,20 @@ func main() {
 
 	logrus.Infof("node chain info check passed")
 
-	s := newSyncer(clients, db, conf.Chain.ReversibleBlocks, conf.Store.ChannelSize, conf.Store.BatchSize, conf.Store.WorkerCount, conf.Fetch.StartHeight, conf.Fetch.EndHeight)
+	w := &kafka.Writer{
+		Addr:         kafka.TCP(conf.Publish.KafkaBrokers...),
+		Topic:        conf.Publish.Topic,
+		Balancer:     &kafka.LeastBytes{},
+		BatchSize:    100,
+		BatchBytes:   1024 * 1024,
+		BatchTimeout: 1 * time.Second,
+		Async:        true,
+		RequiredAcks: kafka.RequireOne,
+		Compression:  kafka.Snappy,
+	}
+	//err = w.Close()
+
+	s := newSyncer(clients, db, w, conf.Chain.ReversibleBlocks, conf.Store.ChannelSize, conf.Store.BatchSize, conf.Store.WorkerCount, conf.Fetch.StartHeight, conf.Fetch.EndHeight)
 
 	leaseAlive()
 	s.Run()

@@ -4,9 +4,10 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-type ProtocolFullBlock struct {
+type FullBlock struct {
 	Block                    *Block                  `json:"block"`
 	TxList                   []*Tx                   `json:"tx_list"`
+	TxInternalList           []*TxInternal           `json:"tx_internal_list"`
 	EventLogList             []*EventLog             `json:"event_log_list"`
 	EventErc20TransferList   []*EventErc20Transfer   `json:"event_erc20_transfer_list"`
 	EventErc721TransferList  []*EventErc721Transfer  `json:"event_erc721_transfer_list"`

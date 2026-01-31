@@ -13,7 +13,9 @@ type PublishOperation struct {
 }
 
 type PublishApplyData struct {
-	FullBlock *FullBlock
+	Id                uint64
+	Height            uint64
+	ProtocolFullBlock []byte
 }
 
 type PublishRollbackData struct {
