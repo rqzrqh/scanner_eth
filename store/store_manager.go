@@ -32,16 +32,17 @@ type StorageFullBlock struct {
 }
 
 type StoreManager struct {
-	db                      *gorm.DB
-	batchSize               int
-	storeOperationChannel   chan *types.StoreOperation
-	storeTaskChannel        chan *StoreTask
-	storeCompleteChannel    chan *StoreComplete
-	publishOperationChannel chan<- *types.PublishOperation
-	storeWorkers            []*StoreWorker
+	db                              *gorm.DB
+	batchSize                       int
+	storeOperationChannel           chan *types.StoreOperation
+	publishFeedbackOperationChannel <-chan *types.PublishFeedbackOperation
+	storeTaskChannel                chan *StoreTask
+	storeCompleteChannel            chan *StoreComplete
+	publishOperationChannel         chan<- *types.PublishOperation
+	storeWorkers                    []*StoreWorker
 }
 
-func NewStoreManager(db *gorm.DB, batchSize int, storeWorkerCount int, storeOperationChannel chan *types.StoreOperation,
+func NewStoreManager(db *gorm.DB, batchSize int, storeWorkerCount int, storeOperationChannel chan *types.StoreOperation, publishFeedbackOperationChannel <-chan *types.PublishFeedbackOperation,
 	publishOperationChannel chan<- *types.PublishOperation) *StoreManager {
 
 	storeTaskChannel := make(chan *StoreTask, 10)
@@ -54,13 +55,14 @@ func NewStoreManager(db *gorm.DB, batchSize int, storeWorkerCount int, storeOper
 	}
 
 	return &StoreManager{
-		db:                      db,
-		batchSize:               batchSize,
-		storeOperationChannel:   storeOperationChannel,
-		storeTaskChannel:        storeTaskChannel,
-		storeCompleteChannel:    storeCompleteChannel,
-		publishOperationChannel: publishOperationChannel,
-		storeWorkers:            storeWorkers,
+		db:                              db,
+		batchSize:                       batchSize,
+		storeOperationChannel:           storeOperationChannel,
+		publishFeedbackOperationChannel: publishFeedbackOperationChannel,
+		storeTaskChannel:                storeTaskChannel,
+		storeCompleteChannel:            storeCompleteChannel,
+		publishOperationChannel:         publishOperationChannel,
+		storeWorkers:                    storeWorkers,
 	}
 }
 
@@ -70,96 +72,96 @@ func (sm *StoreManager) Run() {
 	}
 
 	go func() {
-		for op := range sm.storeOperationChannel {
-			switch op.Type {
-			case types.StoreApply:
-				data := op.Data.(*types.StoreApplyData)
-				height := data.FullBlock.Block.Height
 
-				storageFullBlock := convertStorageFullBlock(data.FullBlock)
-				protocolFullBlock := convertProtocolFullBlock(data.FullBlock)
-				var protocolFullBlockData []byte
-				var err error
-				if protocolFullBlockData, err = json.Marshal(protocolFullBlock); err != nil {
-					logrus.Errorf("marshal protocol fullblock failed. height:%v err:%v", height, err)
-					os.Exit(0)
+		for {
+			select {
+			case op := <-sm.storeOperationChannel:
+				switch op.Type {
+				case types.StoreApply:
+					fullblock := op.FullBlock
+					height := op.Height
+
+					storageFullBlock := convertStorageFullBlock(fullblock)
+					protocolFullBlock := convertProtocolFullBlock(fullblock)
+					var protocolFullBlockData []byte
+					var err error
+					if protocolFullBlockData, err = json.Marshal(protocolFullBlock); err != nil {
+						logrus.Errorf("marshal protocol fullblock failed. height:%v err:%v", height, err)
+						os.Exit(0)
+					}
+
+					tryCount := 0
+					for {
+						tryCount++
+						startTime := time.Now()
+
+						var publishActionRecordId uint64
+						if publishActionRecordId, err = StoreFullBlock(sm.db, storageFullBlock, protocolFullBlockData, sm.batchSize, sm.storeTaskChannel, sm.storeCompleteChannel); err != nil {
+							logrus.Errorf("store fullblock failed. wait retry. height:%v err:%v tryCount:%v", height, err, tryCount)
+							time.Sleep(3 * time.Second)
+							continue
+						}
+
+						prevHash := fullblock.Block.ParentHash
+						blockHash := fullblock.Block.BlockHash
+
+						logrus.Infof("store fullblock success. height:%v hash:%v prev_hash:%v cost:%v",
+							height, blockHash, prevHash, time.Since(startTime).String())
+
+						publishOperation := &types.PublishOperation{
+							Type:              types.PublishApply,
+							Id:                publishActionRecordId,
+							Height:            height,
+							ProtocolFullBlock: protocolFullBlockData,
+						}
+						sm.publishOperationChannel <- publishOperation
+						break
+					}
+
+				case types.StoreRollback:
+					height := op.Height
+
+					var err error
+					tryCount := 0
+					for {
+						tryCount++
+						startTime := time.Now()
+
+						var publishActionRecordId uint64
+						if publishActionRecordId, err = Revert(sm.db, height); err != nil {
+							logrus.Errorf("store revert failed. wait retry. height:%v err:%v tryCount:%v", height, err, tryCount)
+							time.Sleep(3 * time.Second)
+							continue
+						}
+
+						logrus.Infof("store revert success. height:%v cost:%v",
+							height, time.Since(startTime).String())
+
+						publishOperation := &types.PublishOperation{
+							Type:   types.PublishRollback,
+							Id:     publishActionRecordId,
+							Height: height,
+						}
+						sm.publishOperationChannel <- publishOperation
+						break
+					}
 				}
+			case op := <-sm.publishFeedbackOperationChannel:
+				id := op.Id
+				height := op.Height
 
-				var publishActionRecordId uint64
 				tryCount := 0
 				for {
 					tryCount++
 					startTime := time.Now()
 
-					if publishActionRecordId, err = StoreFullBlock(sm.db, storageFullBlock, protocolFullBlockData, sm.batchSize, sm.storeTaskChannel, sm.storeCompleteChannel); err != nil {
-						logrus.Errorf("db revert failed. wait retry. height:%v err:%v tryCount:%v", height, err, tryCount)
+					if err := sm.db.Delete(&model.ChainBinlog{}, id).Error; err != nil {
+						logrus.Errorf("delete chain binlog failed. id:%v err:%v tryCount:%v", id, err, tryCount)
 						time.Sleep(3 * time.Second)
 						continue
 					}
 
-					prevHash := data.FullBlock.Block.ParentHash
-					blockHash := data.FullBlock.Block.BlockHash
-
-					logrus.Infof("store fullblock success. height:%v hash:%v prev_hash:%v cost:%v",
-						height, blockHash, prevHash, time.Since(startTime).String())
-
-					publishOperation := &types.PublishOperation{
-						Type:              types.PublishApply,
-						Id:                publishActionRecordId,
-						Height:            height,
-						ProtocolFullBlock: protocolFullBlockData,
-					}
-					sm.publishOperationChannel <- publishOperation
-					break
-				}
-
-			case types.StoreRollback:
-				data := op.Data.(*types.StoreRollbackData)
-				height := data.Height
-
-				tryCount := 0
-				for {
-					tryCount++
-					startTime := time.Now()
-					// TODO: get publishActionRecordId from db
-					var publishActionRecordId uint64
-					publishActionRecordId = 0
-
-					if err := Revert(sm.db, height); err != nil {
-						logrus.Errorf("db revert failed. wait retry. height:%v err:%v tryCount:%v", height, err, tryCount)
-						time.Sleep(3 * time.Second)
-						continue
-					}
-
-					logrus.Infof("store revert success. height:%v cost:%v",
-						height, time.Since(startTime).String())
-
-					publishOperation := &types.PublishOperation{
-						Type:   types.PublishRollback,
-						Id:     publishActionRecordId,
-						Height: height,
-					}
-					sm.publishOperationChannel <- publishOperation
-					break
-				}
-
-			case types.StorePublishSuccess:
-				data := op.Data.(*types.StorePublishSuccessData)
-				id := data.Id
-				height := data.Height
-
-				tryCount := 0
-				for {
-					tryCount++
-					startTime := time.Now()
-
-					if err := sm.db.Delete(&model.PublishAction{}, id).Error; err != nil {
-						logrus.Errorf("delete publish action failed. id:%v err:%v tryCount:%v", id, err, tryCount)
-						time.Sleep(3 * time.Second)
-						continue
-					}
-
-					logrus.Infof("delete publish action success. height:%v cost:%v",
+					logrus.Infof("delete chain binlog success. height:%v cost:%v",
 						height, time.Since(startTime).String())
 					break
 				}

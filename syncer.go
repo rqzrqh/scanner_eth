@@ -37,11 +37,12 @@ func newSyncer(clients []*rpc.Client, db *gorm.DB, w *kafka.Writer, reversibleBl
 		reversibleBlocks, storeChannelSize, storeBatchSize, storeWorkerCount, startHeight, endHeight)
 
 	storeOperationChannel := make(chan *types.StoreOperation, storeChannelSize)
+	publishFeedbackOperationChannel := make(chan *types.PublishFeedbackOperation, 100)
 
 	publishOperationChannel := make(chan *types.PublishOperation, 100)
-	pm := publish.NewPublishManager(w, publishOperationChannel, storeOperationChannel)
+	pm := publish.NewPublishManager(w, publishOperationChannel, publishFeedbackOperationChannel)
 
-	sm := store.NewStoreManager(db, storeBatchSize, storeWorkerCount, storeOperationChannel, publishOperationChannel)
+	sm := store.NewStoreManager(db, storeBatchSize, storeWorkerCount, storeOperationChannel, publishFeedbackOperationChannel, publishOperationChannel)
 
 	remoteChainUpdateChannel := make(chan *types.RemoteChainUpdate, 100)
 	maxUnorganizedBlockCount := 50 * len(clients)

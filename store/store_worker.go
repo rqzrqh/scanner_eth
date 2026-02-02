@@ -15,38 +15,90 @@ import (
 
 var taskCounter = uint64(0)
 
-func deleteData(db *gorm.DB, height uint64) error {
-	result := db.Where("height = ?", height).Delete(model.Block{})
-	if result.Error != nil {
-		logrus.Errorf("deleteData delete block failed %v %v", result.Error, height)
-		return result.Error
+func Revert(db *gorm.DB, height uint64) (uint64, error) {
+
+	modelChainBinlog := &model.ChainBinlog{
+		ActionType: int(types.PublishRollback),
+		Height:     height,
 	}
 
-	logrus.Infof("delete block affected count %v", result.RowsAffected)
+	if err := db.Transaction(func(tx *gorm.DB) error {
 
-	return nil
-}
+		// Delete Block
+		if err := tx.Delete(&model.Block{}, "height = ?", height).Error; err != nil {
+			logrus.Errorf("delete block failed %v", err)
+			return err
+		}
 
-func Restore(db *gorm.DB, height uint64) error {
-	if err := deleteData(db, height); err != nil {
-		logrus.Errorf("restore delete data failed.err:%v height:%v", err, height)
-		return err
-	}
+		// Delete Tx
+		if err := tx.Delete(&model.Tx{}, "height = ?", height).Error; err != nil {
+			logrus.Errorf("delete tx failed %v", err)
+			return err
+		}
 
-	logrus.Infof("database restore success height:%v", height)
+		// Delete TxInternal
+		if err := tx.Delete(&model.TxInternal{}, "height = ?", height).Error; err != nil {
+			logrus.Errorf("delete tx internal failed %v", err)
+			return err
+		}
 
-	return nil
-}
+		// Delete EventLog
+		if err := tx.Delete(&model.EventLog{}, "height = ?", height).Error; err != nil {
+			logrus.Errorf("delete event log failed %v", err)
+			return err
+		}
 
-func Revert(db *gorm.DB, height uint64) error {
-	if err := deleteData(db, height); err != nil {
-		logrus.Errorf("revert delete data failed. err:%v height:%v", err, height)
-		return err
+		// Delete EventErc20Transfer
+		if err := tx.Delete(&model.EventErc20Transfer{}, "height = ?", height).Error; err != nil {
+			logrus.Errorf("delete event erc20 transfer failed %v", err)
+			return err
+		}
+
+		// Delete EventErc721Transfer
+		if err := tx.Delete(&model.EventErc721Transfer{}, "height = ?", height).Error; err != nil {
+			logrus.Errorf("delete event erc721 transfer failed %v", err)
+			return err
+		}
+
+		// Delete EventErc1155Transfer
+		if err := tx.Delete(&model.EventErc1155Transfer{}, "height = ?", height).Error; err != nil {
+			logrus.Errorf("delete event erc1155 transfer failed %v", err)
+			return err
+		}
+		/*
+			// Delete Contract
+			if err := tx.Delete(&model.Contract{}, "height = ?", height).Error; err != nil {
+				logrus.Errorf("delete contract failed %v", err)
+				return err
+			}
+
+			// Delete ContractErc20
+			if err := tx.Delete(&model.ContractErc20{}, "height = ?", height).Error; err != nil {
+				logrus.Errorf("delete contract erc20 failed %v", err)
+				return err
+			}
+
+			// Delete ContractErc721
+			if err := tx.Delete(&model.ContractErc721{}, "height = ?", height).Error; err != nil {
+				logrus.Errorf("delete contract erc721 failed %v", err)
+				return err
+			}
+		*/
+		// Create ChainBinlog
+		if err := tx.Create(modelChainBinlog).Error; err != nil {
+			logrus.Errorf("store chain binlog failed %v", err)
+			return err
+		}
+
+		return nil
+	}); err != nil {
+		logrus.Errorf("store chain block failed %v", err)
+		return 0, err
 	}
 
 	logrus.Infof("database revert success height:%v", height)
 
-	return nil
+	return modelChainBinlog.Id, nil
 }
 
 func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, protocolFullBlock []byte, batchSize int, storeTaskChannel chan *StoreTask, storeCompleteChannel chan *StoreComplete) (uint64, error) {
@@ -118,7 +170,6 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, protocolFullBlock 
 
 	if err := grp.Wait(); err != nil {
 		logrus.Errorf("store fullblock failed %v %v", err, height)
-		panic("grp unknown error")
 		return 0, err
 	}
 
@@ -129,7 +180,7 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, protocolFullBlock 
 
 	startTime2 := time.Now()
 
-	modelPublishAction := &model.PublishAction{
+	modelChainBinlog := &model.ChainBinlog{
 		ActionType: int(types.PublishApply),
 		Height:     fullblock.Block.Height,
 		FullBlock:  string(protocolFullBlock),
@@ -142,8 +193,8 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, protocolFullBlock 
 			return err
 		}
 
-		if err := db.Create(modelPublishAction).Error; err != nil {
-			logrus.Errorf("store publish action failed %v", err)
+		if err := db.Create(modelChainBinlog).Error; err != nil {
+			logrus.Errorf("store chain binlog failed %v", err)
 			return err
 		}
 
@@ -153,9 +204,9 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, protocolFullBlock 
 		return 0, err
 	}
 
-	logrus.Debugf("store block. height:%v cost:%v id:%v", height, time.Since(startTime2).String(), modelPublishAction.Id)
+	logrus.Debugf("store block. height:%v cost:%v id:%v", height, time.Since(startTime2).String(), modelChainBinlog.Id)
 
-	return modelPublishAction.Id, nil
+	return modelChainBinlog.Id, nil
 }
 
 func splitTask(taskType StoreTaskType, modelList []interface{}, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {

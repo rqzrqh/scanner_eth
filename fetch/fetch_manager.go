@@ -72,10 +72,8 @@ func (fm *FetchManager) addBlock(data *types.FullBlock, forkVersion uint64) {
 			fm.localChain.Revert(currentHeight)
 
 			storeOperation := &types.StoreOperation{
-				Type: types.StoreRollback,
-				Data: &types.StoreRollbackData{
-					Height: currentHeight,
-				},
+				Type:   types.StoreRollback,
+				Height: currentHeight,
 			}
 			fm.storeOperationChannel <- storeOperation
 
@@ -85,10 +83,9 @@ func (fm *FetchManager) addBlock(data *types.FullBlock, forkVersion uint64) {
 			fm.pendingBlocks.removeData(nextHeight)
 			logrus.Infof("local chain grow. height:%v fork_version:%v event_id:%v", nextHeight, fm.forkVersion, fm.eventID)
 			storeOperation := &types.StoreOperation{
-				Type: types.StoreApply,
-				Data: &types.StoreApplyData{
-					FullBlock: fullblock,
-				},
+				Type:      types.StoreApply,
+				Height:    fullblock.Block.Height,
+				FullBlock: fullblock,
 			}
 			fm.storeOperationChannel <- storeOperation
 		}
