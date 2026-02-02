@@ -88,7 +88,7 @@ func main() {
 
 	if err := db.AutoMigrate(
 		&model.ChainInfo{},
-		&model.PublishAction{},
+		&model.ChainBinlog{},
 		&model.Block{},
 		&model.Tx{},
 		&model.TxInternal{},

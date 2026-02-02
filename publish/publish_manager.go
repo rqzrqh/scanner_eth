@@ -13,16 +13,16 @@ import (
 )
 
 type PublishManager struct {
-	w                       *kafka.Writer
-	publishOperationChannel <-chan *types.PublishOperation
-	storeOperationChannel   chan<- *types.StoreOperation
+	w                               *kafka.Writer
+	publishOperationChannel         <-chan *types.PublishOperation
+	publishFeedbackOperationChannel chan<- *types.PublishFeedbackOperation
 }
 
-func NewPublishManager(w *kafka.Writer, publishOperationChannel <-chan *types.PublishOperation, storeOperationChannel chan<- *types.StoreOperation) *PublishManager {
+func NewPublishManager(w *kafka.Writer, publishOperationChannel <-chan *types.PublishOperation, publishFeedbackOperationChannel chan<- *types.PublishFeedbackOperation) *PublishManager {
 	return &PublishManager{
-		w:                       w,
-		publishOperationChannel: publishOperationChannel,
-		storeOperationChannel:   storeOperationChannel,
+		w:                               w,
+		publishOperationChannel:         publishOperationChannel,
+		publishFeedbackOperationChannel: publishFeedbackOperationChannel,
 	}
 }
 
@@ -49,7 +49,7 @@ func (pm *PublishManager) Run() {
 					var protocolData []byte
 					var err error
 					if protocolData, err = json.Marshal(sannerData); err != nil {
-						logrus.Errorf("marshal protocol scanner data failed. height:%v err:%v", height, err)
+						logrus.Errorf("marshal protocol scanner data(apply) failed. height:%v err:%v", height, err)
 						os.Exit(0)
 					}
 
@@ -68,25 +68,56 @@ func (pm *PublishManager) Run() {
 							continue
 						}
 
-						logrus.Infof("publish fullblock success. height:%v id:%v cost:%v", height, id, time.Since(startTime).String())
+						logrus.Infof("publish success. height:%v id:%v cost:%v", height, id, time.Since(startTime).String())
 						break
 					}
 
 				case types.PublishRollback:
+					id = op.Id
+					height = op.Height
+
+					sannerData := protocol.ScannerData{
+						ActionType: protocol.ChainActionRollback,
+						Height:     height,
+					}
+
+					var protocolData []byte
+					var err error
+					if protocolData, err = json.Marshal(sannerData); err != nil {
+						logrus.Errorf("marshal protocol scanner data(rollback) failed. height:%v err:%v", height, err)
+						os.Exit(0)
+					}
+
+					tryCount := 0
+					for {
+						tryCount++
+						startTime := time.Now()
+
+						if err := pm.w.WriteMessages(context.Background(),
+							kafka.Message{
+								Value: protocolData,
+							},
+						); err != nil {
+							logrus.Errorf("failed to write messages. wait retry. height:%v err:%v tryCount:%v", height, err, tryCount)
+							time.Sleep(3 * time.Second)
+							continue
+						}
+
+						logrus.Infof("publish success. height:%v id:%v cost:%v", height, id, time.Since(startTime).String())
+						break
+					}
 
 				default:
 					logrus.Errorf("unknown publish operation type. type:%v", op.Type)
 					os.Exit(0)
 				}
 
-				storeOperation := &types.StoreOperation{
-					Type: types.StorePublishSuccess,
-					Data: &types.StorePublishSuccessData{
-						Id:     id,
-						Height: height,
-					},
+				publishFeedbackOperation := &types.PublishFeedbackOperation{
+					Id:     id,
+					Height: height,
 				}
-				pm.storeOperationChannel <- storeOperation
+
+				pm.publishFeedbackOperationChannel <- publishFeedbackOperation
 			}
 		}
 	}()
