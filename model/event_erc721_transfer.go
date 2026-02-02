@@ -3,12 +3,12 @@ package model
 type EventErc721Transfer struct {
 	Id           uint64 `gorm:"primaryKey:autoIncrement;comment:auto_inc_id"`
 	Height       uint64 `gorm:"index;type:bigint unsigned;comment:block_height"`
-	TxHash       string `gorm:"index;type:varchar(255);comment:tx_hash"`
+	TxHash       string `gorm:"index;uniqueIndex:txhash_logindex;type:varchar(255);comment:tx_hash"`
+	IndexInBlock uint   `gorm:"uniqueIndex:txhash_logindex;type:uint;comment:index_in_block"`
 	ContractAddr string `gorm:"index;type:varchar(255);comment:contract_addr"`
 	From         string `gorm:"index;type:varchar(255);comment:from"`
 	To           string `gorm:"index;type:varchar(255);comment:to"`
 	TokenId      string `gorm:"index;type:varchar(255);comment:token_id"`
-	Index        int    `gorm:"type:int;comment:index"`
 }
 
 func (EventErc721Transfer) TableName() string {

@@ -80,45 +80,46 @@ type TxInternal struct {
 
 type EventLog struct {
 	TxHash       string
+	IndexInTx    uint
+	IndexInBlock uint
 	ContractAddr string
-	TopicCount   int
+	TopicCount   uint
 	Topic0       string
 	Topic1       string
 	Topic2       string
 	Topic3       string
 	Data         string
-	Index        int
 }
 
 type EventErc20Transfer struct {
 	TxHash       string
+	IndexInBlock uint
 	ContractAddr string
 	From         string
 	To           string
 	Amount       decimal.Decimal
 	AmountOrigin string
-	Index        int
 }
 
 type EventErc721Transfer struct {
 	TxHash       string
+	IndexInBlock uint
 	ContractAddr string
 	From         string
 	To           string
 	TokenId      string
-	Index        int
 }
 
 type EventErc1155Transfer struct {
 	TxHash       string
+	IndexInBlock uint
+	IndexInBatch int
 	ContractAddr string
 	Operator     string
 	From         string
 	To           string
 	TokenId      string
 	Amount       decimal.Decimal
-	Index        int
-	IndexInBatch int
 }
 
 type TokenErc721 struct {
