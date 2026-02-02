@@ -102,42 +102,42 @@ type FullEventLog struct {
 }
 
 type EventLog struct {
+	IndexInBlock uint   `json:"index_in_block"`
 	ContractAddr string `json:"contract_addr"`
-	TopicCount   int    `json:"topic_count"`
+	TopicCount   uint   `json:"topic_count"`
 	Topic0       string `json:"topic0"`
 	Topic1       string `json:"topic1"`
 	Topic2       string `json:"topic2"`
 	Topic3       string `json:"topic3"`
 	Data         string `json:"data"`
-	Index        int    `json:"index"`
 }
 
 type EventErc20Transfer struct {
+	IndexInBlock uint            `json:"index_in_block"`
 	ContractAddr string          `json:"contract_addr"`
 	From         string          `json:"from"`
 	To           string          `json:"to"`
 	Amount       decimal.Decimal `json:"amount"`
 	AmountOrigin string          `json:"amount_origin"`
-	Index        int             `json:"index"`
 }
 
 type EventErc721Transfer struct {
+	IndexInBlock uint   `json:"index_in_block"`
 	ContractAddr string `json:"contract_addr"`
 	From         string `json:"from"`
 	To           string `json:"to"`
 	TokenId      string `json:"token_id"`
-	Index        int    `json:"index"`
 }
 
 type EventErc1155Transfer struct {
+	IndexInBlock uint            `json:"index_in_block"`
+	IndexInBatch int             `json:"index_in_batch"`
 	ContractAddr string          `json:"contract_addr"`
 	Operator     string          `json:"operator"`
 	From         string          `json:"from"`
 	To           string          `json:"to"`
 	TokenId      string          `json:"token_id"`
 	Amount       decimal.Decimal `json:"amount"`
-	Index        int             `json:"index"`
-	IndexInBatch int             `json:"index_in_batch"`
 }
 
 type TokenErc721 struct {

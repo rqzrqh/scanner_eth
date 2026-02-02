@@ -517,7 +517,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 		balanceNativeAddress[fromAddr] = struct{}{}
 		balanceNativeAddress[toAddr] = struct{}{}
 
-		for _, txLog := range receipt.Logs {
+		for indexInTx, txLog := range receipt.Logs {
 			// first one is event signature, left is indexed field, up to 3
 			var topic0, topic1, topic2, topic3 string
 			switch len(txLog.Topics) {
@@ -541,14 +541,15 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 			// event log
 			eventLog := &types.EventLog{
 				TxHash:       txHash,
-				TopicCount:   len(txLog.Topics),
+				IndexInTx:    uint(indexInTx),
+				IndexInBlock: uint(txLog.Index),
+				ContractAddr: contractAddr,
+				TopicCount:   uint(len(txLog.Topics)),
 				Topic0:       topic0,
 				Topic1:       topic1,
 				Topic2:       topic2,
 				Topic3:       topic3,
 				Data:         hexutil.Encode(txLog.Data),
-				Index:        int(txLog.Index),
-				ContractAddr: contractAddr,
 			}
 			eventLogList = append(eventLogList, eventLog)
 
@@ -582,12 +583,12 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 
 				eventErc20Transfer := &types.EventErc20Transfer{
 					TxHash:       txHash,
+					IndexInBlock: uint(txLog.Index),
 					ContractAddr: contractAddr,
 					From:         sender,
 					To:           receiver,
 					Amount:       amount,
 					AmountOrigin: tokenCntOrigin,
-					Index:        int(txLog.Index),
 				}
 				eventErc20TransferList = append(eventErc20TransferList, eventErc20Transfer)
 
@@ -612,7 +613,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 					From:         sender,
 					To:           receiver,
 					TokenId:      tokenId,
-					Index:        int(txLog.Index),
+					IndexInBlock: uint(txLog.Index),
 				}
 				eventErc721TransferList = append(eventErc721TransferList, eventErc721Transfer)
 
@@ -668,13 +669,13 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 
 				eventErc1155Transfer := &types.EventErc1155Transfer{
 					TxHash:       txHash,
+					IndexInBlock: uint(txLog.Index),
 					ContractAddr: contractAddr,
 					Operator:     operator,
 					From:         sender,
 					To:           receiver,
 					TokenId:      tokenId,
 					Amount:       amount,
-					Index:        int(txLog.Index),
 					IndexInBatch: -1,
 				}
 				eventErc1155TransferList = append(eventErc1155TransferList, eventErc1155Transfer)
@@ -719,14 +720,14 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 
 					eventErc1155Transfer := &types.EventErc1155Transfer{
 						TxHash:       txHash,
+						IndexInBlock: uint(txLog.Index),
+						IndexInBatch: index,
 						ContractAddr: contractAddr,
 						Operator:     operator,
 						From:         sender,
 						To:           receiver,
 						TokenId:      tokenId,
 						Amount:       amount,
-						Index:        int(txLog.Index),
-						IndexInBatch: index,
 					}
 					eventErc1155TransferList = append(eventErc1155TransferList, eventErc1155Transfer)
 				}

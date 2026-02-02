@@ -237,6 +237,8 @@ func convertStorageFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 		modelLog := model.EventLog{
 			Height:       blockHeight,
 			TxHash:       log.TxHash,
+			IndexInTx:    log.IndexInTx,
+			IndexInBlock: log.IndexInBlock,
 			ContractAddr: log.ContractAddr,
 			TopicCount:   log.TopicCount,
 			Topic0:       log.Topic0,
@@ -244,7 +246,6 @@ func convertStorageFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 			Topic2:       log.Topic2,
 			Topic3:       log.Topic3,
 			Data:         log.Data,
-			Index:        log.Index,
 		}
 		eventLogList = append(eventLogList, modelLog)
 	}
@@ -254,12 +255,12 @@ func convertStorageFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 		modelTransfer := model.EventErc20Transfer{
 			Height:       blockHeight,
 			TxHash:       transfer.TxHash,
+			IndexInBlock: transfer.IndexInBlock,
 			ContractAddr: transfer.ContractAddr,
 			From:         transfer.From,
 			To:           transfer.To,
 			Amount:       transfer.Amount,
 			AmountOrigin: transfer.AmountOrigin,
-			Index:        transfer.Index,
 		}
 		eventErc20TransferList = append(eventErc20TransferList, modelTransfer)
 	}
@@ -269,11 +270,11 @@ func convertStorageFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 		modelTransfer := model.EventErc721Transfer{
 			Height:       blockHeight,
 			TxHash:       transfer.TxHash,
+			IndexInBlock: transfer.IndexInBlock,
 			ContractAddr: transfer.ContractAddr,
 			From:         transfer.From,
 			To:           transfer.To,
 			TokenId:      transfer.TokenId,
-			Index:        transfer.Index,
 		}
 		eventErc721TransferList = append(eventErc721TransferList, modelTransfer)
 	}
@@ -283,14 +284,14 @@ func convertStorageFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 		modelTransfer := model.EventErc1155Transfer{
 			Height:       blockHeight,
 			TxHash:       transfer.TxHash,
+			IndexInBlock: transfer.IndexInBlock,
+			IndexInBatch: transfer.IndexInBatch,
 			ContractAddr: transfer.ContractAddr,
 			Operator:     transfer.Operator,
 			From:         transfer.From,
 			To:           transfer.To,
 			TokenId:      transfer.TokenId,
 			Amount:       transfer.Amount,
-			Index:        transfer.Index,
-			IndexInBatch: transfer.IndexInBatch,
 		}
 		eventErc1155TransferList = append(eventErc1155TransferList, modelTransfer)
 	}
@@ -409,6 +410,7 @@ func convertProtocolFullBlock(fullblock *types.FullBlock) *protocol.FullBlock {
 		for _, log := range fullblock.EventLogList {
 			if log.TxHash == tx.TxHash {
 				protocolEventLog := &protocol.EventLog{
+					IndexInBlock: log.IndexInBlock,
 					ContractAddr: log.ContractAddr,
 					TopicCount:   log.TopicCount,
 					Topic0:       log.Topic0,
@@ -416,7 +418,6 @@ func convertProtocolFullBlock(fullblock *types.FullBlock) *protocol.FullBlock {
 					Topic2:       log.Topic2,
 					Topic3:       log.Topic3,
 					Data:         log.Data,
-					Index:        log.Index,
 				}
 
 				fullEventLog := &protocol.FullEventLog{
@@ -425,14 +426,14 @@ func convertProtocolFullBlock(fullblock *types.FullBlock) *protocol.FullBlock {
 
 				// Check for ERC20 Transfer
 				for _, erc20Transfer := range fullblock.EventErc20TransferList {
-					if erc20Transfer.TxHash == tx.TxHash && erc20Transfer.Index == log.Index {
+					if erc20Transfer.TxHash == tx.TxHash && erc20Transfer.IndexInBlock == log.IndexInBlock {
 						fullEventLog.EventErc20Transfer = &protocol.EventErc20Transfer{
+							IndexInBlock: erc20Transfer.IndexInBlock,
 							ContractAddr: erc20Transfer.ContractAddr,
 							From:         erc20Transfer.From,
 							To:           erc20Transfer.To,
 							Amount:       erc20Transfer.Amount,
 							AmountOrigin: erc20Transfer.AmountOrigin,
-							Index:        erc20Transfer.Index,
 						}
 						break
 					}
@@ -440,13 +441,13 @@ func convertProtocolFullBlock(fullblock *types.FullBlock) *protocol.FullBlock {
 
 				// Check for ERC721 Transfer
 				for _, erc721Transfer := range fullblock.EventErc721TransferList {
-					if erc721Transfer.TxHash == tx.TxHash && erc721Transfer.Index == log.Index {
+					if erc721Transfer.TxHash == tx.TxHash && erc721Transfer.IndexInBlock == log.IndexInBlock {
 						fullEventLog.EventErc721Transfer = &protocol.EventErc721Transfer{
+							IndexInBlock: erc721Transfer.IndexInBlock,
 							ContractAddr: erc721Transfer.ContractAddr,
 							From:         erc721Transfer.From,
 							To:           erc721Transfer.To,
 							TokenId:      erc721Transfer.TokenId,
-							Index:        erc721Transfer.Index,
 						}
 						break
 					}
@@ -454,16 +455,16 @@ func convertProtocolFullBlock(fullblock *types.FullBlock) *protocol.FullBlock {
 
 				// Check for ERC1155 Transfer
 				for _, erc1155Transfer := range fullblock.EventErc1155TransferList {
-					if erc1155Transfer.TxHash == tx.TxHash && erc1155Transfer.Index == log.Index {
+					if erc1155Transfer.TxHash == tx.TxHash && erc1155Transfer.IndexInBlock == log.IndexInBlock {
 						fullEventLog.EventErc1155Transfer = &protocol.EventErc1155Transfer{
+							IndexInBlock: erc1155Transfer.IndexInBlock,
+							IndexInBatch: erc1155Transfer.IndexInBatch,
 							ContractAddr: erc1155Transfer.ContractAddr,
 							Operator:     erc1155Transfer.Operator,
 							From:         erc1155Transfer.From,
 							To:           erc1155Transfer.To,
 							TokenId:      erc1155Transfer.TokenId,
 							Amount:       erc1155Transfer.Amount,
-							Index:        erc1155Transfer.Index,
-							IndexInBatch: erc1155Transfer.IndexInBatch,
 						}
 						break
 					}
