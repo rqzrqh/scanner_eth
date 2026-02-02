@@ -4,9 +4,9 @@ import (
 	"math"
 	"math/big"
 	"os"
-	"sync_eth/event"
 	"sync_eth/fetch"
 	"sync_eth/model"
+	"sync_eth/publish"
 	"sync_eth/store"
 	"sync_eth/types"
 	"sync_eth/util"
@@ -25,10 +25,10 @@ type SimpleBlockHeaderJson struct {
 }
 
 type Syncer struct {
-	hns          []*fetch.HeaderNotifier
-	fm           *fetch.FetchManager
-	sm           *store.StoreManager
-	event_center *event.EventCenter
+	hns []*fetch.HeaderNotifier
+	fm  *fetch.FetchManager
+	sm  *store.StoreManager
+	pm  *publish.PublishManager
 }
 
 func newSyncer(clients []*rpc.Client, db *gorm.DB, w *kafka.Writer, reversibleBlocks int, storeChannelSize int, storeBatchSize int, storeWorkerCount int, startHeight uint64, endHeight uint64) *Syncer {
@@ -39,7 +39,7 @@ func newSyncer(clients []*rpc.Client, db *gorm.DB, w *kafka.Writer, reversibleBl
 	storeOperationChannel := make(chan *types.StoreOperation, storeChannelSize)
 
 	publishOperationChannel := make(chan *types.PublishOperation, 100)
-	event_center := event.NewEventCenter(w, publishOperationChannel, storeOperationChannel)
+	pm := publish.NewPublishManager(w, publishOperationChannel, storeOperationChannel)
 
 	sm := store.NewStoreManager(db, storeBatchSize, storeWorkerCount, storeOperationChannel, publishOperationChannel)
 
@@ -55,16 +55,16 @@ func newSyncer(clients []*rpc.Client, db *gorm.DB, w *kafka.Writer, reversibleBl
 	}
 
 	return &Syncer{
-		hns:          hns,
-		fm:           fm,
-		sm:           sm,
-		event_center: event_center,
+		hns: hns,
+		fm:  fm,
+		sm:  sm,
+		pm:  pm,
 	}
 }
 
 func (s *Syncer) Run() {
 
-	s.event_center.Run()
+	s.pm.Run()
 	s.sm.Run()
 	s.fm.Run()
 

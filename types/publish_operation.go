@@ -8,16 +8,8 @@ const (
 )
 
 type PublishOperation struct {
-	Type PublishOperationType
-	Data interface{}
-}
-
-type PublishApplyData struct {
+	Type              PublishOperationType
 	Id                uint64
 	Height            uint64
 	ProtocolFullBlock []byte
-}
-
-type PublishRollbackData struct {
-	Height uint64
 }
