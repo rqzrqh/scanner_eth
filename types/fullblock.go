@@ -1,7 +1,5 @@
 package types
 
-import "github.com/shopspring/decimal"
-
 type FullBlock struct {
 	Block                    *Block
 	TxList                   []*Tx
@@ -28,13 +26,13 @@ type Block struct {
 	Miner           string
 	Size            int
 	Nonce           string
-	BaseFee         decimal.Decimal
-	BurntFees       decimal.Decimal
+	BaseFee         string
+	BurntFees       string
 	GasLimit        uint64
 	GasUsed         uint64
 	UnclesCount     int
-	Difficulty      decimal.Decimal
-	TotalDifficulty decimal.Decimal
+	Difficulty      string
+	TotalDifficulty string
 	StateRoot       string
 	TransactionRoot string
 	ReceiptRoot     string
@@ -49,13 +47,13 @@ type Tx struct {
 	To                   string
 	Nonce                uint64
 	GasLimit             uint64
-	GasPrice             decimal.Decimal
+	GasPrice             string
 	GasUsed              uint64
-	BaseFee              decimal.Decimal
-	BurntFees            decimal.Decimal
-	MaxFeePerGas         decimal.Decimal
-	MaxPriorityFeePerGas decimal.Decimal
-	Value                decimal.Decimal
+	BaseFee              string
+	BurntFees            string
+	MaxFeePerGas         string
+	MaxPriorityFeePerGas string
+	Value                string
 	Input                string
 	ExecStatus           uint64
 	IsCallContract       bool
@@ -68,7 +66,7 @@ type TxInternal struct {
 	From         string
 	To           string
 	OpCode       string
-	Value        decimal.Decimal
+	Value        string
 	Success      bool
 	Depth        int
 	Gas          uint64
@@ -97,8 +95,7 @@ type EventErc20Transfer struct {
 	ContractAddr string
 	From         string
 	To           string
-	Amount       decimal.Decimal
-	AmountOrigin string
+	Amount       string
 }
 
 type EventErc721Transfer struct {
@@ -119,7 +116,7 @@ type EventErc1155Transfer struct {
 	From         string
 	To           string
 	TokenId      string
-	Amount       decimal.Decimal
+	Amount       string
 }
 
 type TokenErc721 struct {
@@ -138,14 +135,13 @@ type Contract struct {
 }
 
 type ContractErc20 struct {
-	TxHash            string
-	ContractAddr      string
-	CreatorAddr       string
-	Name              []byte
-	Symbol            []byte
-	Decimals          int
-	TotalSupply       decimal.Decimal
-	TotalSupplyOrigin string
+	TxHash       string
+	ContractAddr string
+	CreatorAddr  string
+	Name         []byte
+	Symbol       []byte
+	Decimals     int
+	TotalSupply  string
 }
 
 type ContractErc721 struct {
@@ -158,18 +154,18 @@ type ContractErc721 struct {
 
 type BalanceNative struct {
 	Addr    string
-	Balance decimal.Decimal
+	Balance string
 }
 
 type BalanceErc20 struct {
 	Addr         string
 	ContractAddr string
-	Balance      decimal.Decimal
+	Balance      string
 }
 
 type BalanceErc1155 struct {
 	Addr         string
 	ContractAddr string
 	TokenId      string
-	Balance      decimal.Decimal
+	Balance      string
 }
