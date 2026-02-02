@@ -260,7 +260,6 @@ func convertStorageFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 			From:         transfer.From,
 			To:           transfer.To,
 			Amount:       transfer.Amount,
-			AmountOrigin: transfer.AmountOrigin,
 		}
 		eventErc20TransferList = append(eventErc20TransferList, modelTransfer)
 	}
@@ -325,15 +324,14 @@ func convertStorageFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 	contractErc20List := make([]model.ContractErc20, 0, len(fullblock.ContractErc20List))
 	for _, contract := range fullblock.ContractErc20List {
 		modelContract := model.ContractErc20{
-			Height:            blockHeight,
-			TxHash:            contract.TxHash,
-			ContractAddr:      contract.ContractAddr,
-			CreatorAddr:       contract.CreatorAddr,
-			Name:              contract.Name,
-			Symbol:            contract.Symbol,
-			Decimals:          contract.Decimals,
-			TotalSupply:       contract.TotalSupply,
-			TotalSupplyOrigin: contract.TotalSupplyOrigin,
+			Height:       blockHeight,
+			TxHash:       contract.TxHash,
+			ContractAddr: contract.ContractAddr,
+			CreatorAddr:  contract.CreatorAddr,
+			Name:         contract.Name,
+			Symbol:       contract.Symbol,
+			Decimals:     contract.Decimals,
+			TotalSupply:  contract.TotalSupply,
 		}
 		contractErc20List = append(contractErc20List, modelContract)
 	}
@@ -433,7 +431,6 @@ func convertProtocolFullBlock(fullblock *types.FullBlock) *protocol.FullBlock {
 							From:         erc20Transfer.From,
 							To:           erc20Transfer.To,
 							Amount:       erc20Transfer.Amount,
-							AmountOrigin: erc20Transfer.AmountOrigin,
 						}
 						break
 					}
@@ -547,14 +544,13 @@ func convertProtocolFullBlock(fullblock *types.FullBlock) *protocol.FullBlock {
 	contractErc20List := make([]*protocol.ContractErc20, 0, len(fullblock.ContractErc20List))
 	for _, contract := range fullblock.ContractErc20List {
 		contractErc20List = append(contractErc20List, &protocol.ContractErc20{
-			TxHash:            contract.TxHash,
-			ContractAddr:      contract.ContractAddr,
-			CreatorAddr:       contract.CreatorAddr,
-			Name:              contract.Name,
-			Symbol:            contract.Symbol,
-			Decimals:          contract.Decimals,
-			TotalSupply:       contract.TotalSupply,
-			TotalSupplyOrigin: contract.TotalSupplyOrigin,
+			TxHash:       contract.TxHash,
+			ContractAddr: contract.ContractAddr,
+			CreatorAddr:  contract.CreatorAddr,
+			Name:         contract.Name,
+			Symbol:       contract.Symbol,
+			Decimals:     contract.Decimals,
+			TotalSupply:  contract.TotalSupply,
 		})
 	}
 

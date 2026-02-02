@@ -1,7 +1,5 @@
 package model
 
-import "github.com/shopspring/decimal"
-
 type Block struct {
 	Id             uint64 `gorm:"primaryKey:autoIncrement;comment:auto_inc_id"`
 	Height         uint64 `gorm:"index:uniq_height,unique;type:bigint unsigned;comment:block_height"`
@@ -12,17 +10,17 @@ type Block struct {
 	Miner          string `gorm:"index;type:varchar(255);comment:miner"`
 	Size           int    `gorm:"type:int;comment:block_size"`
 
-	Nonce     string          `gorm:"type:varchar(255);comment:nonce"`
-	BaseFee   decimal.Decimal `gorm:"type:DECIMAL(65,0);comment:base_fee"`
-	BurntFees decimal.Decimal `gorm:"type:DECIMAL(65,0);comment:burnt_fees"`
+	Nonce     string `gorm:"type:varchar(255);comment:nonce"`
+	BaseFee   string `gorm:"type:varchar(255);comment:base_fee"`
+	BurntFees string `gorm:"type:varchar(255);comment:burnt_fees"`
 
 	GasLimit uint64 `gorm:"type:bigint unsigned;comment:gas_limit"`
 	GasUsed  uint64 `gorm:"type:bigint unsigned;comment:gas_used"`
 
 	UnclesCount int `gorm:"type:int;comment:uncles_count"`
 
-	Difficulty      decimal.Decimal `gorm:"type:DECIMAL(65,0);comment:difficulty"`
-	TotalDifficulty decimal.Decimal `gorm:"type:DECIMAL(65,0);comment:total_difficulty"`
+	Difficulty      string `gorm:"type:varchar(255);comment:difficulty"`
+	TotalDifficulty string `gorm:"type:varchar(255);comment:total_difficulty"`
 
 	StateRoot       string `gorm:"index;type:varchar(255);comment:state_root"`
 	TransactionRoot string `gorm:"index;type:varchar(255);comment:transaction_root"`

@@ -16,7 +16,6 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	eth_types "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/shopspring/decimal"
 	"github.com/sirupsen/logrus"
 )
 
@@ -189,15 +188,15 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		Miner:          blkJson.Miner,
 		Size:           int(hexutil.MustDecodeUint64(blkJson.Size)),
 		Nonce:          blkJson.Nonce,
-		BaseFee:        decimal.NewFromBigInt(baseFee, 0),
-		BurntFees:      decimal.NewFromBigInt(burntFees, 0),
+		BaseFee:        baseFee.String(),
+		BurntFees:      burntFees.String(),
 		GasLimit:       hexutil.MustDecodeUint64(blkJson.GasLimit),
 		GasUsed:        gasUsed,
 
 		UnclesCount: len(blkJson.Uncles),
 
-		Difficulty:      decimal.NewFromBigInt(difficulty, 0),
-		TotalDifficulty: decimal.NewFromBigInt(totalDifficulty, 0),
+		Difficulty:      difficulty.String(),
+		TotalDifficulty: totalDifficulty.String(),
 		StateRoot:       blkJson.StateRoot,
 		TransactionRoot: blkJson.TransactionRoot,
 		ReceiptRoot:     blkJson.ReceiptsRoot,
@@ -306,9 +305,10 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 
 		balanceNativeList = make([]*types.BalanceNative, 0, len(balances))
 		for _, v := range balances {
+			// TODO use latest height
 			balanceNative := &types.BalanceNative{
 				Addr:    v.Addr.Hex(),
-				Balance: decimal.NewFromBigInt(v.ValueHexBig.ToInt(), 0),
+				Balance: v.ValueHexBig.ToInt().String(),
 			}
 			balanceNativeList = append(balanceNativeList, balanceNative)
 		}
@@ -338,7 +338,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 			balanceErc20 := &types.BalanceErc20{
 				Addr:         v.Addr.Hex(),
 				ContractAddr: v.ContractAddr.Hex(),
-				Balance:      decimal.NewFromBigInt(v.Value, 0),
+				Balance:      v.Value.String(),
 			}
 			balanceErc20List = append(balanceErc20List, balanceErc20)
 		}
@@ -499,13 +499,13 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 			To:                   toAddr,
 			Nonce:                nonce,
 			GasLimit:             gasLimit,
-			GasPrice:             decimal.NewFromBigInt(gasPrice, 0),
+			GasPrice:             gasPrice.String(),
 			GasUsed:              receipt.GasUsed,
-			BaseFee:              decimal.NewFromBigInt(baseFee, 0),
-			BurntFees:            decimal.NewFromBigInt(txBurntFees, 0),
-			MaxFeePerGas:         decimal.NewFromBigInt(txMaxFeePerGas, 0),
-			MaxPriorityFeePerGas: decimal.NewFromBigInt(txMaxPriorityFeePerGas, 0),
-			Value:                decimal.NewFromBigInt(value, 0),
+			BaseFee:              baseFee.String(),
+			BurntFees:            txBurntFees.String(),
+			MaxFeePerGas:         txMaxFeePerGas.String(),
+			MaxPriorityFeePerGas: txMaxPriorityFeePerGas.String(),
+			Value:                value.String(),
 			Input:                txJson.Input,
 			ExecStatus:           receipt.Status,
 			IsCallContract:       isCallContract,
@@ -573,22 +573,13 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 				}
 
 				// tx erc20
-				tokenCnt := tokenAmount.String()
-				var tokenCntOrigin string
-				if len(tokenCnt) > 65 {
-					tokenCntOrigin = tokenCnt
-					tokenCnt = tokenCnt[:65]
-				}
-				amount, _ := decimal.NewFromString(tokenCnt)
-
 				eventErc20Transfer := &types.EventErc20Transfer{
 					TxHash:       txHash,
 					IndexInBlock: uint(txLog.Index),
 					ContractAddr: contractAddr,
 					From:         sender,
 					To:           receiver,
-					Amount:       amount,
-					AmountOrigin: tokenCntOrigin,
+					Amount:       tokenAmount.String(),
 				}
 				eventErc20TransferList = append(eventErc20TransferList, eventErc20Transfer)
 
@@ -661,11 +652,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 
 				// tx erc1155
 				tokens := transferSingleData.Value
-				tokenCnt := tokens.String()
-				if len(tokenCnt) > 65 {
-					tokenCnt = tokenCnt[:65]
-				}
-				amount, _ := decimal.NewFromString(tokenCnt)
+				amount := tokens.String()
 
 				eventErc1155Transfer := &types.EventErc1155Transfer{
 					TxHash:       txHash,
@@ -712,11 +699,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 					}
 
 					// tx erc1155
-					tokenCnt := values[index].String()
-					if len(tokenCnt) > 65 {
-						tokenCnt = tokenCnt[:65]
-					}
-					amount, _ := decimal.NewFromString(tokenCnt)
+					amount := values[index].String()
 
 					eventErc1155Transfer := &types.EventErc1155Transfer{
 						TxHash:       txHash,
@@ -773,7 +756,7 @@ func parseTxInternal(jsonTxInternalList []*TxInternalJson, height uint64) ([]*ty
 				From:         fromAddr,
 				To:           toAddr,
 				OpCode:       tiLog.OpCode,
-				Value:        decimal.NewFromBigInt(tiLog.Value, 0),
+				Value:        tiLog.Value.String(),
 				Success:      tiLog.Success,
 				Depth:        tiLog.Depth,
 				Gas:          tiLog.Gas,
@@ -1023,8 +1006,7 @@ func fetchContractErc20(client *rpc.Client, addr *common.Address, height uint64)
 			}
 		case 3:
 			if totalSupply, ok := rets[0].(*big.Int); ok {
-				contractErc20.TotalSupplyOrigin = totalSupply.String()
-				contractErc20.TotalSupply = decimal.NewFromBigInt(totalSupply, 0)
+				contractErc20.TotalSupply = totalSupply.String()
 			} else {
 				logrus.Infof("erc20 info totalSupply not *big.Int addr:%v", addr.Hex())
 			}

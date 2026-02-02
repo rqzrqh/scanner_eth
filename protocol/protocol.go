@@ -1,9 +1,5 @@
 package protocol
 
-import (
-	"github.com/shopspring/decimal"
-)
-
 type ChainActionType byte
 
 const (
@@ -18,25 +14,25 @@ type ScannerData struct {
 }
 
 type FullBlock struct {
-	Height          uint64          `json:"height"`
-	BlockHash       string          `json:"block_hash"`
-	ParentHash      string          `json:"parent_block_hash"`
-	BlockTimestamp  int64           `json:"block_timestamp"`
-	TxsCount        int             `json:"block_tx_count"`
-	Miner           string          `json:"miner"`
-	Size            int             `json:"block_size"`
-	Nonce           string          `json:"nonce"`
-	BaseFee         decimal.Decimal `json:"base_fee"`
-	BurntFees       decimal.Decimal `json:"burnt_fees"`
-	GasLimit        uint64          `json:"gas_limit"`
-	GasUsed         uint64          `json:"gas_used"`
-	UnclesCount     int             `json:"uncles_count"`
-	Difficulty      decimal.Decimal `json:"difficulty"`
-	TotalDifficulty decimal.Decimal `json:"total_difficulty"`
-	StateRoot       string          `json:"state_root"`
-	TransactionRoot string          `json:"transaction_root"`
-	ReceiptRoot     string          `json:"receipt_root"`
-	ExtraData       string          `json:"extra_data"`
+	Height          uint64 `json:"height"`
+	BlockHash       string `json:"block_hash"`
+	ParentHash      string `json:"parent_block_hash"`
+	BlockTimestamp  int64  `json:"block_timestamp"`
+	TxsCount        int    `json:"block_tx_count"`
+	Miner           string `json:"miner"`
+	Size            int    `json:"block_size"`
+	Nonce           string `json:"nonce"`
+	BaseFee         string `json:"base_fee"`
+	BurntFees       string `json:"burnt_fees"`
+	GasLimit        uint64 `json:"gas_limit"`
+	GasUsed         uint64 `json:"gas_used"`
+	UnclesCount     int    `json:"uncles_count"`
+	Difficulty      string `json:"difficulty"`
+	TotalDifficulty string `json:"total_difficulty"`
+	StateRoot       string `json:"state_root"`
+	TransactionRoot string `json:"transaction_root"`
+	ReceiptRoot     string `json:"receipt_root"`
+	ExtraData       string `json:"extra_data"`
 
 	FullTxList []*FullTx `json:"full_tx_list"`
 	StateSet   *StateSet `json:"state_set"`
@@ -49,24 +45,24 @@ type FullTx struct {
 }
 
 type Tx struct {
-	TxHash               string          `json:"tx_hash"`
-	TxIndex              int             `json:"tx_index"`
-	TxType               int             `json:"tx_type"`
-	From                 string          `json:"from"`
-	To                   string          `json:"to"`
-	Nonce                uint64          `json:"nonce"`
-	GasLimit             uint64          `json:"gas_limit"`
-	GasPrice             decimal.Decimal `json:"gas_price"`
-	GasUsed              uint64          `json:"gas_used"`
-	BaseFee              decimal.Decimal `json:"base_fee"`
-	BurntFees            decimal.Decimal `json:"burnt_fees"`
-	MaxFeePerGas         decimal.Decimal `json:"max_fee_per_gas"`
-	MaxPriorityFeePerGas decimal.Decimal `json:"max_priority_fee_per_gas"`
-	Value                decimal.Decimal `json:"value"`
-	Input                string          `json:"input"`
-	ExecStatus           uint64          `json:"exec_status"`
-	IsCallContract       bool            `json:"is_call_contract"`
-	IsCreateContract     bool            `json:"is_create_contract"`
+	TxHash               string `json:"tx_hash"`
+	TxIndex              int    `json:"tx_index"`
+	TxType               int    `json:"tx_type"`
+	From                 string `json:"from"`
+	To                   string `json:"to"`
+	Nonce                uint64 `json:"nonce"`
+	GasLimit             uint64 `json:"gas_limit"`
+	GasPrice             string `json:"gas_price"`
+	GasUsed              uint64 `json:"gas_used"`
+	BaseFee              string `json:"base_fee"`
+	BurntFees            string `json:"burnt_fees"`
+	MaxFeePerGas         string `json:"max_fee_per_gas"`
+	MaxPriorityFeePerGas string `json:"max_priority_fee_per_gas"`
+	Value                string `json:"value"`
+	Input                string `json:"input"`
+	ExecStatus           uint64 `json:"exec_status"`
+	IsCallContract       bool   `json:"is_call_contract"`
+	IsCreateContract     bool   `json:"is_create_contract"`
 }
 
 type StateSet struct {
@@ -80,18 +76,18 @@ type StateSet struct {
 }
 
 type TxInternal struct {
-	Index        int             `json:"index"`
-	From         string          `json:"from"`
-	To           string          `json:"to"`
-	OpCode       string          `json:"op_code"`
-	Value        decimal.Decimal `json:"value"`
-	Success      bool            `json:"success"`
-	Depth        int             `json:"call_depth"`
-	Gas          uint64          `json:"gas"`
-	GasUsed      uint64          `json:"gas_used"`
-	Input        string          `json:"input"`
-	Output       string          `json:"output"`
-	TraceAddress string          `json:"trace_address"`
+	Index        int    `json:"index"`
+	From         string `json:"from"`
+	To           string `json:"to"`
+	OpCode       string `json:"op_code"`
+	Value        string `json:"value"`
+	Success      bool   `json:"success"`
+	Depth        int    `json:"call_depth"`
+	Gas          uint64 `json:"gas"`
+	GasUsed      uint64 `json:"gas_used"`
+	Input        string `json:"input"`
+	Output       string `json:"output"`
+	TraceAddress string `json:"trace_address"`
 }
 
 type FullEventLog struct {
@@ -113,12 +109,11 @@ type EventLog struct {
 }
 
 type EventErc20Transfer struct {
-	IndexInBlock uint            `json:"index_in_block"`
-	ContractAddr string          `json:"contract_addr"`
-	From         string          `json:"from"`
-	To           string          `json:"to"`
-	Amount       decimal.Decimal `json:"amount"`
-	AmountOrigin string          `json:"amount_origin"`
+	IndexInBlock uint   `json:"index_in_block"`
+	ContractAddr string `json:"contract_addr"`
+	From         string `json:"from"`
+	To           string `json:"to"`
+	Amount       string `json:"amount"`
 }
 
 type EventErc721Transfer struct {
@@ -130,14 +125,14 @@ type EventErc721Transfer struct {
 }
 
 type EventErc1155Transfer struct {
-	IndexInBlock uint            `json:"index_in_block"`
-	IndexInBatch int             `json:"index_in_batch"`
-	ContractAddr string          `json:"contract_addr"`
-	Operator     string          `json:"operator"`
-	From         string          `json:"from"`
-	To           string          `json:"to"`
-	TokenId      string          `json:"token_id"`
-	Amount       decimal.Decimal `json:"amount"`
+	IndexInBlock uint   `json:"index_in_block"`
+	IndexInBatch int    `json:"index_in_batch"`
+	ContractAddr string `json:"contract_addr"`
+	Operator     string `json:"operator"`
+	From         string `json:"from"`
+	To           string `json:"to"`
+	TokenId      string `json:"token_id"`
+	Amount       string `json:"amount"`
 }
 
 type TokenErc721 struct {
@@ -156,14 +151,13 @@ type Contract struct {
 }
 
 type ContractErc20 struct {
-	TxHash            string          `json:"tx_hash"`
-	ContractAddr      string          `json:"contract_addr"`
-	CreatorAddr       string          `json:"creator_addr"`
-	Name              []byte          `json:"name"`
-	Symbol            []byte          `json:"symbol"`
-	Decimals          int             `json:"decimals"`
-	TotalSupply       decimal.Decimal `json:"total_supply"`
-	TotalSupplyOrigin string          `json:"total_supply_origin"`
+	TxHash       string `json:"tx_hash"`
+	ContractAddr string `json:"contract_addr"`
+	CreatorAddr  string `json:"creator_addr"`
+	Name         []byte `json:"name"`
+	Symbol       []byte `json:"symbol"`
+	Decimals     int    `json:"decimals"`
+	TotalSupply  string `json:"total_supply"`
 }
 
 type ContractErc721 struct {
@@ -175,19 +169,19 @@ type ContractErc721 struct {
 }
 
 type BalanceNative struct {
-	Addr    string          `json:"addr"`
-	Balance decimal.Decimal `json:"balance"`
+	Addr    string `json:"addr"`
+	Balance string `json:"balance"`
 }
 
 type BalanceErc20 struct {
-	Addr         string          `json:"addr"`
-	ContractAddr string          `json:"contract_addr"`
-	Balance      decimal.Decimal `json:"balance"`
+	Addr         string `json:"addr"`
+	ContractAddr string `json:"contract_addr"`
+	Balance      string `json:"balance"`
 }
 
 type BalanceErc1155 struct {
-	Addr         string          `json:"addr"`
-	ContractAddr string          `json:"contract_addr"`
-	TokenId      string          `json:"token_id"`
-	Balance      decimal.Decimal `json:"balance"`
+	Addr         string `json:"addr"`
+	ContractAddr string `json:"contract_addr"`
+	TokenId      string `json:"token_id"`
+	Balance      string `json:"balance"`
 }
