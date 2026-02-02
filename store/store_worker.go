@@ -131,8 +131,8 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, protocolFullBlock 
 
 	modelPublishAction := &model.PublishAction{
 		ActionType: int(types.PublishApply),
-		Data:       string(protocolFullBlock),
 		Height:     fullblock.Block.Height,
+		FullBlock:  string(protocolFullBlock),
 	}
 
 	if err := db.Transaction(func(tx *gorm.DB) error {

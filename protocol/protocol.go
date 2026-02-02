@@ -4,24 +4,20 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-type FullBlock struct {
-	Block                    *Block                  `json:"block"`
-	TxList                   []*Tx                   `json:"tx_list"`
-	TxInternalList           []*TxInternal           `json:"tx_internal_list"`
-	EventLogList             []*EventLog             `json:"event_log_list"`
-	EventErc20TransferList   []*EventErc20Transfer   `json:"event_erc20_transfer_list"`
-	EventErc721TransferList  []*EventErc721Transfer  `json:"event_erc721_transfer_list"`
-	EventErc1155TransferList []*EventErc1155Transfer `json:"event_erc1155_transfer_list"`
-	TokenErc721List          []*TokenErc721          `json:"token_erc721_list"`
-	ContractList             []*Contract             `json:"contract_list"`
-	ContractErc20List        []*ContractErc20        `json:"contract_erc20_list"`
-	ContractErc721List       []*ContractErc721       `json:"contract_erc721_list"`
-	BalanceNativeList        []*BalanceNative        `json:"balance_native_list"`
-	BalanceErc20List         []*BalanceErc20         `json:"balance_erc20_list"`
-	BalanceErc1155List       []*BalanceErc1155       `json:"balance_erc1155_list"`
+type ChainActionType byte
+
+const (
+	ChainActionApply ChainActionType = iota
+	ChainActionRollback
+)
+
+type ScannerData struct {
+	ActionType ChainActionType `json:"action_type"`
+	Height     uint64          `json:"height"`
+	FullBlock  []byte          `json:"full_block"`
 }
 
-type Block struct {
+type FullBlock struct {
 	Height          uint64          `json:"height"`
 	BlockHash       string          `json:"block_hash"`
 	ParentHash      string          `json:"parent_block_hash"`
@@ -41,14 +37,23 @@ type Block struct {
 	TransactionRoot string          `json:"transaction_root"`
 	ReceiptRoot     string          `json:"receipt_root"`
 	ExtraData       string          `json:"extra_data"`
+
+	FullTxList []*FullTx `json:"full_tx_list"`
+	StateSet   *StateSet `json:"state_set"`
+}
+
+type FullTx struct {
+	Tx               *Tx             `json:"tx"`
+	FullEventLogList []*FullEventLog `json:"full_event_log_list"`
+	TxInternalList   []*TxInternal   `json:"tx_internal_list"`
 }
 
 type Tx struct {
 	TxHash               string          `json:"tx_hash"`
 	TxIndex              int             `json:"tx_index"`
 	TxType               int             `json:"tx_type"`
-	From                 string          `json:"from_addr"`
-	To                   string          `json:"to_addr"`
+	From                 string          `json:"from"`
+	To                   string          `json:"to"`
 	Nonce                uint64          `json:"nonce"`
 	GasLimit             uint64          `json:"gas_limit"`
 	GasPrice             decimal.Decimal `json:"gas_price"`
@@ -64,11 +69,20 @@ type Tx struct {
 	IsCreateContract     bool            `json:"is_create_contract"`
 }
 
+type StateSet struct {
+	TokenErc721List    []*TokenErc721    `json:"token_erc721_list"`
+	ContractList       []*Contract       `json:"contract_list"`
+	ContractErc20List  []*ContractErc20  `json:"contract_erc20_list"`
+	ContractErc721List []*ContractErc721 `json:"contract_erc721_list"`
+	BalanceNativeList  []*BalanceNative  `json:"balance_native_list"`
+	BalanceErc20List   []*BalanceErc20   `json:"balance_erc20_list"`
+	BalanceErc1155List []*BalanceErc1155 `json:"balance_erc1155_list"`
+}
+
 type TxInternal struct {
-	TxHash       string          `json:"tx_hash"`
 	Index        int             `json:"index"`
-	From         string          `json:"from_addr"`
-	To           string          `json:"to_addr"`
+	From         string          `json:"from"`
+	To           string          `json:"to"`
 	OpCode       string          `json:"op_code"`
 	Value        decimal.Decimal `json:"value"`
 	Success      bool            `json:"success"`
@@ -80,8 +94,14 @@ type TxInternal struct {
 	TraceAddress string          `json:"trace_address"`
 }
 
+type FullEventLog struct {
+	EventLog             *EventLog             `json:"event_log"`
+	EventErc20Transfer   *EventErc20Transfer   `json:"event_erc20_transfer"`
+	EventErc721Transfer  *EventErc721Transfer  `json:"event_erc721_transfer"`
+	EventErc1155Transfer *EventErc1155Transfer `json:"event_erc1155_transfer"`
+}
+
 type EventLog struct {
-	TxHash       string `json:"tx_hash"`
 	ContractAddr string `json:"contract_addr"`
 	TopicCount   int    `json:"topic_count"`
 	Topic0       string `json:"topic0"`
@@ -93,17 +113,15 @@ type EventLog struct {
 }
 
 type EventErc20Transfer struct {
-	TxHash       string          `json:"tx_hash"`
 	ContractAddr string          `json:"contract_addr"`
-	From         string          `json:"from_addr"`
-	To           string          `json:"to_addr"`
+	From         string          `json:"from"`
+	To           string          `json:"to"`
 	Amount       decimal.Decimal `json:"amount"`
 	AmountOrigin string          `json:"amount_origin"`
 	Index        int             `json:"index"`
 }
 
 type EventErc721Transfer struct {
-	TxHash       string `json:"tx_hash"`
 	ContractAddr string `json:"contract_addr"`
 	From         string `json:"from"`
 	To           string `json:"to"`
@@ -112,7 +130,6 @@ type EventErc721Transfer struct {
 }
 
 type EventErc1155Transfer struct {
-	TxHash       string          `json:"tx_hash"`
 	ContractAddr string          `json:"contract_addr"`
 	Operator     string          `json:"operator"`
 	From         string          `json:"from"`
@@ -127,7 +144,7 @@ type TokenErc721 struct {
 	ContractAddr  string `json:"contract_addr"`
 	TokenId       string `json:"token_id"`
 	OwnerAddr     string `json:"owner_addr"`
-	TokenUri      string `json:"tokenUri"`
+	TokenUri      string `json:"token_uri"`
 	TokenMetaData []byte `json:"token_meta_data"`
 }
 

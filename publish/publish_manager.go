@@ -1,8 +1,10 @@
-package event
+package publish
 
 import (
 	"context"
+	"encoding/json"
 	"os"
+	"sync_eth/protocol"
 	"sync_eth/types"
 	"time"
 
@@ -10,43 +12,55 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type EventCenter struct {
+type PublishManager struct {
 	w                       *kafka.Writer
 	publishOperationChannel <-chan *types.PublishOperation
 	storeOperationChannel   chan<- *types.StoreOperation
 }
 
-func NewEventCenter(w *kafka.Writer, publishOperationChannel <-chan *types.PublishOperation, storeOperationChannel chan<- *types.StoreOperation) *EventCenter {
-	return &EventCenter{
+func NewPublishManager(w *kafka.Writer, publishOperationChannel <-chan *types.PublishOperation, storeOperationChannel chan<- *types.StoreOperation) *PublishManager {
+	return &PublishManager{
 		w:                       w,
 		publishOperationChannel: publishOperationChannel,
 		storeOperationChannel:   storeOperationChannel,
 	}
 }
 
-func (ec *EventCenter) Run() {
+func (pm *PublishManager) Run() {
 	go func() {
 		for {
-			for op := range ec.publishOperationChannel {
+			for op := range pm.publishOperationChannel {
 				id := uint64(0)
 				height := uint64(0)
 
-				// must async publish
 				switch op.Type {
 				case types.PublishApply:
 
-					protocolFullBlock := op.Data.(*types.PublishApplyData).ProtocolFullBlock
-					id = op.Data.(*types.PublishApplyData).Id
-					height = op.Data.(*types.PublishApplyData).Height
+					id = op.Id
+					height = op.Height
+					protocolFullBlock := op.ProtocolFullBlock
+
+					sannerData := protocol.ScannerData{
+						ActionType: protocol.ChainActionApply,
+						Height:     height,
+						FullBlock:  protocolFullBlock,
+					}
+
+					var protocolData []byte
+					var err error
+					if protocolData, err = json.Marshal(sannerData); err != nil {
+						logrus.Errorf("marshal protocol scanner data failed. height:%v err:%v", height, err)
+						os.Exit(0)
+					}
 
 					tryCount := 0
 					for {
 						tryCount++
 						startTime := time.Now()
 
-						if err := ec.w.WriteMessages(context.Background(),
+						if err := pm.w.WriteMessages(context.Background(),
 							kafka.Message{
-								Value: protocolFullBlock,
+								Value: protocolData,
 							},
 						); err != nil {
 							logrus.Errorf("failed to write messages. wait retry. height:%v err:%v tryCount:%v", height, err, tryCount)
@@ -72,7 +86,7 @@ func (ec *EventCenter) Run() {
 						Height: height,
 					},
 				}
-				ec.storeOperationChannel <- storeOperation
+				pm.storeOperationChannel <- storeOperation
 			}
 		}
 	}()

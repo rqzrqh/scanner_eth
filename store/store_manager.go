@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"os"
 	"sync_eth/model"
 	"sync_eth/protocol"
 	"sync_eth/types"
@@ -77,15 +78,20 @@ func (sm *StoreManager) Run() {
 
 				storageFullBlock := convertStorageFullBlock(data.FullBlock)
 				protocolFullBlock := convertProtocolFullBlock(data.FullBlock)
-
-				var id uint64
-				tryCount := 0
+				var protocolFullBlockData []byte
 				var err error
+				if protocolFullBlockData, err = json.Marshal(protocolFullBlock); err != nil {
+					logrus.Errorf("marshal protocol fullblock failed. height:%v err:%v", height, err)
+					os.Exit(0)
+				}
+
+				var publishActionRecordId uint64
+				tryCount := 0
 				for {
 					tryCount++
 					startTime := time.Now()
 
-					if id, err = StoreFullBlock(sm.db, storageFullBlock, protocolFullBlock, sm.batchSize, sm.storeTaskChannel, sm.storeCompleteChannel); err != nil {
+					if publishActionRecordId, err = StoreFullBlock(sm.db, storageFullBlock, protocolFullBlockData, sm.batchSize, sm.storeTaskChannel, sm.storeCompleteChannel); err != nil {
 						logrus.Errorf("db revert failed. wait retry. height:%v err:%v tryCount:%v", height, err, tryCount)
 						time.Sleep(3 * time.Second)
 						continue
@@ -98,12 +104,10 @@ func (sm *StoreManager) Run() {
 						height, blockHash, prevHash, time.Since(startTime).String())
 
 					publishOperation := &types.PublishOperation{
-						Type: types.PublishApply,
-						Data: &types.PublishApplyData{
-							Id:                id,
-							Height:            height,
-							ProtocolFullBlock: protocolFullBlock,
-						},
+						Type:              types.PublishApply,
+						Id:                publishActionRecordId,
+						Height:            height,
+						ProtocolFullBlock: protocolFullBlockData,
 					}
 					sm.publishOperationChannel <- publishOperation
 					break
@@ -117,6 +121,9 @@ func (sm *StoreManager) Run() {
 				for {
 					tryCount++
 					startTime := time.Now()
+					// TODO: get publishActionRecordId from db
+					var publishActionRecordId uint64
+					publishActionRecordId = 0
 
 					if err := Revert(sm.db, height); err != nil {
 						logrus.Errorf("db revert failed. wait retry. height:%v err:%v tryCount:%v", height, err, tryCount)
@@ -128,10 +135,9 @@ func (sm *StoreManager) Run() {
 						height, time.Since(startTime).String())
 
 					publishOperation := &types.PublishOperation{
-						Type: types.PublishRollback,
-						Data: &types.PublishRollbackData{
-							Height: height,
-						},
+						Type:   types.PublishRollback,
+						Id:     publishActionRecordId,
+						Height: height,
 					}
 					sm.publishOperationChannel <- publishOperation
 					break
@@ -393,89 +399,231 @@ func convertStorageFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 	}
 }
 
-func convertProtocolFullBlock(fullblock *types.FullBlock) []byte {
-	txList := make([]*protocol.Tx, 0, len(fullblock.TxList))
+func convertProtocolFullBlock(fullblock *types.FullBlock) *protocol.FullBlock {
+
+	fullTxList := make([]*protocol.FullTx, 0, len(fullblock.TxList))
 	for _, tx := range fullblock.TxList {
-		txList = append(txList, (*protocol.Tx)(tx))
-	}
+		fullEventLogList := make([]*protocol.FullEventLog, 0)
+		for _, log := range fullblock.EventLogList {
+			if log.TxHash == tx.TxHash {
+				protocolEventLog := &protocol.EventLog{
+					ContractAddr: log.ContractAddr,
+					TopicCount:   log.TopicCount,
+					Topic0:       log.Topic0,
+					Topic1:       log.Topic1,
+					Topic2:       log.Topic2,
+					Topic3:       log.Topic3,
+					Data:         log.Data,
+					Index:        log.Index,
+				}
 
-	txInternalList := make([]*protocol.TxInternal, 0, len(fullblock.TxInternalList))
-	for _, txInternal := range fullblock.TxInternalList {
-		txInternalList = append(txInternalList, (*protocol.TxInternal)(txInternal))
-	}
+				fullEventLog := &protocol.FullEventLog{
+					EventLog: protocolEventLog,
+				}
 
-	eventLogList := make([]*protocol.EventLog, 0, len(fullblock.EventLogList))
-	for _, log := range fullblock.EventLogList {
-		eventLogList = append(eventLogList, (*protocol.EventLog)(log))
-	}
+				// Check for ERC20 Transfer
+				for _, erc20Transfer := range fullblock.EventErc20TransferList {
+					if erc20Transfer.TxHash == tx.TxHash && erc20Transfer.Index == log.Index {
+						fullEventLog.EventErc20Transfer = &protocol.EventErc20Transfer{
+							ContractAddr: erc20Transfer.ContractAddr,
+							From:         erc20Transfer.From,
+							To:           erc20Transfer.To,
+							Amount:       erc20Transfer.Amount,
+							AmountOrigin: erc20Transfer.AmountOrigin,
+							Index:        erc20Transfer.Index,
+						}
+						break
+					}
+				}
 
-	eventErc20TransferList := make([]*protocol.EventErc20Transfer, 0, len(fullblock.EventErc20TransferList))
-	for _, transfer := range fullblock.EventErc20TransferList {
-		eventErc20TransferList = append(eventErc20TransferList, (*protocol.EventErc20Transfer)(transfer))
-	}
+				// Check for ERC721 Transfer
+				for _, erc721Transfer := range fullblock.EventErc721TransferList {
+					if erc721Transfer.TxHash == tx.TxHash && erc721Transfer.Index == log.Index {
+						fullEventLog.EventErc721Transfer = &protocol.EventErc721Transfer{
+							ContractAddr: erc721Transfer.ContractAddr,
+							From:         erc721Transfer.From,
+							To:           erc721Transfer.To,
+							TokenId:      erc721Transfer.TokenId,
+							Index:        erc721Transfer.Index,
+						}
+						break
+					}
+				}
 
-	eventErc721TransferList := make([]*protocol.EventErc721Transfer, 0, len(fullblock.EventErc721TransferList))
-	for _, transfer := range fullblock.EventErc721TransferList {
-		eventErc721TransferList = append(eventErc721TransferList, (*protocol.EventErc721Transfer)(transfer))
-	}
+				// Check for ERC1155 Transfer
+				for _, erc1155Transfer := range fullblock.EventErc1155TransferList {
+					if erc1155Transfer.TxHash == tx.TxHash && erc1155Transfer.Index == log.Index {
+						fullEventLog.EventErc1155Transfer = &protocol.EventErc1155Transfer{
+							ContractAddr: erc1155Transfer.ContractAddr,
+							Operator:     erc1155Transfer.Operator,
+							From:         erc1155Transfer.From,
+							To:           erc1155Transfer.To,
+							TokenId:      erc1155Transfer.TokenId,
+							Amount:       erc1155Transfer.Amount,
+							Index:        erc1155Transfer.Index,
+							IndexInBatch: erc1155Transfer.IndexInBatch,
+						}
+						break
+					}
+				}
 
-	eventErc1155TransferList := make([]*protocol.EventErc1155Transfer, 0, len(fullblock.EventErc1155TransferList))
-	for _, transfer := range fullblock.EventErc1155TransferList {
-		eventErc1155TransferList = append(eventErc1155TransferList, (*protocol.EventErc1155Transfer)(transfer))
+				fullEventLogList = append(fullEventLogList, fullEventLog)
+			}
+		}
+
+		txInternalListForTx := make([]*protocol.TxInternal, 0)
+		for _, txInternal := range fullblock.TxInternalList {
+			if txInternal.TxHash == tx.TxHash {
+				txInternalListForTx = append(txInternalListForTx, &protocol.TxInternal{
+					Index:        txInternal.Index,
+					From:         txInternal.From,
+					To:           txInternal.To,
+					OpCode:       txInternal.OpCode,
+					Value:        txInternal.Value,
+					Success:      txInternal.Success,
+					Depth:        txInternal.Depth,
+					Gas:          txInternal.Gas,
+					GasUsed:      txInternal.GasUsed,
+					Input:        txInternal.Input,
+					Output:       txInternal.Output,
+					TraceAddress: txInternal.TraceAddress,
+				})
+			}
+		}
+
+		protocolTx := &protocol.Tx{
+			TxHash:               tx.TxHash,
+			TxIndex:              tx.TxIndex,
+			TxType:               tx.TxType,
+			From:                 tx.From,
+			To:                   tx.To,
+			Nonce:                tx.Nonce,
+			GasLimit:             tx.GasLimit,
+			GasPrice:             tx.GasPrice,
+			GasUsed:              tx.GasUsed,
+			BaseFee:              tx.BaseFee,
+			BurntFees:            tx.BurntFees,
+			MaxFeePerGas:         tx.MaxFeePerGas,
+			MaxPriorityFeePerGas: tx.MaxPriorityFeePerGas,
+			Value:                tx.Value,
+			Input:                tx.Input,
+			ExecStatus:           tx.ExecStatus,
+			IsCallContract:       tx.IsCallContract,
+			IsCreateContract:     tx.IsCreateContract,
+		}
+
+		fullTx := &protocol.FullTx{
+			Tx:               protocolTx,
+			FullEventLogList: fullEventLogList,
+			TxInternalList:   txInternalListForTx,
+		}
+		fullTxList = append(fullTxList, fullTx)
 	}
 
 	tokenErc721List := make([]*protocol.TokenErc721, 0, len(fullblock.TokenErc721List))
 	for _, token := range fullblock.TokenErc721List {
-		tokenErc721List = append(tokenErc721List, (*protocol.TokenErc721)(token))
+		tokenErc721List = append(tokenErc721List, &protocol.TokenErc721{
+			ContractAddr:  token.ContractAddr,
+			TokenId:       token.TokenId,
+			OwnerAddr:     token.OwnerAddr,
+			TokenUri:      token.TokenUri,
+			TokenMetaData: token.TokenMetaData,
+		})
 	}
 
 	contractList := make([]*protocol.Contract, 0, len(fullblock.ContractList))
 	for _, contract := range fullblock.ContractList {
-		contractList = append(contractList, (*protocol.Contract)(contract))
+		contractList = append(contractList, &protocol.Contract{
+			TxHash:       contract.TxHash,
+			ContractAddr: contract.ContractAddr,
+			CreatorAddr:  contract.CreatorAddr,
+			ExecStatus:   contract.ExecStatus,
+		})
 	}
 
 	contractErc20List := make([]*protocol.ContractErc20, 0, len(fullblock.ContractErc20List))
 	for _, contract := range fullblock.ContractErc20List {
-		contractErc20List = append(contractErc20List, (*protocol.ContractErc20)(contract))
+		contractErc20List = append(contractErc20List, &protocol.ContractErc20{
+			TxHash:            contract.TxHash,
+			ContractAddr:      contract.ContractAddr,
+			CreatorAddr:       contract.CreatorAddr,
+			Name:              contract.Name,
+			Symbol:            contract.Symbol,
+			Decimals:          contract.Decimals,
+			TotalSupply:       contract.TotalSupply,
+			TotalSupplyOrigin: contract.TotalSupplyOrigin,
+		})
 	}
 
 	contractErc721List := make([]*protocol.ContractErc721, 0, len(fullblock.ContractErc721List))
 	for _, contract := range fullblock.ContractErc721List {
-		contractErc721List = append(contractErc721List, (*protocol.ContractErc721)(contract))
+		contractErc721List = append(contractErc721List, &protocol.ContractErc721{
+			TxHash:       contract.TxHash,
+			ContractAddr: contract.ContractAddr,
+			CreatorAddr:  contract.CreatorAddr,
+			Name:         contract.Name,
+			Symbol:       contract.Symbol,
+		})
 	}
 
 	balanceNativeList := make([]*protocol.BalanceNative, 0, len(fullblock.BalanceNativeList))
 	for _, balance := range fullblock.BalanceNativeList {
-		balanceNativeList = append(balanceNativeList, (*protocol.BalanceNative)(balance))
+		balanceNativeList = append(balanceNativeList, &protocol.BalanceNative{
+			Addr:    balance.Addr,
+			Balance: balance.Balance,
+		})
 	}
 
 	balanceErc20List := make([]*protocol.BalanceErc20, 0, len(fullblock.BalanceErc20List))
 	for _, balance := range fullblock.BalanceErc20List {
-		balanceErc20List = append(balanceErc20List, (*protocol.BalanceErc20)(balance))
+		balanceErc20List = append(balanceErc20List, &protocol.BalanceErc20{
+			Addr:         balance.Addr,
+			ContractAddr: balance.ContractAddr,
+			Balance:      balance.Balance,
+		})
 	}
 
 	balanceErc1155List := make([]*protocol.BalanceErc1155, 0, len(fullblock.BalanceErc1155List))
 	for _, balance := range fullblock.BalanceErc1155List {
-		balanceErc1155List = append(balanceErc1155List, (*protocol.BalanceErc1155)(balance))
+		balanceErc1155List = append(balanceErc1155List, &protocol.BalanceErc1155{
+			Addr:         balance.Addr,
+			ContractAddr: balance.ContractAddr,
+			TokenId:      balance.TokenId,
+			Balance:      balance.Balance,
+		})
 	}
 
 	protocolFullBlock := &protocol.FullBlock{
-		Block:                    (*protocol.Block)(fullblock.Block),
-		TxList:                   txList,
-		TxInternalList:           txInternalList,
-		EventLogList:             eventLogList,
-		EventErc20TransferList:   eventErc20TransferList,
-		EventErc721TransferList:  eventErc721TransferList,
-		EventErc1155TransferList: eventErc1155TransferList,
-		TokenErc721List:          tokenErc721List,
-		ContractList:             contractList,
-		ContractErc20List:        contractErc20List,
-		ContractErc721List:       contractErc721List,
-		BalanceNativeList:        balanceNativeList,
-		BalanceErc20List:         balanceErc20List,
-		BalanceErc1155List:       balanceErc1155List,
+		Height:          fullblock.Block.Height,
+		BlockHash:       fullblock.Block.BlockHash,
+		ParentHash:      fullblock.Block.ParentHash,
+		BlockTimestamp:  fullblock.Block.BlockTimestamp,
+		TxsCount:        fullblock.Block.TxsCount,
+		Miner:           fullblock.Block.Miner,
+		Size:            fullblock.Block.Size,
+		Nonce:           fullblock.Block.Nonce,
+		BaseFee:         fullblock.Block.BaseFee,
+		BurntFees:       fullblock.Block.BurntFees,
+		GasLimit:        fullblock.Block.GasLimit,
+		GasUsed:         fullblock.Block.GasUsed,
+		UnclesCount:     fullblock.Block.UnclesCount,
+		Difficulty:      fullblock.Block.Difficulty,
+		TotalDifficulty: fullblock.Block.TotalDifficulty,
+		StateRoot:       fullblock.Block.StateRoot,
+		TransactionRoot: fullblock.Block.TransactionRoot,
+		ReceiptRoot:     fullblock.Block.ReceiptRoot,
+		ExtraData:       fullblock.Block.ExtraData,
+		FullTxList:      fullTxList,
+		StateSet: &protocol.StateSet{
+			TokenErc721List:    tokenErc721List,
+			ContractList:       contractList,
+			ContractErc20List:  contractErc20List,
+			ContractErc721List: contractErc721List,
+			BalanceNativeList:  balanceNativeList,
+			BalanceErc20List:   balanceErc20List,
+			BalanceErc1155List: balanceErc1155List,
+		},
 	}
 
-	data, _ := json.Marshal(protocolFullBlock)
-	return data
+	return protocolFullBlock
 }
