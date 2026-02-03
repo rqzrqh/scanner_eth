@@ -127,9 +127,7 @@ type Contract struct {
 }
 
 type ContractErc20 struct {
-	TxHash       string
 	ContractAddr string
-	CreatorAddr  string
 	Name         []byte
 	Symbol       []byte
 	Decimals     int
@@ -137,9 +135,7 @@ type ContractErc20 struct {
 }
 
 type ContractErc721 struct {
-	TxHash       string
 	ContractAddr string
-	CreatorAddr  string
 	Name         []byte
 	Symbol       []byte
 }
