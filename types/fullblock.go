@@ -119,14 +119,6 @@ type EventErc1155Transfer struct {
 	Amount       string
 }
 
-type TokenErc721 struct {
-	ContractAddr  string
-	TokenId       string
-	OwnerAddr     string
-	TokenUri      string
-	TokenMetaData []byte
-}
-
 type Contract struct {
 	TxHash       string
 	ContractAddr string
@@ -153,14 +145,16 @@ type ContractErc721 struct {
 }
 
 type BalanceNative struct {
-	Addr    string
-	Balance string
+	Addr         string
+	Balance      string
+	UpdateHeight uint64
 }
 
 type BalanceErc20 struct {
 	Addr         string
 	ContractAddr string
 	Balance      string
+	UpdateHeight uint64
 }
 
 type BalanceErc1155 struct {
@@ -168,4 +162,14 @@ type BalanceErc1155 struct {
 	ContractAddr string
 	TokenId      string
 	Balance      string
+	UpdateHeight uint64
+}
+
+type TokenErc721 struct {
+	ContractAddr  string
+	TokenId       string
+	OwnerAddr     string
+	TokenUri      string
+	TokenMetaData []byte
+	UpdateHeight  uint64
 }

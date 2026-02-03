@@ -66,13 +66,13 @@ type Tx struct {
 }
 
 type StateSet struct {
-	TokenErc721List    []*TokenErc721    `json:"token_erc721_list"`
 	ContractList       []*Contract       `json:"contract_list"`
 	ContractErc20List  []*ContractErc20  `json:"contract_erc20_list"`
 	ContractErc721List []*ContractErc721 `json:"contract_erc721_list"`
 	BalanceNativeList  []*BalanceNative  `json:"balance_native_list"`
 	BalanceErc20List   []*BalanceErc20   `json:"balance_erc20_list"`
 	BalanceErc1155List []*BalanceErc1155 `json:"balance_erc1155_list"`
+	TokenErc721List    []*TokenErc721    `json:"token_erc721_list"`
 }
 
 type TxInternal struct {
@@ -135,14 +135,6 @@ type EventErc1155Transfer struct {
 	Amount       string `json:"amount"`
 }
 
-type TokenErc721 struct {
-	ContractAddr  string `json:"contract_addr"`
-	TokenId       string `json:"token_id"`
-	OwnerAddr     string `json:"owner_addr"`
-	TokenUri      string `json:"token_uri"`
-	TokenMetaData []byte `json:"token_meta_data"`
-}
-
 type Contract struct {
 	TxHash       string `json:"tx_hash"`
 	ContractAddr string `json:"contract_addr"`
@@ -169,14 +161,16 @@ type ContractErc721 struct {
 }
 
 type BalanceNative struct {
-	Addr    string `json:"addr"`
-	Balance string `json:"balance"`
+	Addr         string `json:"addr"`
+	Balance      string `json:"balance"`
+	UpdateHeight uint64 `json:"update_height"`
 }
 
 type BalanceErc20 struct {
 	Addr         string `json:"addr"`
 	ContractAddr string `json:"contract_addr"`
 	Balance      string `json:"balance"`
+	UpdateHeight uint64 `json:"update_height"`
 }
 
 type BalanceErc1155 struct {
@@ -184,4 +178,14 @@ type BalanceErc1155 struct {
 	ContractAddr string `json:"contract_addr"`
 	TokenId      string `json:"token_id"`
 	Balance      string `json:"balance"`
+	UpdateHeight uint64 `json:"update_height"`
+}
+
+type TokenErc721 struct {
+	ContractAddr  string `json:"contract_addr"`
+	TokenId       string `json:"token_id"`
+	OwnerAddr     string `json:"owner_addr"`
+	TokenUri      string `json:"token_uri"`
+	TokenMetaData []byte `json:"token_meta_data"`
+	UpdateHeight  uint64 `json:"update_height"`
 }
