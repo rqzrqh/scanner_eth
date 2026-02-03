@@ -42,6 +42,7 @@ type FullTx struct {
 	Tx               *Tx             `json:"tx"`
 	FullEventLogList []*FullEventLog `json:"full_event_log_list"`
 	TxInternalList   []*TxInternal   `json:"tx_internal_list"`
+	ContractList     []*Contract     `json:"contract_list"`
 }
 
 type Tx struct {
@@ -63,16 +64,6 @@ type Tx struct {
 	ExecStatus           uint64 `json:"exec_status"`
 	IsCallContract       bool   `json:"is_call_contract"`
 	IsCreateContract     bool   `json:"is_create_contract"`
-}
-
-type StateSet struct {
-	ContractList       []*Contract       `json:"contract_list"`
-	ContractErc20List  []*ContractErc20  `json:"contract_erc20_list"`
-	ContractErc721List []*ContractErc721 `json:"contract_erc721_list"`
-	BalanceNativeList  []*BalanceNative  `json:"balance_native_list"`
-	BalanceErc20List   []*BalanceErc20   `json:"balance_erc20_list"`
-	BalanceErc1155List []*BalanceErc1155 `json:"balance_erc1155_list"`
-	TokenErc721List    []*TokenErc721    `json:"token_erc721_list"`
 }
 
 type TxInternal struct {
@@ -136,16 +127,22 @@ type EventErc1155Transfer struct {
 }
 
 type Contract struct {
-	TxHash       string `json:"tx_hash"`
 	ContractAddr string `json:"contract_addr"`
 	CreatorAddr  string `json:"creator_addr"`
 	ExecStatus   uint64 `json:"exec_status"`
 }
 
+type StateSet struct {
+	ContractErc20List  []*ContractErc20  `json:"contract_erc20_list"`
+	ContractErc721List []*ContractErc721 `json:"contract_erc721_list"`
+	BalanceNativeList  []*BalanceNative  `json:"balance_native_list"`
+	BalanceErc20List   []*BalanceErc20   `json:"balance_erc20_list"`
+	BalanceErc1155List []*BalanceErc1155 `json:"balance_erc1155_list"`
+	TokenErc721List    []*TokenErc721    `json:"token_erc721_list"`
+}
+
 type ContractErc20 struct {
-	TxHash       string `json:"tx_hash"`
 	ContractAddr string `json:"contract_addr"`
-	CreatorAddr  string `json:"creator_addr"`
 	Name         []byte `json:"name"`
 	Symbol       []byte `json:"symbol"`
 	Decimals     int    `json:"decimals"`
@@ -153,9 +150,7 @@ type ContractErc20 struct {
 }
 
 type ContractErc721 struct {
-	TxHash       string `json:"tx_hash"`
 	ContractAddr string `json:"contract_addr"`
-	CreatorAddr  string `json:"creator_addr"`
 	Name         []byte `json:"name"`
 	Symbol       []byte `json:"symbol"`
 }

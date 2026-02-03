@@ -36,6 +36,11 @@ func newSyncer(clients []*rpc.Client, db *gorm.DB, w *kafka.Writer, reversibleBl
 	logrus.Infof("reversibleBlocks:%v storeChannelSize:%v storeBatchSize:%v storeWorkerCount:%v startHeight:%v endHeight:%v",
 		reversibleBlocks, storeChannelSize, storeBatchSize, storeWorkerCount, startHeight, endHeight)
 
+	if startHeight > endHeight {
+		logrus.Errorf("start height must be less than end height. startHeight:%v endHeight:%v", startHeight, endHeight)
+		os.Exit(0)
+	}
+
 	storeOperationChannel := make(chan *types.StoreOperation, storeChannelSize)
 	publishFeedbackOperationChannel := make(chan *types.PublishFeedbackOperation, 100)
 

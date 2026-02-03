@@ -310,10 +310,7 @@ func convertStorageFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 	contractErc20List := make([]model.ContractErc20, 0, len(fullblock.ContractErc20List))
 	for _, contract := range fullblock.ContractErc20List {
 		modelContract := model.ContractErc20{
-			Height:       blockHeight,
-			TxHash:       contract.TxHash,
 			ContractAddr: contract.ContractAddr,
-			CreatorAddr:  contract.CreatorAddr,
 			Name:         contract.Name,
 			Symbol:       contract.Symbol,
 			Decimals:     contract.Decimals,
@@ -325,10 +322,7 @@ func convertStorageFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 	contractErc721List := make([]model.ContractErc721, 0, len(fullblock.ContractErc721List))
 	for _, contract := range fullblock.ContractErc721List {
 		modelContract := model.ContractErc721{
-			Height:       blockHeight,
-			TxHash:       contract.TxHash,
 			ContractAddr: contract.ContractAddr,
-			CreatorAddr:  contract.CreatorAddr,
 			Name:         contract.Name,
 			Symbol:       contract.Symbol,
 		}
@@ -490,6 +484,17 @@ func convertProtocolFullBlock(fullblock *types.FullBlock) *protocol.FullBlock {
 			}
 		}
 
+		contractList := make([]*protocol.Contract, 0)
+		for _, contract := range fullblock.ContractList {
+			if contract.TxHash == tx.TxHash {
+				contractList = append(contractList, &protocol.Contract{
+					ContractAddr: contract.ContractAddr,
+					CreatorAddr:  contract.CreatorAddr,
+					ExecStatus:   contract.ExecStatus,
+				})
+			}
+		}
+
 		protocolTx := &protocol.Tx{
 			TxHash:               tx.TxHash,
 			TxIndex:              tx.TxIndex,
@@ -515,26 +520,15 @@ func convertProtocolFullBlock(fullblock *types.FullBlock) *protocol.FullBlock {
 			Tx:               protocolTx,
 			FullEventLogList: fullEventLogList,
 			TxInternalList:   txInternalListForTx,
+			ContractList:     contractList,
 		}
 		fullTxList = append(fullTxList, fullTx)
-	}
-
-	contractList := make([]*protocol.Contract, 0, len(fullblock.ContractList))
-	for _, contract := range fullblock.ContractList {
-		contractList = append(contractList, &protocol.Contract{
-			TxHash:       contract.TxHash,
-			ContractAddr: contract.ContractAddr,
-			CreatorAddr:  contract.CreatorAddr,
-			ExecStatus:   contract.ExecStatus,
-		})
 	}
 
 	contractErc20List := make([]*protocol.ContractErc20, 0, len(fullblock.ContractErc20List))
 	for _, contract := range fullblock.ContractErc20List {
 		contractErc20List = append(contractErc20List, &protocol.ContractErc20{
-			TxHash:       contract.TxHash,
 			ContractAddr: contract.ContractAddr,
-			CreatorAddr:  contract.CreatorAddr,
 			Name:         contract.Name,
 			Symbol:       contract.Symbol,
 			Decimals:     contract.Decimals,
@@ -545,9 +539,7 @@ func convertProtocolFullBlock(fullblock *types.FullBlock) *protocol.FullBlock {
 	contractErc721List := make([]*protocol.ContractErc721, 0, len(fullblock.ContractErc721List))
 	for _, contract := range fullblock.ContractErc721List {
 		contractErc721List = append(contractErc721List, &protocol.ContractErc721{
-			TxHash:       contract.TxHash,
 			ContractAddr: contract.ContractAddr,
-			CreatorAddr:  contract.CreatorAddr,
 			Name:         contract.Name,
 			Symbol:       contract.Symbol,
 		})
@@ -617,7 +609,6 @@ func convertProtocolFullBlock(fullblock *types.FullBlock) *protocol.FullBlock {
 		ExtraData:       fullblock.Block.ExtraData,
 		FullTxList:      fullTxList,
 		StateSet: &protocol.StateSet{
-			ContractList:       contractList,
 			ContractErc20List:  contractErc20List,
 			ContractErc721List: contractErc721List,
 			BalanceNativeList:  balanceNativeList,
