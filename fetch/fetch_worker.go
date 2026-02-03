@@ -271,7 +271,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	txList, eventLogList, eventErc20TransferList, eventErc721TransferList, eventErc1155TransferList, txContractList, txBalanceNativeAddress, txBalanceErc20Address, txBalanceErc1155Address, erc20ContractAddrs, erc721ContractAddrs, tokenErc721Set := parseTx(blkJson.Txs, receipts, height, baseFee)
 
 	// parse internal txs
-	txInternalList, txInternalContractList, txInternalBalanceAddress, txInternalBalanceErc20Address := parseTxInternal(txInternalJsonList, height)
+	txInternalList, txInternalContractList, txInternalBalanceNativeAddress, txInternalBalanceErc20Address := parseTxInternal(txInternalJsonList, height)
 
 	balanceNativeAddress := make(map[string]struct{}, 0)
 	balanceErc20Address := make(map[string]map[string]struct{}, 0)
@@ -284,7 +284,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	for k := range txBalanceNativeAddress {
 		balanceNativeAddress[k] = struct{}{}
 	}
-	for k := range txInternalBalanceAddress {
+	for k := range txInternalBalanceNativeAddress {
 		balanceNativeAddress[k] = struct{}{}
 	}
 
@@ -518,7 +518,9 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 
 		// balance
 		balanceNativeAddress[fromAddr] = struct{}{}
-		balanceNativeAddress[toAddr] = struct{}{}
+		if toAddr != "" {
+			balanceNativeAddress[toAddr] = struct{}{}
+		}
 
 		for indexInTx, txLog := range receipt.Logs {
 			// first one is event signature, left is indexed field, up to 3
@@ -541,6 +543,8 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 			}
 			contractAddr := strings.ToLower(txLog.Address.Hex())
 
+			balanceNativeAddress[contractAddr] = struct{}{}
+
 			// event log
 			eventLog := &types.EventLog{
 				TxHash:       txHash,
@@ -557,8 +561,8 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 			eventLogList = append(eventLogList, eventLog)
 
 			if isErc20TransferEvent(topic0, topic1, topic2, topic3) {
-				sender := topic1
-				receiver := topic2
+				sender := strings.ToLower(common.HexToAddress(topic1).Hex())
+				receiver := strings.ToLower(common.HexToAddress(topic2).Hex())
 				tokenAmount := new(big.Int)
 				tokenAmount.SetBytes(txLog.Data)
 
@@ -590,6 +594,10 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 					erc20ContractAddrs[contractAddr] = struct{}{}
 				}
 
+				balanceNativeAddress[sender] = struct{}{}
+				balanceNativeAddress[receiver] = struct{}{}
+				balanceNativeAddress[contractAddr] = struct{}{}
+
 			} else if isErc721TransferEvent(topic0, topic1, topic2, topic3) {
 				sender := strings.ToLower(common.HexToAddress(topic1).Hex())
 				receiver := strings.ToLower(common.HexToAddress(topic2).Hex())
@@ -615,6 +623,11 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 				if contractAddr != util.ZeroAddress {
 					erc721ContractAddrs[contractAddr] = struct{}{}
 				}
+
+				balanceNativeAddress[sender] = struct{}{}
+				balanceNativeAddress[receiver] = struct{}{}
+				balanceNativeAddress[contractAddr] = struct{}{}
+
 			} else if isErc1155SingleTransferEvent(topic0, topic1, topic2, topic3) {
 				var transferSingleData struct {
 					Id    *big.Int
@@ -655,6 +668,12 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 					IndexInBatch: -1,
 				}
 				eventErc1155TransferList = append(eventErc1155TransferList, eventErc1155Transfer)
+
+				balanceNativeAddress[operator] = struct{}{}
+				balanceNativeAddress[sender] = struct{}{}
+				balanceNativeAddress[receiver] = struct{}{}
+				balanceNativeAddress[contractAddr] = struct{}{}
+
 			} else if isErc1155BatchTransferEvent(topic0, topic1, topic2, topic3) {
 				var transferBatchData struct {
 					Ids    []*big.Int
@@ -703,6 +722,11 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 					}
 					eventErc1155TransferList = append(eventErc1155TransferList, eventErc1155Transfer)
 				}
+
+				balanceNativeAddress[operator] = struct{}{}
+				balanceNativeAddress[sender] = struct{}{}
+				balanceNativeAddress[receiver] = struct{}{}
+				balanceNativeAddress[contractAddr] = struct{}{}
 			}
 		}
 	}
@@ -714,14 +738,14 @@ func parseTxInternal(jsonTxInternalList []*TxInternalJson, height uint64) ([]*ty
 	txInternalList := make([]*types.TxInternal, 0)
 	contractList := make([]*types.Contract, 0)
 
-	balanceAddress := make(map[string]struct{}, 0)
+	balanceNativeAddress := make(map[string]struct{}, 0)
 	balanceErc20Address := make(map[string]map[string]struct{}, 0)
 
 	for _, v := range jsonTxInternalList {
 		txHash := v.TxHash
 		for tiIdx, tiLog := range v.Logs {
-			fromAddr := strings.ToLower(tiLog.From)
-			toAddr := strings.ToLower(tiLog.To)
+			fromAddr := strings.ToLower(common.HexToAddress(tiLog.From).Hex())
+			toAddr := strings.ToLower(common.HexToAddress(tiLog.To).Hex())
 
 			if tiLog.OpCode == "CREATE" || tiLog.OpCode == "CREATE2" {
 				if tiLog.Success {
@@ -757,13 +781,15 @@ func parseTxInternal(jsonTxInternalList []*TxInternalJson, height uint64) ([]*ty
 			txInternalList = append(txInternalList, modelTxInternal)
 
 			if tiLog.Success && tiLog.Value.Cmp(big.NewInt(0)) > 0 {
-				balanceAddress[fromAddr] = struct{}{}
-				balanceAddress[toAddr] = struct{}{}
+				balanceNativeAddress[fromAddr] = struct{}{}
+				if toAddr != "" {
+					balanceNativeAddress[toAddr] = struct{}{}
+				}
 			}
 		}
 	}
 
-	return txInternalList, contractList, balanceAddress, balanceErc20Address
+	return txInternalList, contractList, balanceNativeAddress, balanceErc20Address
 }
 
 func fetchBalanceNative(client *rpc.Client, balancesNative []*types.BalanceNative, height uint64) error {
