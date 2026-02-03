@@ -20,7 +20,6 @@ type StorageFullBlock struct {
 	EventErc20TransferList   []model.EventErc20Transfer
 	EventErc721TransferList  []model.EventErc721Transfer
 	EventErc1155TransferList []model.EventErc1155Transfer
-	TokenErc721List          []model.TokenErc721
 
 	ContractList       []model.Contract
 	ContractErc20List  []model.ContractErc20
@@ -29,6 +28,7 @@ type StorageFullBlock struct {
 	BalanceNativeList  []model.BalanceNative
 	BalanceErc20List   []model.BalanceErc20
 	BalanceErc1155List []model.BalanceErc1155
+	TokenErc721List    []model.TokenErc721
 }
 
 type StoreManager struct {
@@ -295,20 +295,6 @@ func convertStorageFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 		eventErc1155TransferList = append(eventErc1155TransferList, modelTransfer)
 	}
 
-	tokenErc721List := make([]model.TokenErc721, 0, len(fullblock.TokenErc721List))
-	for _, token := range fullblock.TokenErc721List {
-		modelToken := model.TokenErc721{
-			Height:        blockHeight,
-			ContractAddr:  token.ContractAddr,
-			TokenId:       token.TokenId,
-			OwnerAddr:     token.OwnerAddr,
-			TokenUri:      token.TokenUri,
-			TokenMetaData: token.TokenMetaData,
-			UpdateHeight:  blockHeight,
-		}
-		tokenErc721List = append(tokenErc721List, modelToken)
-	}
-
 	contractList := make([]model.Contract, 0, len(fullblock.ContractList))
 	for _, contract := range fullblock.ContractList {
 		modelContract := model.Contract{
@@ -354,7 +340,7 @@ func convertStorageFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 		modelBalance := model.BalanceNative{
 			Addr:         balance.Addr,
 			Balance:      balance.Balance,
-			UpdateHeight: blockHeight,
+			UpdateHeight: balance.UpdateHeight,
 		}
 		balanceNativeList = append(balanceNativeList, modelBalance)
 	}
@@ -365,7 +351,7 @@ func convertStorageFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 			Addr:         balance.Addr,
 			ContractAddr: balance.ContractAddr,
 			Balance:      balance.Balance,
-			UpdateHeight: blockHeight,
+			UpdateHeight: balance.UpdateHeight,
 		}
 		balanceErc20List = append(balanceErc20List, modelBalance)
 	}
@@ -377,9 +363,22 @@ func convertStorageFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 			ContractAddr: balance.ContractAddr,
 			TokenId:      balance.TokenId,
 			Balance:      balance.Balance,
-			UpdateHeight: blockHeight,
+			UpdateHeight: balance.UpdateHeight,
 		}
 		balanceErc1155List = append(balanceErc1155List, modelBalance)
+	}
+
+	tokenErc721List := make([]model.TokenErc721, 0, len(fullblock.TokenErc721List))
+	for _, token := range fullblock.TokenErc721List {
+		modelToken := model.TokenErc721{
+			ContractAddr:  token.ContractAddr,
+			TokenId:       token.TokenId,
+			OwnerAddr:     token.OwnerAddr,
+			TokenUri:      token.TokenUri,
+			TokenMetaData: token.TokenMetaData,
+			UpdateHeight:  token.UpdateHeight,
+		}
+		tokenErc721List = append(tokenErc721List, modelToken)
 	}
 
 	return &StorageFullBlock{
@@ -390,13 +389,13 @@ func convertStorageFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 		EventErc20TransferList:   eventErc20TransferList,
 		EventErc721TransferList:  eventErc721TransferList,
 		EventErc1155TransferList: eventErc1155TransferList,
-		TokenErc721List:          tokenErc721List,
 		ContractList:             contractList,
 		ContractErc20List:        contractErc20List,
 		ContractErc721List:       contractErc721List,
 		BalanceNativeList:        balanceNativeList,
 		BalanceErc20List:         balanceErc20List,
 		BalanceErc1155List:       balanceErc1155List,
+		TokenErc721List:          tokenErc721List,
 	}
 }
 
@@ -520,17 +519,6 @@ func convertProtocolFullBlock(fullblock *types.FullBlock) *protocol.FullBlock {
 		fullTxList = append(fullTxList, fullTx)
 	}
 
-	tokenErc721List := make([]*protocol.TokenErc721, 0, len(fullblock.TokenErc721List))
-	for _, token := range fullblock.TokenErc721List {
-		tokenErc721List = append(tokenErc721List, &protocol.TokenErc721{
-			ContractAddr:  token.ContractAddr,
-			TokenId:       token.TokenId,
-			OwnerAddr:     token.OwnerAddr,
-			TokenUri:      token.TokenUri,
-			TokenMetaData: token.TokenMetaData,
-		})
-	}
-
 	contractList := make([]*protocol.Contract, 0, len(fullblock.ContractList))
 	for _, contract := range fullblock.ContractList {
 		contractList = append(contractList, &protocol.Contract{
@@ -568,8 +556,9 @@ func convertProtocolFullBlock(fullblock *types.FullBlock) *protocol.FullBlock {
 	balanceNativeList := make([]*protocol.BalanceNative, 0, len(fullblock.BalanceNativeList))
 	for _, balance := range fullblock.BalanceNativeList {
 		balanceNativeList = append(balanceNativeList, &protocol.BalanceNative{
-			Addr:    balance.Addr,
-			Balance: balance.Balance,
+			Addr:         balance.Addr,
+			Balance:      balance.Balance,
+			UpdateHeight: balance.UpdateHeight,
 		})
 	}
 
@@ -579,6 +568,7 @@ func convertProtocolFullBlock(fullblock *types.FullBlock) *protocol.FullBlock {
 			Addr:         balance.Addr,
 			ContractAddr: balance.ContractAddr,
 			Balance:      balance.Balance,
+			UpdateHeight: balance.UpdateHeight,
 		})
 	}
 
@@ -589,6 +579,19 @@ func convertProtocolFullBlock(fullblock *types.FullBlock) *protocol.FullBlock {
 			ContractAddr: balance.ContractAddr,
 			TokenId:      balance.TokenId,
 			Balance:      balance.Balance,
+			UpdateHeight: balance.UpdateHeight,
+		})
+	}
+
+	tokenErc721List := make([]*protocol.TokenErc721, 0, len(fullblock.TokenErc721List))
+	for _, token := range fullblock.TokenErc721List {
+		tokenErc721List = append(tokenErc721List, &protocol.TokenErc721{
+			ContractAddr:  token.ContractAddr,
+			TokenId:       token.TokenId,
+			OwnerAddr:     token.OwnerAddr,
+			TokenUri:      token.TokenUri,
+			TokenMetaData: token.TokenMetaData,
+			UpdateHeight:  token.UpdateHeight,
 		})
 	}
 
@@ -614,13 +617,13 @@ func convertProtocolFullBlock(fullblock *types.FullBlock) *protocol.FullBlock {
 		ExtraData:       fullblock.Block.ExtraData,
 		FullTxList:      fullTxList,
 		StateSet: &protocol.StateSet{
-			TokenErc721List:    tokenErc721List,
 			ContractList:       contractList,
 			ContractErc20List:  contractErc20List,
 			ContractErc721List: contractErc721List,
 			BalanceNativeList:  balanceNativeList,
 			BalanceErc20List:   balanceErc20List,
 			BalanceErc1155List: balanceErc1155List,
+			TokenErc721List:    tokenErc721List,
 		},
 	}
 

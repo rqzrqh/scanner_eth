@@ -55,6 +55,20 @@ func InitAbi() {
 	}
 }
 
+type TokenErc721KeyValue struct {
+	ContractAddr string
+	TokenId      string
+}
+
+type FetchResult struct {
+	NodeId      int
+	TaskId      int
+	ForkVersion uint64
+	Height      uint64
+	FullBlock   *types.FullBlock
+	CostTime    time.Duration
+}
+
 type FetchWorker struct {
 	nodeId                   int
 	taskId                   int
@@ -142,6 +156,10 @@ func transTraceAddressToString(opcode string, traceAddress []uint64) string {
 	return res
 }
 
+// parse tx and log
+// fetch receipts and internal tx
+// fetch latest state, like erc20/erc721/erc1155 token info
+// the reason why not fetch the state of one specific height is fast node always lack historical state, only archive node has it.
 func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *types.FullBlock {
 	blkJson := &BlockJson{}
 	// fetch block with txs
@@ -250,7 +268,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	*/
 
 	// parse txs
-	txList, eventLogList, eventErc20TransferList, eventErc721TransferList, eventErc1155TransferList, tokenErc721List, txContractList, txSet, txBalanceNativeAddress, txBalanceErc20Address, txBalanceErc1155Address, erc20ContractAddrs, erc721ContractAddrs := parseTx(blkJson.Txs, receipts, height, baseFee)
+	txList, eventLogList, eventErc20TransferList, eventErc721TransferList, eventErc1155TransferList, txContractList, txSet, txBalanceNativeAddress, txBalanceErc20Address, txBalanceErc1155Address, erc20ContractAddrs, erc721ContractAddrs, tokenErc721Set := parseTx(blkJson.Txs, receipts, height, baseFee)
 
 	// parse internal txs
 	txInternalList, txInternalContractList, txInternalBalanceAddress, txInternalBalanceErc20Address := parseTxInternal(txInternalJsonList, height)
@@ -262,7 +280,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	contractList = append(contractList, txContractList...)
 	contractList = append(contractList, txInternalContractList...)
 
-	// get all native token balance changed accounts
+	// get all accounts's native token balance whose native balance has been changed
 	for k := range txBalanceNativeAddress {
 		balanceNativeAddress[k] = struct{}{}
 	}
@@ -270,7 +288,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		balanceNativeAddress[k] = struct{}{}
 	}
 
-	// get all erc20 token balance changed accounts
+	// get all accounts's erc20 token balance whose erc20 balance has been changed
 	for k, v := range txBalanceErc20Address {
 		for c := range v {
 			if _, ok := balanceErc20Address[k]; !ok {
@@ -288,59 +306,36 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		}
 	}
 
-	// fetch native token balance whose balance is changed
-	var balanceNativeList []*types.BalanceNative = nil
+	// fetch native token balance
+	balanceNativeList := make([]*types.BalanceNative, 0, len(balanceNativeAddress))
 	{
-		balances := make([]*BalanceNative, 0)
 		for addr := range balanceNativeAddress {
-			balances = append(balances, &BalanceNative{
-				Addr: common.HexToAddress(addr),
+			balanceNativeList = append(balanceNativeList, &types.BalanceNative{
+				Addr: addr,
 			})
 		}
 
-		if err := fetchBalanceNative(client, balances, height); err != nil {
+		if err := fetchBalanceNative(client, balanceNativeList, height); err != nil {
 			logrus.Warnf("fetch balance failed. nodeId:%v taskId:%v height:%v err:%v", nodeId, taskId, height, err)
 			return nil
 		}
-
-		balanceNativeList = make([]*types.BalanceNative, 0, len(balances))
-		for _, v := range balances {
-			// TODO use latest height
-			balanceNative := &types.BalanceNative{
-				Addr:    v.Addr.Hex(),
-				Balance: v.ValueHexBig.ToInt().String(),
-			}
-			balanceNativeList = append(balanceNativeList, balanceNative)
-		}
 	}
 
-	// fetch erc20 token balance whose balance is changed
-	var balanceErc20List []*types.BalanceErc20 = nil
+	// fetch erc20 token balance
+	balanceErc20List := make([]*types.BalanceErc20, 0)
 	{
-		balancesErc20 := make([]*BalanceErc20, 0)
 		for addr, v := range balanceErc20Address {
 			for contractAddr := range v {
-				balancesErc20 = append(balancesErc20, &BalanceErc20{
-					Addr:         common.HexToAddress(addr),
-					ContractAddr: common.HexToAddress(contractAddr),
+				balanceErc20List = append(balanceErc20List, &types.BalanceErc20{
+					Addr:         addr,
+					ContractAddr: contractAddr,
 				})
 			}
 		}
 
-		if err := fetchErc20BalancesBatch(client, balancesErc20, height); err != nil {
+		if err := fetchErc20BalancesBatch(client, balanceErc20List, height); err != nil {
 			logrus.Warnf("fetch erc20balance failed. nodeId:%v taskId:%v height:%v err:%v", nodeId, taskId, height, err)
 			return nil
-		}
-
-		balanceErc20List = make([]*types.BalanceErc20, 0, len(balancesErc20))
-
-		for _, v := range balancesErc20 {
-			balanceErc20 := &types.BalanceErc20{
-				Addr:         v.Addr.Hex(),
-				ContractAddr: v.ContractAddr.Hex(),
-				Balance:      v.Value.String(),
-			}
-			balanceErc20List = append(balanceErc20List, balanceErc20)
 		}
 	}
 
@@ -383,6 +378,26 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		}
 	}
 
+	// get new erc721 token info
+	tokenErc721List := make([]*types.TokenErc721, 0, len(tokenErc721Set))
+	{
+		for k := range tokenErc721Set {
+			contractAddr := common.HexToAddress(k.ContractAddr)
+			var ok bool
+			var tokenId *big.Int
+			if tokenId, ok = new(big.Int).SetString(k.TokenId, 10); !ok {
+				logrus.Warnf("set string failed for contract:%v tokenId: %v", k.ContractAddr, k.TokenId)
+				continue
+			}
+
+			tokenErc721, err := fetchTokenErc721(client, &contractAddr, tokenId)
+			if err != nil {
+				return nil
+			}
+			tokenErc721List = append(tokenErc721List, tokenErc721)
+		}
+	}
+
 	fmt.Println("erc1155 contract count:", len(txBalanceErc1155Address))
 
 	balanceErc1155List := make([]*types.BalanceErc1155, 0)
@@ -395,7 +410,6 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		EventErc20TransferList:   eventErc20TransferList,
 		EventErc721TransferList:  eventErc721TransferList,
 		EventErc1155TransferList: eventErc1155TransferList,
-		TokenErc721List:          tokenErc721List,
 
 		ContractList:       contractList,
 		ContractErc20List:  contractErc20List,
@@ -404,14 +418,15 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		BalanceNativeList:  balanceNativeList,
 		BalanceErc20List:   balanceErc20List,
 		BalanceErc1155List: balanceErc1155List,
+		TokenErc721List:    tokenErc721List,
 	}
 
 	return fullblock
 }
 
 func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, height uint64, baseFee *big.Int) (
-	[]*types.Tx, []*types.EventLog, []*types.EventErc20Transfer, []*types.EventErc721Transfer, []*types.EventErc1155Transfer, []*types.TokenErc721, []*types.Contract,
-	map[string]*TxJson, map[string]struct{}, map[string]map[string]struct{}, map[string]map[string]map[string]struct{}, map[string]string, map[string]string,
+	[]*types.Tx, []*types.EventLog, []*types.EventErc20Transfer, []*types.EventErc721Transfer, []*types.EventErc1155Transfer, []*types.Contract,
+	map[string]*TxJson, map[string]struct{}, map[string]map[string]struct{}, map[string]map[string]map[string]struct{}, map[string]string, map[string]string, map[TokenErc721KeyValue]TokenErc721KeyValue,
 ) {
 
 	txList := make([]*types.Tx, 0, len(jsonTxList))
@@ -419,7 +434,6 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 	eventErc20TransferList := make([]*types.EventErc20Transfer, 0)
 	eventErc721TransferList := make([]*types.EventErc721Transfer, 0)
 	eventErc1155TransferList := make([]*types.EventErc1155Transfer, 0)
-	tokenErc721List := make([]*types.TokenErc721, 0)
 	contractList := make([]*types.Contract, 0)
 
 	txSet := make(map[string]*TxJson, 0)
@@ -429,6 +443,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 
 	erc20ContractAddrs := make(map[string]string, 0)
 	erc721ContractAddrs := make(map[string]string, 0)
+	tokenErc721Set := make(map[TokenErc721KeyValue]TokenErc721KeyValue, 0)
 
 	for _, txJson := range jsonTxList {
 		txHash := txJson.Hash
@@ -608,15 +623,12 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 				}
 				eventErc721TransferList = append(eventErc721TransferList, eventErc721Transfer)
 
-				// token erc721
-				tokenErc721 := &types.TokenErc721{
-					ContractAddr:  contractAddr,
-					TokenId:       tokenId,
-					OwnerAddr:     receiver,
-					TokenUri:      "",
-					TokenMetaData: []byte(""),
+				tokenErc721KeyValue := TokenErc721KeyValue{
+					ContractAddr: contractAddr,
+					TokenId:      tokenId,
 				}
-				tokenErc721List = append(tokenErc721List, tokenErc721)
+
+				tokenErc721Set[tokenErc721KeyValue] = tokenErc721KeyValue
 
 				// consider success
 				if contractAddr != util.ZeroAddress {
@@ -718,7 +730,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 		}
 	}
 
-	return txList, eventLogList, eventErc20TransferList, eventErc721TransferList, eventErc1155TransferList, tokenErc721List, contractList, txSet, balanceNativeAddress, balanceErc20Address, balanceErc1155Address, erc20ContractAddrs, erc721ContractAddrs
+	return txList, eventLogList, eventErc20TransferList, eventErc721TransferList, eventErc1155TransferList, contractList, txSet, balanceNativeAddress, balanceErc20Address, balanceErc1155Address, erc20ContractAddrs, erc721ContractAddrs, tokenErc721Set
 }
 
 func parseTxInternal(jsonTxInternalList []*TxInternalJson, height uint64) ([]*types.TxInternal, []*types.Contract, map[string]struct{}, map[string]map[string]struct{}) {
@@ -777,13 +789,15 @@ func parseTxInternal(jsonTxInternalList []*TxInternalJson, height uint64) ([]*ty
 	return txInternalList, contractList, balanceAddress, balanceErc20Address
 }
 
-func fetchBalanceNative(client *rpc.Client, balancesNative []*BalanceNative, height uint64) error {
-	elems := make([]rpc.BatchElem, 0)
-	for _, ba := range balancesNative {
+func fetchBalanceNative(client *rpc.Client, balancesNative []*types.BalanceNative, height uint64) error {
+	hexBalances := make([]hexutil.Big, len(balancesNative))
+
+	elems := make([]rpc.BatchElem, 0, len(balancesNative)+1)
+	for i, ba := range balancesNative {
 		elem := rpc.BatchElem{
 			Method: "eth_getBalance",
-			Args:   []interface{}{ba.Addr, "latest"},
-			Result: &ba.ValueHexBig,
+			Args:   []interface{}{common.HexToAddress(ba.Addr), "latest"},
+			Result: &hexBalances[i],
 		}
 		elems = append(elems, elem)
 	}
@@ -815,8 +829,9 @@ func fetchBalanceNative(client *rpc.Client, balancesNative []*BalanceNative, hei
 			return fmt.Errorf("latest height:%v got cur chain height:%v", height, uint64(blockNumber))
 		}
 
-		for _, ba := range balancesNative {
-			ba.Height = big.NewInt(int64(blockNumber))
+		for i, ba := range balancesNative {
+			ba.Balance = hexBalances[i].ToInt().String()
+			ba.UpdateHeight = uint64(blockNumber)
 		}
 
 		return nil
@@ -829,24 +844,25 @@ func fetchBalanceNative(client *rpc.Client, balancesNative []*BalanceNative, hei
 	return err
 }
 
-func fetchErc20BalancesBatch(client *rpc.Client, bs []*BalanceErc20, height uint64) error {
+func fetchErc20BalancesBatch(client *rpc.Client, bs []*types.BalanceErc20, height uint64) error {
+	hexBalances := make([]hexutil.Bytes, len(bs))
 	elems := make([]rpc.BatchElem, 0, len(bs))
-	for _, v := range bs {
+	for i, v := range bs {
 		b := v
-		input, err := erc20ABI.Pack("balanceOf", b.Addr)
+		input, err := erc20ABI.Pack("balanceOf", common.HexToAddress(b.Addr))
 		if err != nil {
 			return fmt.Errorf("panic erc20 balanceOf input err:%v", err)
 		}
 		arg := map[string]interface{}{
-			"from": b.Addr,
-			"to":   &b.ContractAddr,
+			"from": common.HexToAddress(b.Addr),
+			"to":   common.HexToAddress(b.ContractAddr),
 			"data": hexutil.Bytes(input),
 		}
 
 		elem := rpc.BatchElem{
 			Method: "eth_call",
 			Args:   []interface{}{arg, "latest"},
-			Result: &b.ValueBytes,
+			Result: &hexBalances[i],
 		}
 		elems = append(elems, elem)
 	}
@@ -874,13 +890,14 @@ func fetchErc20BalancesBatch(client *rpc.Client, bs []*BalanceErc20, height uint
 		return fmt.Errorf("latest height:%v got cur chain height:%v", height, uint64(blockNumber))
 	}
 
-	for _, b := range bs {
-		b.Height = new(big.Int).SetUint64(uint64(blockNumber))
-		if len(b.ValueBytes) == 0 {
+	for i, b := range bs {
+		b.UpdateHeight = uint64(blockNumber)
+		if len(hexBalances[i]) == 0 {
+			b.Balance = "0"
 			continue
 		}
 
-		rets, err := erc20ABI.Unpack("balanceOf", b.ValueBytes)
+		rets, err := erc20ABI.Unpack("balanceOf", hexBalances[i])
 		if err != nil {
 			logrus.Warnf("unpack erc20 balanceOf err:%v contract:%v addr:%v", err, b.ContractAddr, b.Addr)
 			continue
@@ -891,7 +908,7 @@ func fetchErc20BalancesBatch(client *rpc.Client, bs []*BalanceErc20, height uint
 		}
 
 		if v, ok := rets[0].(*big.Int); ok {
-			b.Value = v
+			b.Balance = v.String()
 		} else {
 			logrus.Warnf("erc20 balanceOf ret type error err:%v contract:%v addr:%v", err, b.ContractAddr, b.Addr)
 		}
@@ -1079,7 +1096,7 @@ func fetchContractErc721(client *rpc.Client, addr *common.Address) (*types.Contr
 			continue
 		}
 		if len(rets) <= 0 {
-			logrus.Warnf("elem rets empty addr:%v", addr.Hex())
+			logrus.Warnf("erc721 elem rets empty addr:%v", addr.Hex())
 			continue
 		}
 
@@ -1100,4 +1117,83 @@ func fetchContractErc721(client *rpc.Client, addr *common.Address) (*types.Contr
 	}
 
 	return contractErc721, nil
+}
+
+func fetchTokenErc721(client *rpc.Client, contractAddr *common.Address, tokenId *big.Int) (*types.TokenErc721, error) {
+	methods := []string{"ownerOf", "tokenURI"}
+	elems := make([]rpc.BatchElem, 0)
+	for _, method := range methods {
+		input, _ := erc721ABI.Pack(method, tokenId)
+		var ret hexutil.Bytes
+		msg := ethereum.CallMsg{
+			To:   contractAddr,
+			Data: input,
+		}
+		elem := rpc.BatchElem{
+			Method: "eth_call",
+			Args:   []interface{}{toCallArg2(msg), "latest"},
+			Result: &ret,
+		}
+		elems = append(elems, elem)
+	}
+
+	var blockNumber hexutil.Uint64
+	heightReq := rpc.BatchElem{
+		Method: "eth_blockNumber",
+		Args:   []interface{}{},
+		Result: &blockNumber,
+	}
+	elems = append(elems, heightReq)
+
+	err := client.BatchCall(elems)
+	if err != nil {
+		return nil, fmt.Errorf("batch call get token erc721 info failed. err:%v addr:%v token_id:%v", err, contractAddr.Hex(), tokenId.String())
+	}
+
+	tokenErc721 := &types.TokenErc721{}
+	tokenErc721.ContractAddr = strings.ToLower(contractAddr.Hex())
+	tokenErc721.TokenId = tokenId.String()
+	tokenErc721.UpdateHeight = uint64(blockNumber)
+
+	for i, elem := range elems {
+		if elem.Method == "eth_blockNumber" {
+			continue
+		}
+
+		if elem.Error != nil {
+			logrus.Warnf("token erc721 info elem err:%v elem:%v method:%v", elem.Error, elem, methods[i])
+			continue
+		}
+		ret := elem.Result.(*hexutil.Bytes)
+		if ret == nil || len(*ret) == 0 {
+			logrus.Warnf("token erc721 info ret empty addr:%v elem:%v method:%v", contractAddr.Hex(), elem, methods[i])
+			continue
+		}
+		rets, err := erc721ABI.Unpack(methods[i], *ret)
+		if err != nil {
+			logrus.Warnf("token erc721 info unpack err:%v addr:%v method:%v", err, contractAddr.Hex(), methods[i])
+			continue
+		}
+		if len(rets) <= 0 {
+			logrus.Warnf("token erc721 elem rets empty addr:%v", contractAddr.Hex())
+			continue
+		}
+
+		switch i {
+		case 0:
+			if owner, ok := rets[0].(common.Address); ok {
+				tokenErc721.OwnerAddr = owner.String()
+			} else {
+				logrus.Warnf("token erc721 info owner not string addr:%v token_id:%v", contractAddr.Hex(), tokenId.String())
+			}
+		case 1:
+			if tokenURI, ok := rets[0].(string); ok {
+				tokenErc721.TokenUri = tokenURI
+			} else {
+				logrus.Warnf("token erc721 info tokenURI not string addr:%v token_id:%v", contractAddr.Hex(), tokenId.String())
+			}
+		}
+	}
+
+	return tokenErc721, nil
 }
