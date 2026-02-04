@@ -45,6 +45,8 @@ func main() {
 
 	fmt.Println("load config success")
 
+	// show loglevel
+
 	if err := log.Init(conf.AppName, env, conf.Log); err != nil {
 		fmt.Println("log init failed.", err)
 		os.Exit(0)

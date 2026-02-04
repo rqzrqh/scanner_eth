@@ -256,15 +256,15 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 
 	// fetch internal tx
 	txInternalJsonList := make([]*TxInternalJson, 0)
-	/* need to change evm code
-	{
-		arg := map[string]interface{}{}
-		method := "debug_traceActionByBlockNumber"
-		if err := client.CallContext(context.Background(), &txInternalJsonList, method, util.ToBlockNumArg(new(big.Int).SetUint64(height)), arg); err != nil {
-			logrus.Warnf("fetch internal tx failed. nodeId:%v taskId:%v err:%v height:%v", nodeId, taskId, err, height)
-			return nil
+	/*
+		{
+			arg := map[string]interface{}{}
+			method := "debug_traceActionByBlockNumber"
+			if err := client.CallContext(context.Background(), &txInternalJsonList, method, util.ToBlockNumArg(new(big.Int).SetUint64(height)), arg); err != nil {
+				logrus.Warnf("fetch internal tx failed. nodeId:%v taskId:%v err:%v height:%v", nodeId, taskId, err, height)
+				return nil
+			}
 		}
-	}
 	*/
 
 	// parse txs
@@ -556,7 +556,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 				Topic1:       topic1,
 				Topic2:       topic2,
 				Topic3:       topic3,
-				Data:         hexutil.Encode(txLog.Data),
+				Data:         txLog.Data,
 			}
 			eventLogList = append(eventLogList, eventLog)
 
@@ -740,55 +740,55 @@ func parseTxInternal(jsonTxInternalList []*TxInternalJson, height uint64) ([]*ty
 
 	balanceNativeAddress := make(map[string]struct{}, 0)
 	balanceErc20Address := make(map[string]map[string]struct{}, 0)
+	/*
+		for _, v := range jsonTxInternalList {
+			txHash := v.TxHash
+			for tiIdx, tiLog := range v.Logs {
+				fromAddr := strings.ToLower(common.HexToAddress(tiLog.From).Hex())
+				toAddr := strings.ToLower(common.HexToAddress(tiLog.To).Hex())
 
-	for _, v := range jsonTxInternalList {
-		txHash := v.TxHash
-		for tiIdx, tiLog := range v.Logs {
-			fromAddr := strings.ToLower(common.HexToAddress(tiLog.From).Hex())
-			toAddr := strings.ToLower(common.HexToAddress(tiLog.To).Hex())
-
-			if tiLog.OpCode == "CREATE" || tiLog.OpCode == "CREATE2" {
-				if tiLog.Success {
-					var status uint64 = 1
-					if tiLog.To == util.ZeroAddress {
-						logrus.Fatal("internal tx empty txhash:%v from:%v to:%v", txHash, fromAddr, toAddr)
+				if tiLog.OpCode == "CREATE" || tiLog.OpCode == "CREATE2" {
+					if tiLog.Success {
+						var status uint64 = 1
+						if tiLog.To == util.ZeroAddress {
+							logrus.Fatal("internal tx empty txhash:%v from:%v to:%v", txHash, fromAddr, toAddr)
+						}
+						contract := &types.Contract{
+							TxHash:       txHash,
+							ContractAddr: toAddr,
+							CreatorAddr:  fromAddr,
+							ExecStatus:   status,
+						}
+						contractList = append(contractList, contract)
 					}
-					contract := &types.Contract{
-						TxHash:       txHash,
-						ContractAddr: toAddr,
-						CreatorAddr:  fromAddr,
-						ExecStatus:   status,
-					}
-					contractList = append(contractList, contract)
 				}
-			}
 
-			modelTxInternal := &types.TxInternal{
-				TxHash:       txHash,
-				Index:        tiIdx,
-				From:         fromAddr,
-				To:           toAddr,
-				OpCode:       tiLog.OpCode,
-				Value:        tiLog.Value.String(),
-				Success:      tiLog.Success,
-				Depth:        tiLog.Depth,
-				Gas:          tiLog.Gas,
-				GasUsed:      tiLog.GasUsed,
-				Input:        tiLog.Input,
-				Output:       tiLog.Output,
-				TraceAddress: transTraceAddressToString(tiLog.OpCode, tiLog.TraceAddress),
-			}
-			txInternalList = append(txInternalList, modelTxInternal)
+				modelTxInternal := &types.TxInternal{
+					TxHash:       txHash,
+					Index:        tiIdx,
+					From:         fromAddr,
+					To:           toAddr,
+					OpCode:       tiLog.OpCode,
+					Value:        tiLog.Value.String(),
+					Success:      tiLog.Success,
+					Depth:        tiLog.Depth,
+					Gas:          tiLog.Gas,
+					GasUsed:      tiLog.GasUsed,
+					Input:        tiLog.Input,
+					Output:       tiLog.Output,
+					TraceAddress: transTraceAddressToString(tiLog.OpCode, tiLog.TraceAddress),
+				}
+				txInternalList = append(txInternalList, modelTxInternal)
 
-			if tiLog.Success && tiLog.Value.Cmp(big.NewInt(0)) > 0 {
-				balanceNativeAddress[fromAddr] = struct{}{}
-				if toAddr != "" {
-					balanceNativeAddress[toAddr] = struct{}{}
+				if tiLog.Success && tiLog.Value.Cmp(big.NewInt(0)) > 0 {
+					balanceNativeAddress[fromAddr] = struct{}{}
+					if toAddr != "" {
+						balanceNativeAddress[toAddr] = struct{}{}
+					}
 				}
 			}
 		}
-	}
-
+	*/
 	return txInternalList, contractList, balanceNativeAddress, balanceErc20Address
 }
 
@@ -1008,13 +1008,13 @@ func fetchContractErc20(client *rpc.Client, addr *common.Address, height uint64)
 		switch i {
 		case 0:
 			if name, ok := rets[0].(string); ok {
-				contractErc20.Name = []byte(name)
+				contractErc20.Name = name
 			} else {
 				logrus.Infof("erc20 info name not string addr:%v", addr.Hex())
 			}
 		case 1:
 			if symbol, ok := rets[0].(string); ok {
-				contractErc20.Symbol = []byte(symbol)
+				contractErc20.Symbol = symbol
 			} else {
 				logrus.Infof("erc20 info symbol not string addr:%v", addr.Hex())
 			}
@@ -1106,13 +1106,13 @@ func fetchContractErc721(client *rpc.Client, addr *common.Address) (*types.Contr
 		switch i {
 		case 0:
 			if name, ok := rets[0].(string); ok {
-				contractErc721.Name = []byte(name)
+				contractErc721.Name = name
 			} else {
 				logrus.Warnf("erc721 info name not string addr:%v", addr.Hex())
 			}
 		case 1:
 			if symbol, ok := rets[0].(string); ok {
-				contractErc721.Symbol = []byte(symbol)
+				contractErc721.Symbol = symbol
 			} else {
 				logrus.Warnf("erc721 info symbol not string addr:%v", addr.Hex())
 			}
