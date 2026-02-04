@@ -14,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/segmentio/kafka-go"
 	"github.com/sirupsen/logrus"
@@ -89,7 +88,7 @@ func main() {
 	logrus.Infof("database ping success")
 
 	if err := db.AutoMigrate(
-		&model.ChainInfo{},
+		&model.ScannerInfo{},
 		&model.ChainBinlog{},
 		&model.Block{},
 		&model.Tx{},
@@ -113,9 +112,9 @@ func main() {
 
 	logrus.Infof("database auto migrate success")
 
-	initChainInfo(db, conf.Chain.ChainId, conf.Chain.GenesisBlockHash)
+	initScannerInfo(db, conf.Chain.ChainId, conf.Chain.GenesisBlockHash)
 
-	logrus.Infof("init chain info success")
+	logrus.Infof("init scanner info success")
 
 	initGenesisBlock(db, conf.Chain.GenesisBlockHash)
 
@@ -147,9 +146,9 @@ func main() {
 
 	logrus.Infof("create rpc client success")
 
-	checkNodeChainInfo(clients, db)
+	chainId, genesisBlockHash := getScannerInfo(db)
 
-	logrus.Infof("node chain info check passed")
+	logrus.Infof("get chain info success. chainId:%v genesisBlockHash:%v", chainId, genesisBlockHash)
 
 	w := &kafka.Writer{
 		Addr:         kafka.TCP(conf.Publish.KafkaBrokers...),
@@ -167,7 +166,7 @@ func main() {
 	s := newSyncer(clients, db, w, conf.Chain.ReversibleBlocks, conf.Store.ChannelSize, conf.Store.BatchSize, conf.Store.WorkerCount, conf.Fetch.StartHeight, conf.Fetch.EndHeight)
 
 	leaseAlive()
-	s.Run()
+	s.Run(chainId, genesisBlockHash)
 
 	logrus.Infof("start success")
 
@@ -194,29 +193,29 @@ func leaseAlive() {
 	fmt.Fprintf(f, "%d", now)
 }
 
-func initChainInfo(db *gorm.DB, chainId uint64, genesisBlockHash string) {
-	var chainInfos []model.ChainInfo
-	if err := db.Find(&chainInfos).Error; err != nil {
-		logrus.Errorf("load chain info from db failed. err:%v", err)
+func initScannerInfo(db *gorm.DB, chainId uint64, genesisBlockHash string) {
+	var scannerInfos []model.ScannerInfo
+	if err := db.Find(&scannerInfos).Error; err != nil {
+		logrus.Errorf("load scanner info from db failed. err:%v", err)
 		os.Exit(0)
 	}
-	if len(chainInfos) == 0 {
-		chainInfo := &model.ChainInfo{
+	if len(scannerInfos) == 0 {
+		scannerInfo := &model.ScannerInfo{
 			ChainId:          chainId,
 			GenesisBlockHash: genesisBlockHash,
 		}
-		if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(chainInfo).Error; err != nil {
-			logrus.Errorf("insert chain info to db failed. err:%v", err)
+		if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(scannerInfo).Error; err != nil {
+			logrus.Errorf("insert scanner info to db failed. err:%v", err)
 			os.Exit(0)
 		}
-		logrus.Infof("insert chain info to db success. chain_id:%v hash:%v", chainId, genesisBlockHash)
-	} else if len(chainInfos) > 1 {
-		logrus.Errorf("chain info count more than 1 in db. count:%v", len(chainInfos))
+		logrus.Infof("insert scanner info to db success. chain_id:%v hash:%v", chainId, genesisBlockHash)
+	} else if len(scannerInfos) > 1 {
+		logrus.Errorf("scanner info count more than 1 in db. count:%v", len(scannerInfos))
 		os.Exit(0)
 	} else {
-		if chainInfos[0].ChainId != chainId || chainInfos[0].GenesisBlockHash != genesisBlockHash {
-			logrus.Errorf("chain info not equal with db. db:%v %v conf:%v %v",
-				chainInfos[0].ChainId, chainInfos[0].GenesisBlockHash, chainId, genesisBlockHash)
+		if scannerInfos[0].ChainId != chainId || scannerInfos[0].GenesisBlockHash != genesisBlockHash {
+			logrus.Errorf("scanner info not equal with db. db:%v %v conf:%v %v",
+				scannerInfos[0].ChainId, scannerInfos[0].GenesisBlockHash, chainId, genesisBlockHash)
 			os.Exit(0)
 		}
 	}
@@ -235,37 +234,12 @@ func initGenesisBlock(db *gorm.DB, genesisBlockHash string) {
 	}
 }
 
-func checkNodeChainInfo(clients []*rpc.Client, db *gorm.DB) {
-	var chainInfo model.ChainInfo
-	if err := db.First(&chainInfo).Error; err != nil {
-		logrus.Errorf("load chain info from db failed. err:%v", err)
+func getScannerInfo(db *gorm.DB) (uint64, string) {
+	var scannerInfo model.ScannerInfo
+	if err := db.First(&scannerInfo).Error; err != nil {
+		logrus.Errorf("load scanner info from db failed. err:%v", err)
 		os.Exit(0)
 	}
 
-	// compare node chain info with db
-	for i, client := range clients {
-		strChainId := ""
-		if err := client.Call(&strChainId, "eth_chainId"); err != nil {
-			logrus.Errorf("get chain id failed. id:%v err:%v", i, err)
-			os.Exit(0)
-		}
-
-		chainId := hexutil.MustDecodeUint64(strChainId)
-
-		if chainId != chainInfo.ChainId {
-			logrus.Errorf("chain id not equal with db. id:%v db:%v node:%v", i, chainInfo.ChainId, chainId)
-			os.Exit(0)
-		}
-
-		blkJson := &SimpleBlockHeaderJson{}
-		if err := client.Call(blkJson, "eth_getBlockByNumber", "0x0", false); err != nil {
-			logrus.Errorf("get genesis block failed. id:%v err:%v", i, err)
-			os.Exit(0)
-		}
-
-		if blkJson.Hash != chainInfo.GenesisBlockHash {
-			logrus.Errorf("genesis block not equal with db. id:%v db:%v node:%v", i, chainInfo.GenesisBlockHash, blkJson.Hash)
-			os.Exit(0)
-		}
-	}
+	return scannerInfo.ChainId, scannerInfo.GenesisBlockHash
 }
