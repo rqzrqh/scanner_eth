@@ -14,7 +14,7 @@ type EventLog struct {
 	Topic2     string `gorm:"index;type:varchar(255);comment:topic2"`
 	Topic3     string `gorm:"index;type:varchar(255);comment:topic3"`
 
-	Data string `gorm:"type:longtext;comment:data"`
+	Data []byte `gorm:"type:blob;comment:data"`
 }
 
 func (EventLog) TableName() string {

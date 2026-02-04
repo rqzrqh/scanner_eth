@@ -47,22 +47,13 @@ type TxJson struct {
 }
 
 type TxInternalJson struct {
-	TxHash      string               `json:"transactionHash"`
-	BlockHash   string               `json:"blockHash,omitempty"`
-	BlockNumber uint64               `json:"blockNumber,omitempty"`
-	Logs        []*TxInternalLogJson `json:"logs"`
-}
-
-type TxInternalLogJson struct {
-	From         string   `json:"From"`
-	To           string   `json:"to,omitempty"`
-	Value        *big.Int `json:"value,omitempty"`
-	Success      bool     `json:"success"`
-	OpCode       string   `json:"opcode"`
-	Depth        int      `json:"depth"`
-	Gas          uint64   `json:"gas"`
-	GasUsed      uint64   `json:"gas_used"`
-	Input        string   `json:"input"`
-	Output       string   `json:"output,omitempty"`
-	TraceAddress []uint64 `json:"trace_address"`
+	Type    string            `json:"type"`
+	From    string            `json:"from"`
+	To      string            `json:"to,omitempty"`
+	Value   *big.Int          `json:"value,omitempty"`
+	Gas     uint64            `json:"gas"`
+	GasUsed uint64            `json:"gas_used"`
+	Input   string            `json:"input"`
+	Output  string            `json:"output,omitempty"`
+	Calls   []*TxInternalJson `json:"calls,omitempty"`
 }

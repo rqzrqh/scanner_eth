@@ -188,12 +188,12 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, protocolFullBlock 
 
 	if err := db.Transaction(func(tx *gorm.DB) error {
 
-		if err := db.Clauses(clause.OnConflict{UpdateAll: true}).Create(&fullblock.Block).Error; err != nil {
+		if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&fullblock.Block).Error; err != nil {
 			logrus.Errorf("store chain block failed %v", err)
 			return err
 		}
 
-		if err := db.Create(modelChainBinlog).Error; err != nil {
+		if err := tx.Create(modelChainBinlog).Error; err != nil {
 			logrus.Errorf("store chain binlog failed %v", err)
 			return err
 		}

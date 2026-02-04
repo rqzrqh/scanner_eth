@@ -8,6 +8,7 @@ const (
 )
 
 type ScannerData struct {
+	MessageId  uint64          `json:"message_id"`
 	ActionType ChainActionType `json:"action_type"`
 	Height     uint64          `json:"height"`
 	FullBlock  []byte          `json:"full_block"`
@@ -96,7 +97,7 @@ type EventLog struct {
 	Topic1       string `json:"topic1"`
 	Topic2       string `json:"topic2"`
 	Topic3       string `json:"topic3"`
-	Data         string `json:"data"`
+	Data         []byte `json:"data"`
 }
 
 type EventErc20Transfer struct {
@@ -143,16 +144,16 @@ type StateSet struct {
 
 type ContractErc20 struct {
 	ContractAddr string `json:"contract_addr"`
-	Name         []byte `json:"name"`
-	Symbol       []byte `json:"symbol"`
+	Name         string `json:"name"`
+	Symbol       string `json:"symbol"`
 	Decimals     int    `json:"decimals"`
 	TotalSupply  string `json:"total_supply"`
 }
 
 type ContractErc721 struct {
 	ContractAddr string `json:"contract_addr"`
-	Name         []byte `json:"name"`
-	Symbol       []byte `json:"symbol"`
+	Name         string `json:"name"`
+	Symbol       string `json:"symbol"`
 }
 
 type BalanceNative struct {

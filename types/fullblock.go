@@ -86,7 +86,7 @@ type EventLog struct {
 	Topic1       string
 	Topic2       string
 	Topic3       string
-	Data         string
+	Data         []byte
 }
 
 type EventErc20Transfer struct {
@@ -128,16 +128,16 @@ type Contract struct {
 
 type ContractErc20 struct {
 	ContractAddr string
-	Name         []byte
-	Symbol       []byte
+	Name         string
+	Symbol       string
 	Decimals     int
 	TotalSupply  string
 }
 
 type ContractErc721 struct {
 	ContractAddr string
-	Name         []byte
-	Symbol       []byte
+	Name         string
+	Symbol       string
 }
 
 type BalanceNative struct {
