@@ -68,14 +68,14 @@ func newSyncer(clients []*rpc.Client, db *gorm.DB, w *kafka.Writer, reversibleBl
 	}
 }
 
-func (s *Syncer) Run() {
+func (s *Syncer) Run(chainId uint64, genesisBlockHash string) {
 
 	s.pm.Run()
 	s.sm.Run()
 	s.fm.Run()
 
 	for _, hn := range s.hns {
-		hn.Run()
+		hn.Run(chainId, genesisBlockHash)
 	}
 }
 
