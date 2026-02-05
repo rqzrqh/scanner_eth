@@ -2,8 +2,8 @@ package store
 
 import (
 	"context"
-	"sync_eth/model"
-	"sync_eth/protocol"
+	"scanner_eth/model"
+	"scanner_eth/protocol"
 	"time"
 
 	"github.com/sirupsen/logrus"

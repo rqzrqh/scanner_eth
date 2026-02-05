@@ -3,9 +3,9 @@ package store
 import (
 	"encoding/json"
 	"os"
-	"sync_eth/model"
-	"sync_eth/protocol"
-	"sync_eth/types"
+	"scanner_eth/model"
+	"scanner_eth/protocol"
+	"scanner_eth/types"
 	"time"
 
 	"github.com/sirupsen/logrus"

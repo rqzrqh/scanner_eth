@@ -1,1 +1,1 @@
-# sync_eth
+# scanner_eth

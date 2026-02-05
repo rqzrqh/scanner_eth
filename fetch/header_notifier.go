@@ -3,8 +3,8 @@ package fetch
 import (
 	"context"
 	"os"
-	"sync_eth/types"
-	"sync_eth/util"
+	"scanner_eth/types"
+	"scanner_eth/util"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"

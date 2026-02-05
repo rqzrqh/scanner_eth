@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync_eth/config"
-	"sync_eth/log"
-	"sync_eth/model"
+	"scanner_eth/config"
+	"scanner_eth/log"
+	"scanner_eth/model"
 	"syscall"
 	"time"
 
@@ -174,7 +174,7 @@ func main() {
 	removeFile()
 }
 
-var fName = `/tmp/sync_eth.lock`
+var fName = `/tmp/scanner_eth.lock`
 
 func removeFile() {
 	os.Remove(fName)

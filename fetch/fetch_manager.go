@@ -1,7 +1,7 @@
 package fetch
 
 import (
-	"sync_eth/types"
+	"scanner_eth/types"
 
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/sirupsen/logrus"

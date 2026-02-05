@@ -2,7 +2,7 @@ package fetch
 
 import (
 	"fmt"
-	"sync_eth/types"
+	"scanner_eth/types"
 
 	"golang.org/x/xerrors"
 )

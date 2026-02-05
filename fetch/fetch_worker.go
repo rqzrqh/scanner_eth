@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"scanner_eth/types"
+	"scanner_eth/util"
 	"strings"
-	"sync_eth/types"
-	"sync_eth/util"
 	"time"
 
 	"github.com/ethereum/go-ethereum"

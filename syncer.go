@@ -3,12 +3,12 @@ package main
 import (
 	"math"
 	"os"
+	"scanner_eth/fetch"
+	"scanner_eth/model"
+	"scanner_eth/publish"
+	"scanner_eth/store"
+	"scanner_eth/types"
 	"sort"
-	"sync_eth/fetch"
-	"sync_eth/model"
-	"sync_eth/publish"
-	"sync_eth/store"
-	"sync_eth/types"
 
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/segmentio/kafka-go"

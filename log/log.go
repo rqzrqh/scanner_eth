@@ -5,8 +5,8 @@ import (
 	"io/ioutil"
 	"os"
 	"runtime"
+	"scanner_eth/config"
 	"strings"
-	"sync_eth/config"
 
 	"github.com/sirupsen/logrus"
 )

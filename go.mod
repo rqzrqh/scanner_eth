@@ -1,4 +1,4 @@
-module sync_eth
+module scanner_eth
 
 go 1.25.6
 

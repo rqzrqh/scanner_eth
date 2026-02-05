@@ -2,7 +2,7 @@ package publish
 
 import (
 	"context"
-	"sync_eth/types"
+	"scanner_eth/types"
 	"time"
 
 	"github.com/segmentio/kafka-go"
