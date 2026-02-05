@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 	"sync_eth/model"
-	"sync_eth/types"
+	"sync_eth/protocol"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -15,11 +15,13 @@ import (
 
 var taskCounter = uint64(0)
 
-func Revert(db *gorm.DB, height uint64) (uint64, error) {
+func Revert(db *gorm.DB, height uint64, chainBinlog *protocol.ChainBinlog, binlogData []byte) (uint64, error) {
 
 	modelChainBinlog := &model.ChainBinlog{
-		ActionType: int(types.PublishRollback),
+		MessageId:  chainBinlog.MessageId,
+		ActionType: int(protocol.ChainActionRollback),
 		Height:     height,
+		BinlogData: binlogData,
 	}
 
 	if err := db.Transaction(func(tx *gorm.DB) error {
@@ -90,6 +92,11 @@ func Revert(db *gorm.DB, height uint64) (uint64, error) {
 			return err
 		}
 
+		if err := tx.Model(&model.ScannerInfo{}).Where("chain_id = ?", chainBinlog.ChainId).Update("message_id", chainBinlog.MessageId).Error; err != nil {
+			logrus.Errorf("update scanner info failed %v", err)
+			return err
+		}
+
 		return nil
 	}); err != nil {
 		logrus.Errorf("store chain block failed %v", err)
@@ -101,7 +108,7 @@ func Revert(db *gorm.DB, height uint64) (uint64, error) {
 	return modelChainBinlog.Id, nil
 }
 
-func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, protocolFullBlock []byte, batchSize int, storeTaskChannel chan *StoreTask, storeCompleteChannel chan *StoreComplete) (uint64, error) {
+func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, chainBinlog *protocol.ChainBinlog, binlogData []byte, batchSize int, storeTaskChannel chan *StoreTask, storeCompleteChannel chan *StoreComplete) (uint64, error) {
 
 	height := fullblock.Block.Height
 
@@ -181,9 +188,10 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, protocolFullBlock 
 	startTime2 := time.Now()
 
 	modelChainBinlog := &model.ChainBinlog{
-		ActionType: int(types.PublishApply),
-		Height:     fullblock.Block.Height,
-		FullBlock:  string(protocolFullBlock),
+		MessageId:  chainBinlog.MessageId,
+		ActionType: int(chainBinlog.ActionType),
+		Height:     chainBinlog.Height,
+		BinlogData: binlogData,
 	}
 
 	if err := db.Transaction(func(tx *gorm.DB) error {
@@ -195,6 +203,11 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, protocolFullBlock 
 
 		if err := tx.Create(modelChainBinlog).Error; err != nil {
 			logrus.Errorf("store chain binlog failed %v", err)
+			return err
+		}
+
+		if err := tx.Model(&model.ScannerInfo{}).Where("chain_id = ?", chainBinlog.ChainId).Update("message_id", chainBinlog.MessageId).Error; err != nil {
+			logrus.Errorf("update scanner info failed %v", err)
 			return err
 		}
 

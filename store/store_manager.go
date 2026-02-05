@@ -33,6 +33,8 @@ type StorageFullBlock struct {
 
 type StoreManager struct {
 	db                              *gorm.DB
+	chainId                         int64
+	messageId                       uint64
 	batchSize                       int
 	storeOperationChannel           chan *types.StoreOperation
 	publishFeedbackOperationChannel <-chan *types.PublishFeedbackOperation
@@ -42,7 +44,7 @@ type StoreManager struct {
 	storeWorkers                    []*StoreWorker
 }
 
-func NewStoreManager(db *gorm.DB, batchSize int, storeWorkerCount int, storeOperationChannel chan *types.StoreOperation, publishFeedbackOperationChannel <-chan *types.PublishFeedbackOperation,
+func NewStoreManager(db *gorm.DB, chainId int64, messageId uint64, batchSize int, storeWorkerCount int, storeOperationChannel chan *types.StoreOperation, publishFeedbackOperationChannel <-chan *types.PublishFeedbackOperation,
 	publishOperationChannel chan<- *types.PublishOperation) *StoreManager {
 
 	storeTaskChannel := make(chan *StoreTask, 10)
@@ -55,6 +57,8 @@ func NewStoreManager(db *gorm.DB, batchSize int, storeWorkerCount int, storeOper
 	}
 
 	return &StoreManager{
+		chainId:                         chainId,
+		messageId:                       messageId,
 		db:                              db,
 		batchSize:                       batchSize,
 		storeOperationChannel:           storeOperationChannel,
@@ -81,11 +85,22 @@ func (sm *StoreManager) Run() {
 					fullblock := op.FullBlock
 					height := op.Height
 
+					sm.messageId++
+
 					storageFullBlock := convertStorageFullBlock(fullblock)
 					protocolFullBlock := convertProtocolFullBlock(fullblock)
-					var protocolFullBlockData []byte
+
+					chainBinlog := &protocol.ChainBinlog{
+						ChainId:    sm.chainId,
+						MessageId:  sm.messageId,
+						ActionType: protocol.ChainActionApply,
+						Height:     height,
+						FullBlock:  protocolFullBlock,
+					}
+
+					var binlogData []byte
 					var err error
-					if protocolFullBlockData, err = json.Marshal(protocolFullBlock); err != nil {
+					if binlogData, err = json.Marshal(chainBinlog); err != nil {
 						logrus.Errorf("marshal protocol fullblock failed. height:%v err:%v", height, err)
 						os.Exit(0)
 					}
@@ -95,8 +110,8 @@ func (sm *StoreManager) Run() {
 						tryCount++
 						startTime := time.Now()
 
-						var publishActionRecordId uint64
-						if publishActionRecordId, err = StoreFullBlock(sm.db, storageFullBlock, protocolFullBlockData, sm.batchSize, sm.storeTaskChannel, sm.storeCompleteChannel); err != nil {
+						var binlogRecordId uint64
+						if binlogRecordId, err = StoreFullBlock(sm.db, storageFullBlock, chainBinlog, binlogData, sm.batchSize, sm.storeTaskChannel, sm.storeCompleteChannel); err != nil {
 							logrus.Errorf("store fullblock failed. wait retry. height:%v err:%v tryCount:%v", height, err, tryCount)
 							time.Sleep(3 * time.Second)
 							continue
@@ -109,10 +124,10 @@ func (sm *StoreManager) Run() {
 							height, blockHash, prevHash, time.Since(startTime).String())
 
 						publishOperation := &types.PublishOperation{
-							Type:              types.PublishApply,
-							Id:                publishActionRecordId,
-							Height:            height,
-							ProtocolFullBlock: protocolFullBlockData,
+							BinlogRecordId: binlogRecordId,
+							MessageId:      chainBinlog.MessageId,
+							Height:         height,
+							BinlogData:     binlogData,
 						}
 						sm.publishOperationChannel <- publishOperation
 						break
@@ -121,14 +136,29 @@ func (sm *StoreManager) Run() {
 				case types.StoreRollback:
 					height := op.Height
 
+					sm.messageId++
+
 					var err error
 					tryCount := 0
 					for {
 						tryCount++
 						startTime := time.Now()
 
-						var publishActionRecordId uint64
-						if publishActionRecordId, err = Revert(sm.db, height); err != nil {
+						chainBinlog := &protocol.ChainBinlog{
+							ChainId:    sm.chainId,
+							MessageId:  sm.messageId,
+							ActionType: protocol.ChainActionRollback,
+							Height:     height,
+						}
+
+						var binlogData []byte
+						if binlogData, err = json.Marshal(chainBinlog); err != nil {
+							logrus.Errorf("marshal protocol fullblock failed. height:%v err:%v", height, err)
+							os.Exit(0)
+						}
+
+						var binlogRecordId uint64
+						if binlogRecordId, err = Revert(sm.db, height, chainBinlog, binlogData); err != nil {
 							logrus.Errorf("store revert failed. wait retry. height:%v err:%v tryCount:%v", height, err, tryCount)
 							time.Sleep(3 * time.Second)
 							continue
@@ -138,16 +168,17 @@ func (sm *StoreManager) Run() {
 							height, time.Since(startTime).String())
 
 						publishOperation := &types.PublishOperation{
-							Type:   types.PublishRollback,
-							Id:     publishActionRecordId,
-							Height: height,
+							BinlogRecordId: binlogRecordId,
+							MessageId:      sm.messageId,
+							Height:         height,
 						}
 						sm.publishOperationChannel <- publishOperation
 						break
 					}
 				}
 			case op := <-sm.publishFeedbackOperationChannel:
-				id := op.Id
+				binlogRecordId := op.BinlogRecordId
+				messageId := op.MessageId
 				height := op.Height
 
 				tryCount := 0
@@ -155,14 +186,14 @@ func (sm *StoreManager) Run() {
 					tryCount++
 					startTime := time.Now()
 
-					if err := sm.db.Delete(&model.ChainBinlog{}, id).Error; err != nil {
-						logrus.Errorf("delete chain binlog failed. id:%v err:%v tryCount:%v", id, err, tryCount)
+					if err := sm.db.Delete(&model.ChainBinlog{}, binlogRecordId).Error; err != nil {
+						logrus.Errorf("delete chain binlog failed. binlog_record_id:%v message_id:%v height:%v err:%v tryCount:%v", binlogRecordId, messageId, height, err, tryCount)
 						time.Sleep(3 * time.Second)
 						continue
 					}
 
-					logrus.Infof("delete chain binlog success. height:%v cost:%v",
-						height, time.Since(startTime).String())
+					logrus.Infof("delete chain binlog success. binlog_record_id:%v message_id:%v height:%v cost:%v",
+						binlogRecordId, messageId, height, time.Since(startTime).String())
 					break
 				}
 			}

@@ -12,7 +12,7 @@ import (
 
 type Chain struct {
 	Name             string `mapstructure:"name"`
-	ChainId          uint64 `mapstructure:"chain_id"`
+	ChainId          int64  `mapstructure:"chain_id"`
 	GenesisBlockHash string `mapstructure:"genesis_block_hash"`
 	ReversibleBlocks int    `mapstructure:"reversible_blocks"`
 }

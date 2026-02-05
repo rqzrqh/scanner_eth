@@ -2,9 +2,6 @@ package publish
 
 import (
 	"context"
-	"encoding/json"
-	"os"
-	"sync_eth/protocol"
 	"sync_eth/types"
 	"time"
 
@@ -30,91 +27,34 @@ func (pm *PublishManager) Run() {
 	go func() {
 		for {
 			for op := range pm.publishOperationChannel {
-				id := uint64(0)
-				height := uint64(0)
+				binlogRecordId := op.BinlogRecordId
+				messageId := op.MessageId
+				height := op.Height
+				binlogData := op.BinlogData
 
-				switch op.Type {
-				case types.PublishApply:
+				tryCount := 0
+				for {
+					tryCount++
+					startTime := time.Now()
 
-					id = op.Id
-					height = op.Height
-					protocolFullBlock := op.ProtocolFullBlock
-
-					sannerData := protocol.ScannerData{
-						ActionType: protocol.ChainActionApply,
-						Height:     height,
-						FullBlock:  protocolFullBlock,
+					if err := pm.w.WriteMessages(context.Background(),
+						kafka.Message{
+							Value: binlogData,
+						},
+					); err != nil {
+						logrus.Errorf("failed to write messages. wait retry. binlog_record_id:%v message_id:%v height:%v err:%v tryCount:%v", binlogRecordId, messageId, height, err, tryCount)
+						time.Sleep(3 * time.Second)
+						continue
 					}
 
-					var protocolData []byte
-					var err error
-					if protocolData, err = json.Marshal(sannerData); err != nil {
-						logrus.Errorf("marshal protocol scanner data(apply) failed. height:%v err:%v", height, err)
-						os.Exit(0)
-					}
-
-					tryCount := 0
-					for {
-						tryCount++
-						startTime := time.Now()
-
-						if err := pm.w.WriteMessages(context.Background(),
-							kafka.Message{
-								Value: protocolData,
-							},
-						); err != nil {
-							logrus.Errorf("failed to write messages. wait retry. height:%v err:%v tryCount:%v", height, err, tryCount)
-							time.Sleep(3 * time.Second)
-							continue
-						}
-
-						logrus.Infof("publish success. height:%v id:%v cost:%v", height, id, time.Since(startTime).String())
-						break
-					}
-
-				case types.PublishRollback:
-					id = op.Id
-					height = op.Height
-
-					sannerData := protocol.ScannerData{
-						ActionType: protocol.ChainActionRollback,
-						Height:     height,
-					}
-
-					var protocolData []byte
-					var err error
-					if protocolData, err = json.Marshal(sannerData); err != nil {
-						logrus.Errorf("marshal protocol scanner data(rollback) failed. height:%v err:%v", height, err)
-						os.Exit(0)
-					}
-
-					tryCount := 0
-					for {
-						tryCount++
-						startTime := time.Now()
-
-						if err := pm.w.WriteMessages(context.Background(),
-							kafka.Message{
-								Value: protocolData,
-							},
-						); err != nil {
-							logrus.Errorf("failed to write messages. wait retry. height:%v err:%v tryCount:%v", height, err, tryCount)
-							time.Sleep(3 * time.Second)
-							continue
-						}
-
-						logrus.Infof("publish success. height:%v id:%v cost:%v", height, id, time.Since(startTime).String())
-						break
-					}
-
-				default:
-					logrus.Errorf("unknown publish operation type. type:%v", op.Type)
-					os.Exit(0)
+					logrus.Infof("publish success. binlog_record_id:%v message_id:%v height:%v cost:%v", binlogRecordId, messageId, height, time.Since(startTime).String())
+					break
 				}
 
 				publishFeedbackOperation := &types.PublishFeedbackOperation{
-					Id:     id,
-					Height: height,
+					BinlogRecordId: binlogRecordId,
+					MessageId:      messageId,
+					Height:         height,
 				}
 
 				pm.publishFeedbackOperationChannel <- publishFeedbackOperation

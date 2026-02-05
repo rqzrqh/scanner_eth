@@ -146,9 +146,9 @@ func main() {
 
 	logrus.Infof("create rpc client success")
 
-	chainId, genesisBlockHash := getScannerInfo(db)
+	chainId, genesisBlockHash, messageId := getScannerInfo(db)
 
-	logrus.Infof("get chain info success. chainId:%v genesisBlockHash:%v", chainId, genesisBlockHash)
+	logrus.Infof("get chain info success. chainId:%v genesisBlockHash:%v messageId:%v", chainId, genesisBlockHash, messageId)
 
 	w := &kafka.Writer{
 		Addr:         kafka.TCP(conf.Publish.KafkaBrokers...),
@@ -163,10 +163,10 @@ func main() {
 	}
 	//err = w.Close()
 
-	s := newSyncer(clients, db, w, conf.Chain.ReversibleBlocks, conf.Store.ChannelSize, conf.Store.BatchSize, conf.Store.WorkerCount, conf.Fetch.StartHeight, conf.Fetch.EndHeight)
+	s := newSyncer(clients, db, w, conf.Chain.ReversibleBlocks, conf.Store.ChannelSize, conf.Store.BatchSize, conf.Store.WorkerCount, conf.Fetch.StartHeight, conf.Fetch.EndHeight, chainId, genesisBlockHash, messageId)
 
 	leaseAlive()
-	s.Run(chainId, genesisBlockHash)
+	s.Run()
 
 	logrus.Infof("start success")
 
@@ -193,7 +193,7 @@ func leaseAlive() {
 	fmt.Fprintf(f, "%d", now)
 }
 
-func initScannerInfo(db *gorm.DB, chainId uint64, genesisBlockHash string) {
+func initScannerInfo(db *gorm.DB, chainId int64, genesisBlockHash string) {
 	var scannerInfos []model.ScannerInfo
 	if err := db.Find(&scannerInfos).Error; err != nil {
 		logrus.Errorf("load scanner info from db failed. err:%v", err)
@@ -203,6 +203,7 @@ func initScannerInfo(db *gorm.DB, chainId uint64, genesisBlockHash string) {
 		scannerInfo := &model.ScannerInfo{
 			ChainId:          chainId,
 			GenesisBlockHash: genesisBlockHash,
+			MessageId:        0,
 		}
 		if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(scannerInfo).Error; err != nil {
 			logrus.Errorf("insert scanner info to db failed. err:%v", err)
@@ -234,12 +235,12 @@ func initGenesisBlock(db *gorm.DB, genesisBlockHash string) {
 	}
 }
 
-func getScannerInfo(db *gorm.DB) (uint64, string) {
+func getScannerInfo(db *gorm.DB) (int64, string, uint64) {
 	var scannerInfo model.ScannerInfo
 	if err := db.First(&scannerInfo).Error; err != nil {
 		logrus.Errorf("load scanner info from db failed. err:%v", err)
 		os.Exit(0)
 	}
 
-	return scannerInfo.ChainId, scannerInfo.GenesisBlockHash
+	return scannerInfo.ChainId, scannerInfo.GenesisBlockHash, scannerInfo.MessageId
 }

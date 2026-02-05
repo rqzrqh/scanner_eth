@@ -7,11 +7,12 @@ const (
 	ChainActionRollback
 )
 
-type ScannerData struct {
+type ChainBinlog struct {
+	ChainId    int64           `json:"chain_id"`
 	MessageId  uint64          `json:"message_id"`
 	ActionType ChainActionType `json:"action_type"`
 	Height     uint64          `json:"height"`
-	FullBlock  []byte          `json:"full_block"`
+	FullBlock  *FullBlock      `json:"full_block"`
 }
 
 type FullBlock struct {

@@ -25,13 +25,15 @@ type SimpleBlockHeaderJson struct {
 }
 
 type Syncer struct {
-	hns []*fetch.HeaderNotifier
-	fm  *fetch.FetchManager
-	sm  *store.StoreManager
-	pm  *publish.PublishManager
+	chainId          int64
+	genesisBlockHash string
+	hns              []*fetch.HeaderNotifier
+	fm               *fetch.FetchManager
+	sm               *store.StoreManager
+	pm               *publish.PublishManager
 }
 
-func newSyncer(clients []*rpc.Client, db *gorm.DB, w *kafka.Writer, reversibleBlocks int, storeChannelSize int, storeBatchSize int, storeWorkerCount int, startHeight uint64, endHeight uint64) *Syncer {
+func newSyncer(clients []*rpc.Client, db *gorm.DB, w *kafka.Writer, reversibleBlocks int, storeChannelSize int, storeBatchSize int, storeWorkerCount int, startHeight uint64, endHeight uint64, chainId int64, genesisBlockHash string, messageId uint64) *Syncer {
 
 	logrus.Infof("reversibleBlocks:%v storeChannelSize:%v storeBatchSize:%v storeWorkerCount:%v startHeight:%v endHeight:%v",
 		reversibleBlocks, storeChannelSize, storeBatchSize, storeWorkerCount, startHeight, endHeight)
@@ -47,7 +49,7 @@ func newSyncer(clients []*rpc.Client, db *gorm.DB, w *kafka.Writer, reversibleBl
 	publishOperationChannel := make(chan *types.PublishOperation, 100)
 	pm := publish.NewPublishManager(w, publishOperationChannel, publishFeedbackOperationChannel)
 
-	sm := store.NewStoreManager(db, storeBatchSize, storeWorkerCount, storeOperationChannel, publishFeedbackOperationChannel, publishOperationChannel)
+	sm := store.NewStoreManager(db, chainId, messageId, storeBatchSize, storeWorkerCount, storeOperationChannel, publishFeedbackOperationChannel, publishOperationChannel)
 
 	remoteChainUpdateChannel := make(chan *types.RemoteChainUpdate, 100)
 	maxUnorganizedBlockCount := 50 * len(clients)
@@ -61,21 +63,23 @@ func newSyncer(clients []*rpc.Client, db *gorm.DB, w *kafka.Writer, reversibleBl
 	}
 
 	return &Syncer{
-		hns: hns,
-		fm:  fm,
-		sm:  sm,
-		pm:  pm,
+		chainId:          chainId,
+		genesisBlockHash: genesisBlockHash,
+		hns:              hns,
+		fm:               fm,
+		sm:               sm,
+		pm:               pm,
 	}
 }
 
-func (s *Syncer) Run(chainId uint64, genesisBlockHash string) {
+func (s *Syncer) Run() {
 
 	s.pm.Run()
 	s.sm.Run()
 	s.fm.Run()
 
 	for _, hn := range s.hns {
-		hn.Run(chainId, genesisBlockHash)
+		hn.Run(s.chainId, s.genesisBlockHash)
 	}
 }
 

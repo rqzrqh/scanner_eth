@@ -1,6 +1,7 @@
 package types
 
 type PublishFeedbackOperation struct {
-	Id     uint64
-	Height uint64
+	BinlogRecordId uint64
+	MessageId      uint64
+	Height         uint64
 }

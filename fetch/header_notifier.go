@@ -29,7 +29,7 @@ func NewHeaderNotifier(id int, client *rpc.Client, remoteChainUpdateChannel chan
 	}
 }
 
-func (ds *HeaderNotifier) Run(dbChainId uint64, dbGenesisBlockHash string) {
+func (ds *HeaderNotifier) Run(dbChainId int64, dbGenesisBlockHash string) {
 
 	go func() {
 
@@ -42,7 +42,7 @@ func (ds *HeaderNotifier) Run(dbChainId uint64, dbGenesisBlockHash string) {
 				continue
 			}
 
-			chainId := hexutil.MustDecodeUint64(strChainId)
+			chainId := int64(hexutil.MustDecodeUint64(strChainId))
 
 			if chainId != dbChainId {
 				logrus.Errorf("chain id not equal with db. id:%v db:%v node:%v", ds.id, dbChainId, chainId)
