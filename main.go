@@ -116,10 +116,6 @@ func main() {
 
 	logrus.Infof("init scanner info success")
 
-	initGenesisBlock(db, conf.Chain.GenesisBlockHash)
-
-	logrus.Infof("init genesis block success")
-
 	rpcNodeCount := len(conf.Fetch.RpcNodes)
 	if rpcNodeCount == 0 {
 		logrus.Errorf("rpc node count is zero")
@@ -219,19 +215,6 @@ func initScannerInfo(db *gorm.DB, chainId int64, genesisBlockHash string) {
 				scannerInfos[0].ChainId, scannerInfos[0].GenesisBlockHash, chainId, genesisBlockHash)
 			os.Exit(0)
 		}
-	}
-}
-
-func initGenesisBlock(db *gorm.DB, genesisBlockHash string) {
-
-	genesisBlock := &model.Block{
-		Height:    0,
-		BlockHash: genesisBlockHash,
-	}
-
-	if err := db.Clauses(clause.Insert{Modifier: "IGNORE"}).Create(genesisBlock).Error; err != nil {
-		logrus.Errorf("insert genesis block to db failed. err:%v", err)
-		os.Exit(0)
 	}
 }
 

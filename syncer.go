@@ -2,27 +2,19 @@ package main
 
 import (
 	"math"
-	"math/big"
 	"os"
+	"sort"
 	"sync_eth/fetch"
 	"sync_eth/model"
 	"sync_eth/publish"
 	"sync_eth/store"
 	"sync_eth/types"
-	"sync_eth/util"
 
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/segmentio/kafka-go"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
-
-type SimpleBlockHeaderJson struct {
-	Hash       string `json:"hash"`
-	Number     string `json:"number"`
-	ParentHash string `json:"parentHash"`
-}
 
 type Syncer struct {
 	chainId          int64
@@ -86,73 +78,59 @@ func (s *Syncer) Run() {
 func loadStartBlock(clients []*rpc.Client, db *gorm.DB, startHeight uint64, reversibleBlocks int) []*fetch.BlockDigest {
 	blkDigestList := make([]*fetch.BlockDigest, 0)
 
-	if startHeight == math.MaxUint64 {
-		var latestBlock model.Block
-		if err := db.Select("height").Order("height desc").Limit(1).Find(&latestBlock).Error; err != nil {
-			logrus.Errorf("failed to get max block height from db %v", err)
-			os.Exit(0)
-		}
-
-		logrus.Infof("startup load lookback blocks from db. height:%v", latestBlock.Height)
-
-		lookbackBlockList := lookbackBlock(db, latestBlock.Height, reversibleBlocks)
-		for _, v := range lookbackBlockList {
-			blk := &fetch.BlockDigest{
-				Height:     v.Height,
-				Hash:       v.BlockHash,
-				ParentHash: v.ParentHash,
-			}
-			blkDigestList = append(blkDigestList, blk)
-		}
-	} else {
-
-		blockNum := new(big.Int).SetUint64(startHeight - 1)
-		blkJson := &SimpleBlockHeaderJson{}
-
-		logrus.Infof("startup load latest block from rpc. height:%v", blockNum.Uint64())
-
-		if err := clients[0].Call(blkJson, "eth_getBlockByNumber", util.ToBlockNumArg(blockNum), false); err != nil {
-			logrus.Warnf("startup failed to get specific block. height:%v err:%v", blockNum.String(), err)
-			os.Exit(0)
-		}
-
-		if blkJson.Number == "" {
-			logrus.Warnf("startup get empty block. height:%v", blockNum.Uint64())
-			os.Exit(0)
-		}
-
-		startBlockHeight := hexutil.MustDecodeUint64(blkJson.Number)
-		startBlockHash := blkJson.Hash
-		startBlockParentHash := blkJson.ParentHash
-
-		blk := &fetch.BlockDigest{
-			Height:     startBlockHeight,
-			Hash:       startBlockHash,
-			ParentHash: startBlockParentHash,
-		}
-		blkDigestList = append(blkDigestList, blk)
-	}
-	return blkDigestList
-}
-
-func lookbackBlock(db *gorm.DB, height uint64, reversibleBlocks int) []*model.Block {
-	var modelBlockList []*model.Block
-	var heightList []uint64
-
-	for i := uint64(0); i <= uint64(reversibleBlocks); i++ {
-		h := height - i
-		if h > height {
-			break
-		}
-		heightList = append(heightList, h)
-	}
-
-	logrus.Infof("lookback block heights: %v", heightList)
-
-	if err := db.Where("height in ?", heightList).Order("height asc").Find(&modelBlockList).Error; err != nil {
-		logrus.Errorf("lookback block failed: %v", err)
+	var lookbackBlockList []*model.Block
+	if err := db.Select("height").Order("height desc").Limit(reversibleBlocks).Find(&lookbackBlockList).Error; err != nil {
+		logrus.Errorf("failed to lookback blocks from db %v", err)
 		os.Exit(0)
 	}
 
-	return modelBlockList
+	if len(lookbackBlockList) == 0 {
+
+		fetchStartHeight := startHeight
+
+		// meaning from beginning
+		if startHeight == 0 || startHeight == math.MaxUint64 {
+			fetchStartHeight = 1
+		}
+
+		fullblock := fetch.FetchFullBlock(0, -1, clients[0], fetchStartHeight-1)
+		if fullblock == nil {
+			os.Exit(0)
+		}
+
+		if startHeight == 0 || startHeight == math.MaxUint64 {
+			block := &model.Block{
+				Height:     0,
+				BlockHash:  fullblock.Block.BlockHash,
+				ParentHash: fullblock.Block.ParentHash,
+			}
+
+			if err := db.Create(block).Error; err != nil {
+				logrus.Errorf("insert genesis block to db failed. err:%v", err)
+				os.Exit(0)
+			}
+		}
+
+		lookbackBlockList = append(lookbackBlockList, &model.Block{
+			Height:     fullblock.Block.Height,
+			BlockHash:  fullblock.Block.BlockHash,
+			ParentHash: fullblock.Block.ParentHash,
+		})
+
+	} else {
+		sort.Slice(lookbackBlockList, func(i, j int) bool {
+			return lookbackBlockList[i].Height < lookbackBlockList[j].Height
+		})
+	}
+
+	for _, v := range lookbackBlockList {
+		blk := &fetch.BlockDigest{
+			Height:     v.Height,
+			Hash:       v.BlockHash,
+			ParentHash: v.ParentHash,
+		}
+		blkDigestList = append(blkDigestList, blk)
+	}
+
+	return blkDigestList
 }
