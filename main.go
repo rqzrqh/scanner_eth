@@ -160,8 +160,6 @@ func main() {
 	//err = w.Close()
 
 	s := newSyncer(clients, db, w, conf.Chain.ReversibleBlocks, conf.Store.ChannelSize, conf.Store.BatchSize, conf.Store.WorkerCount, conf.Fetch.StartHeight, conf.Fetch.EndHeight, chainId, genesisBlockHash, messageId)
-
-	leaseAlive()
 	s.Run()
 
 	logrus.Infof("start success")
@@ -170,23 +168,6 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
 	<-sigCh
 	logrus.Infof("stop sync eth")
-
-	removeFile()
-}
-
-var fName = `/tmp/scanner_eth.lock`
-
-func removeFile() {
-	os.Remove(fName)
-}
-
-func leaseAlive() {
-	f, err := os.OpenFile(fName, os.O_RDWR|os.O_CREATE, os.ModePerm)
-	if err != nil {
-		panic(fmt.Sprintf("create alive file err:%v", err))
-	}
-	now := time.Now().Unix()
-	fmt.Fprintf(f, "%d", now)
 }
 
 func initScannerInfo(db *gorm.DB, chainId int64, genesisBlockHash string) {
