@@ -87,30 +87,32 @@ func main() {
 
 	logrus.Infof("database ping success")
 
-	if err := db.AutoMigrate(
-		&model.ScannerInfo{},
-		&model.ChainBinlog{},
-		&model.Block{},
-		&model.Tx{},
-		&model.TxInternal{},
-		&model.EventLog{},
-		&model.EventErc20Transfer{},
-		&model.EventErc721Transfer{},
-		&model.EventErc1155Transfer{},
+	if conf.Store.AutoCreateTables {
+		if err := db.AutoMigrate(
+			&model.ScannerInfo{},
+			&model.ChainBinlog{},
+			&model.Block{},
+			&model.Tx{},
+			&model.TxInternal{},
+			&model.EventLog{},
+			&model.EventErc20Transfer{},
+			&model.EventErc721Transfer{},
+			&model.EventErc1155Transfer{},
 
-		&model.Contract{},
-		&model.ContractErc20{},
-		&model.ContractErc721{},
-		&model.TokenErc721{},
-		&model.BalanceNative{},
-		&model.BalanceErc20{},
-		&model.BalanceErc1155{},
-	); err != nil {
-		logrus.Errorf("auto migrate failed %v", err)
-		os.Exit(0)
+			&model.Contract{},
+			&model.ContractErc20{},
+			&model.ContractErc721{},
+			&model.TokenErc721{},
+			&model.BalanceNative{},
+			&model.BalanceErc20{},
+			&model.BalanceErc1155{},
+		); err != nil {
+			logrus.Errorf("auto migrate failed %v", err)
+			os.Exit(0)
+		}
+
+		logrus.Infof("database auto migrate success")
 	}
-
-	logrus.Infof("database auto migrate success")
 
 	initScannerInfo(db, conf.Chain.ChainId, conf.Chain.GenesisBlockHash)
 
@@ -159,7 +161,7 @@ func main() {
 	}
 	//err = w.Close()
 
-	s := newSyncer(clients, db, w, conf.Chain.ReversibleBlocks, conf.Store.ChannelSize, conf.Store.BatchSize, conf.Store.WorkerCount, conf.Fetch.StartHeight, conf.Fetch.EndHeight, chainId, genesisBlockHash, messageId)
+	s := newSyncer(conf, clients, db, w, chainId, genesisBlockHash, messageId)
 	s.Run()
 
 	logrus.Infof("start success")
@@ -167,7 +169,7 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
 	<-sigCh
-	logrus.Infof("stop sync eth")
+	logrus.Infof("stop scanner eth")
 }
 
 func initScannerInfo(db *gorm.DB, chainId int64, genesisBlockHash string) {

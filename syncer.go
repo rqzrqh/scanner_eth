@@ -4,6 +4,7 @@ import (
 	"math"
 	"math/big"
 	"os"
+	"scanner_eth/config"
 	"scanner_eth/fetch"
 	"scanner_eth/model"
 	"scanner_eth/publish"
@@ -26,10 +27,15 @@ type Syncer struct {
 	pm  *publish.PublishManager
 }
 
-func newSyncer(clients []*rpc.Client, db *gorm.DB, w *kafka.Writer, reversibleBlocks int, storeChannelSize int, storeBatchSize int, storeWorkerCount int, startHeight uint64, endHeight uint64, chainId int64, genesisBlockHash string, messageId uint64) *Syncer {
+func newSyncer(conf *config.Config, clients []*rpc.Client, db *gorm.DB, w *kafka.Writer, chainId int64, genesisBlockHash string, messageId uint64) *Syncer {
 
-	logrus.Infof("reversibleBlocks:%v storeChannelSize:%v storeBatchSize:%v storeWorkerCount:%v startHeight:%v endHeight:%v",
-		reversibleBlocks, storeChannelSize, storeBatchSize, storeWorkerCount, startHeight, endHeight)
+	reversibleBlocks := conf.Chain.ReversibleBlocks
+	startHeight, endHeight, enableInternalTx := conf.Fetch.StartHeight, conf.Fetch.EndHeight, conf.Fetch.EnableInternalTx
+	storeChannelSize, storeBatchSize, storeWorkerCount := conf.Store.ChannelSize, conf.Store.BatchSize, conf.Store.WorkerCount
+
+	logrus.Infof("reversibleBlocks:%v", reversibleBlocks)
+	logrus.Infof("startHeight:%v endHeight:%v enableInternalTx:%v", startHeight, endHeight, enableInternalTx)
+	logrus.Infof("storeChannelSize:%v storeBatchSize:%v storeWorkerCount:%v", storeChannelSize, storeBatchSize, storeWorkerCount)
 
 	if startHeight > endHeight {
 		logrus.Errorf("start height must be less than end height. startHeight:%v endHeight:%v", startHeight, endHeight)
@@ -37,6 +43,7 @@ func newSyncer(clients []*rpc.Client, db *gorm.DB, w *kafka.Writer, reversibleBl
 	}
 
 	fetch.InitAbi()
+	fetch.SetEnableInternalTx(enableInternalTx)
 
 	checkNodeChainInfo(clients, chainId, genesisBlockHash)
 

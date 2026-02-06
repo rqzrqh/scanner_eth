@@ -18,17 +18,18 @@ type Chain struct {
 }
 
 type Fetch struct {
-	RpcNodes    []string      `mapstructure:"rpc_nodes"`
-	Timeout     time.Duration `mapstructure:"timeout"`
-	StartHeight uint64        `mapstructure:"start_height"`
-	EndHeight   uint64        `mapstructure:"end_height"`
+	RpcNodes         []string      `mapstructure:"rpc_nodes"`
+	Timeout          time.Duration `mapstructure:"timeout"`
+	StartHeight      uint64        `mapstructure:"start_height"`
+	EndHeight        uint64        `mapstructure:"end_height"`
+	EnableInternalTx bool          `mapstructure:"enable_internal_tx"`
 }
 
 type Store struct {
 	Host             string `mapstructure:"host"`
 	ChannelSize      int    `mapstructure:"channel_size"`
 	BatchSize        int    `mapstructure:"batch_size"`
-	WorkerCount      int    `mapstructure:"worker"`
+	WorkerCount      int    `mapstructure:"worker_count"`
 	AutoCreateTables bool   `mapstructure:"auto_create_tables"`
 }
 
@@ -99,15 +100,16 @@ func LoadConf(fpath string, env string) (*Config, error) {
 
 	conf := &Config{
 		Fetch: Fetch{
-			Timeout:     5 * time.Second,
-			StartHeight: math.MaxUint64,
-			EndHeight:   math.MaxUint64,
+			Timeout:          5 * time.Second,
+			StartHeight:      math.MaxUint64,
+			EndHeight:        math.MaxUint64,
+			EnableInternalTx: true,
 		},
 		Store: Store{
-			ChannelSize:      50,
-			BatchSize:        20,
-			WorkerCount:      16,
-			AutoCreateTables: false,
+			ChannelSize:      100,
+			BatchSize:        100,
+			WorkerCount:      8,
+			AutoCreateTables: true,
 		},
 	}
 	vip := viper.New()

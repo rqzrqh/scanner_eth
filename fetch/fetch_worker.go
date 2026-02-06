@@ -30,6 +30,7 @@ const jsonStrErc1155ABI = `[{"inputs":[{"internalType":"address","name":"_logic"
 
 var (
 	erc20ABI, erc721ABI, erc1155ABI abi.ABI
+	enableInternalTx                bool
 )
 
 func InitAbi() {
@@ -53,6 +54,10 @@ func InitAbi() {
 	if err != nil {
 		os.Exit(0)
 	}
+}
+
+func SetEnableInternalTx(enable bool) {
+	enableInternalTx = enable
 }
 
 type TokenErc721KeyValue struct {
@@ -256,16 +261,14 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 
 	// fetch internal tx
 	txInternalJsonList := make([]*TxInternalJson, 0)
-	/*
-		{
-			arg := map[string]interface{}{}
-			method := "debug_traceActionByBlockNumber"
-			if err := client.CallContext(context.Background(), &txInternalJsonList, method, util.ToBlockNumArg(new(big.Int).SetUint64(height)), arg); err != nil {
-				logrus.Warnf("fetch internal tx failed. nodeId:%v taskId:%v err:%v height:%v", nodeId, taskId, err, height)
-				return nil
-			}
+	if enableInternalTx {
+		arg := map[string]interface{}{}
+		method := "debug_traceBlockByNumber"
+		if err := client.CallContext(context.Background(), &txInternalJsonList, method, util.ToBlockNumArg(new(big.Int).SetUint64(height)), arg); err != nil {
+			logrus.Warnf("fetch internal tx failed. nodeId:%v taskId:%v err:%v height:%v", nodeId, taskId, err, height)
+			return nil
 		}
-	*/
+	}
 
 	// parse txs
 	txList, eventLogList, eventErc20TransferList, eventErc721TransferList, eventErc1155TransferList, txContractList, txBalanceNativeAddress, txBalanceErc20Address, txBalanceErc1155Address, erc20ContractAddrs, erc721ContractAddrs, tokenErc721Set := parseTx(blkJson.Txs, receipts, height, baseFee)

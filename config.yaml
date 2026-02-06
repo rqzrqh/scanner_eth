@@ -9,15 +9,21 @@ chain:
 fetch:
   rpc_nodes:
     - "http://127.0.0.1:8545"
-    - "wss://127.0.0.1:8545"
+
   timeout: 5s
   start_height: -1 #if db has blocks, this config would be ignored
-  end_height: -1
+  end_height:  -1
+  #With internal txs, all account balance changed action and all contract created action could be captured.
+  #But this api need archive node, and always it is not free.
+  #If set false, balanceChanged and contractCreated is incomplete.
+  #For test, set false is ok.
+  enable_internal_tx: true
 
 store:
   host: "root:123456@tcp(127.0.0.1:3306)/scanner_bsc_testnet?charset=utf8mb4"
   channel_size: 100
-  batch_size: 20
+  batch_size: 100
+  worker_count: 8
   auto_create_tables: true # prd environment set false
 
 publish:
