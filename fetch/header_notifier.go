@@ -2,7 +2,6 @@ package fetch
 
 import (
 	"context"
-	"os"
 	"scanner_eth/types"
 	"scanner_eth/util"
 	"time"
@@ -29,46 +28,9 @@ func NewHeaderNotifier(id int, client *rpc.Client, remoteChainUpdateChannel chan
 	}
 }
 
-func (ds *HeaderNotifier) Run(dbChainId int64, dbGenesisBlockHash string) {
+func (ds *HeaderNotifier) Run() {
 
 	go func() {
-
-		// compare node chain info with db
-		for {
-			strChainId := ""
-			if err := ds.client.Call(&strChainId, "eth_chainId"); err != nil {
-				logrus.Warnf("get chain id failed. id:%v err:%v", ds.id, err)
-				time.Sleep(3000 * time.Millisecond)
-				continue
-			}
-
-			chainId := int64(hexutil.MustDecodeUint64(strChainId))
-
-			if chainId != dbChainId {
-				logrus.Errorf("chain id not equal with db. id:%v db:%v node:%v", ds.id, dbChainId, chainId)
-				os.Exit(0)
-			}
-
-			break
-		}
-
-		for {
-			blkJson := &BlockHeaderJson{}
-			if err := ds.client.Call(blkJson, "eth_getBlockByNumber", "0x0", false); err != nil {
-				logrus.Warnf("get genesis block failed. id:%v err:%v", ds.id, err)
-				time.Sleep(3000 * time.Millisecond)
-				continue
-			}
-
-			if blkJson.Hash != dbGenesisBlockHash {
-				logrus.Errorf("genesis block not equal with db. id:%v db:%v node:%v", ds.id, dbGenesisBlockHash, blkJson.Hash)
-				os.Exit(0)
-			}
-
-			break
-		}
-
-		logrus.Infof("node chain info check passed. id:%v", ds.id)
 
 		if ds.client.SupportsSubscriptions() {
 			logrus.Infof("header notifier use websocket. id:%d", ds.id)

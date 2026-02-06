@@ -22,8 +22,6 @@ type FetchManager struct {
 func NewFetchManager(clients []*rpc.Client, localChain *LocalChain, endHeight uint64, maxUnorganizedBlockCount int, remoteChainUpdateChannel <-chan *types.RemoteChainUpdate,
 	storeOperationChannel chan<- *types.StoreOperation) *FetchManager {
 
-	InitAbi()
-
 	fetchResultNotifyChannel := make(chan *FetchResult, 100)
 
 	return &FetchManager{
