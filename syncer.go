@@ -182,6 +182,17 @@ func loadStartBlock(clients []*rpc.Client, db *gorm.DB, startHeight uint64, reve
 		startBlockHash := blkJson.Hash
 		startBlockParentHash := blkJson.ParentHash
 
+		block := &model.Block{
+			Height:     startBlockHeight,
+			BlockHash:  startBlockHash,
+			ParentHash: startBlockParentHash,
+		}
+
+		if err := db.Create(block).Error; err != nil {
+			logrus.Errorf("startup insert block to db failed. height:%v err:%v", startBlockHeight, err)
+			os.Exit(0)
+		}
+
 		blk := &fetch.BlockDigest{
 			Height:     startBlockHeight,
 			Hash:       startBlockHash,

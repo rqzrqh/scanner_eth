@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"os"
 	"scanner_eth/model"
 	"scanner_eth/protocol"
 	"time"
@@ -92,9 +93,17 @@ func Revert(db *gorm.DB, height uint64, chainBinlog *protocol.ChainBinlog, binlo
 			return err
 		}
 
-		if err := tx.Model(&model.ScannerInfo{}).Where("chain_id = ?", chainBinlog.ChainId).Update("message_id", chainBinlog.MessageId).Error; err != nil {
-			logrus.Errorf("update scanner info failed %v", err)
-			return err
+		expectMessageId := modelChainBinlog.MessageId - 1
+
+		var result *gorm.DB
+		if result = tx.Model(&model.ScannerInfo{}).Where("chain_id = ? AND message_id = ?", chainBinlog.ChainId, expectMessageId).Update("message_id", modelChainBinlog.MessageId); result.Error != nil {
+			logrus.Fatalf("update scanner info failed %v", result.Error)
+			return result.Error
+		}
+
+		if result.RowsAffected == 0 {
+			logrus.Fatalf("update scanner info failed, expect message id not match, may be there are multiple processes. expect:%v", expectMessageId)
+			os.Exit(0)
 		}
 
 		return nil
@@ -206,9 +215,29 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, chainBinlog *proto
 			return err
 		}
 
-		if err := tx.Model(&model.ScannerInfo{}).Where("chain_id = ?", chainBinlog.ChainId).Update("message_id", chainBinlog.MessageId).Error; err != nil {
-			logrus.Errorf("update scanner info failed %v", err)
+		expectMessageId := modelChainBinlog.MessageId - 1
+
+		var result *gorm.DB
+		if result = tx.Model(&model.ScannerInfo{}).Where("chain_id = ? AND message_id = ?", chainBinlog.ChainId, expectMessageId).Update("message_id", modelChainBinlog.MessageId); result.Error != nil {
+			logrus.Fatalf("update scanner info failed %v", result.Error)
+			return result.Error
+		}
+
+		if result.RowsAffected == 0 {
+			logrus.Fatalf("update scanner info failed, expect message id not match, may be there are multiple processes. expect:%v", expectMessageId)
+			os.Exit(0)
+		}
+
+		var prevBlock model.Block
+		if err := tx.Where("height = ?", height-1).First(&prevBlock).Error; err != nil {
+			logrus.Errorf("get prev block failed %v", err)
 			return err
+		}
+
+		if prevBlock.BlockHash != fullblock.Block.ParentHash {
+			logrus.Fatalf("prev block hash not match. height:%v prev_hash:%v current_parent_hash:%v", height, prevBlock.BlockHash, fullblock.Block.ParentHash)
+			os.Exit(0)
+			return xerrors.New("prev block hash not match")
 		}
 
 		return nil
