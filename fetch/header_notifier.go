@@ -121,5 +121,7 @@ func (ds *HeaderNotifier) useHttp() {
 			BlockHash: blockHash,
 			Weight:    weight,
 		}
+
+		time.Sleep(3000 * time.Millisecond)
 	}
 }
