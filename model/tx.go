@@ -2,12 +2,12 @@ package model
 
 type Tx struct {
 	Id        uint64 `gorm:"primaryKey:autoIncrement;comment:auto_inc_id"`
-	Height    uint64 `gorm:"index;type:bigint unsigned;comment:block_height"`
+	Height    uint64 `gorm:"index;type:bigint unsigned;comment:height"`
 	TxHash    string `gorm:"index:uniq_txhash,unique;type:varchar(255);comment:tx_hash"`
 	TxIndex   int    `gorm:"type:int;comment:tx_index"`
 	TxType    int    `gorm:"type:tinyint;comment:tx_type"`
-	From      string `gorm:"index;type:varchar(255);comment:from_addr"`
-	To        string `gorm:"index;type:varchar(255);comment:to_addr"`
+	From      string `gorm:"index;type:varchar(255);comment:from"`
+	To        string `gorm:"index;type:varchar(255);comment:to"`
 	Nonce     uint64 `gorm:"type:bigint unsigned;comment:nonce"`
 	GasLimit  uint64 `gorm:"type:bigint unsigned;comment:gas_limit"`
 	GasPrice  string `gorm:"type:varchar(255);comment:gas_price"`

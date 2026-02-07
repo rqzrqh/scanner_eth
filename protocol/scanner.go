@@ -17,12 +17,12 @@ type ChainBinlog struct {
 
 type FullBlock struct {
 	Height          uint64 `json:"height"`
-	BlockHash       string `json:"block_hash"`
-	ParentHash      string `json:"parent_block_hash"`
-	BlockTimestamp  int64  `json:"block_timestamp"`
-	TxsCount        int    `json:"block_tx_count"`
+	Hash            string `json:"hash"`
+	ParentHash      string `json:"parent_hash"`
+	Timestamp       int64  `json:"timestamp"`
+	TxCount         int    `json:"tx_count"`
 	Miner           string `json:"miner"`
-	Size            int    `json:"block_size"`
+	Size            int    `json:"size"`
 	Nonce           string `json:"nonce"`
 	BaseFee         string `json:"base_fee"`
 	BurntFees       string `json:"burnt_fees"`

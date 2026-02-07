@@ -1,14 +1,14 @@
 package model
 
 type Block struct {
-	Id             uint64 `gorm:"primaryKey:autoIncrement;comment:auto_inc_id"`
-	Height         uint64 `gorm:"index:uniq_height,unique;type:bigint unsigned;comment:block_height"`
-	BlockHash      string `gorm:"index:uniq_blockhash,unique;type:varchar(255);comment:block_hash"`
-	ParentHash     string `gorm:"index;type:varchar(255);comment:parent_block_hash"`
-	BlockTimestamp int64  `gorm:"index;type:bigint;comment:block_timestamp"`
-	TxsCount       int    `gorm:"type:int;comment:block_tx_count"`
-	Miner          string `gorm:"index;type:varchar(255);comment:miner"`
-	Size           int    `gorm:"type:int;comment:block_size"`
+	Id         uint64 `gorm:"primaryKey:autoIncrement;comment:auto_inc_id"`
+	Height     uint64 `gorm:"index:uniq_height,unique;type:bigint unsigned;comment:height"`
+	Hash       string `gorm:"index:uniq_hash,unique;type:varchar(255);comment:hash"`
+	ParentHash string `gorm:"index;type:varchar(255);comment:parent_hash"`
+	Timestamp  int64  `gorm:"index;type:bigint;comment:timestamp"`
+	TxCount    int    `gorm:"type:int;comment:tx_count"`
+	Miner      string `gorm:"index;type:varchar(255);comment:miner"`
+	Size       int    `gorm:"type:int;comment:size"`
 
 	Nonce     string `gorm:"type:varchar(255);comment:nonce"`
 	BaseFee   string `gorm:"type:varchar(255);comment:base_fee"`

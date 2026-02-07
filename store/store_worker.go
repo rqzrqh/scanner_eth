@@ -68,25 +68,13 @@ func Revert(db *gorm.DB, height uint64, chainBinlog *protocol.ChainBinlog, binlo
 			logrus.Errorf("delete event erc1155 transfer failed %v", err)
 			return err
 		}
-		/*
-			// Delete Contract
-			if err := tx.Delete(&model.Contract{}, "height = ?", height).Error; err != nil {
-				logrus.Errorf("delete contract failed %v", err)
-				return err
-			}
 
-			// Delete ContractErc20
-			if err := tx.Delete(&model.ContractErc20{}, "height = ?", height).Error; err != nil {
-				logrus.Errorf("delete contract erc20 failed %v", err)
-				return err
-			}
+		// Delete Contract
+		if err := tx.Delete(&model.Contract{}, "height = ?", height).Error; err != nil {
+			logrus.Errorf("delete contract failed %v", err)
+			return err
+		}
 
-			// Delete ContractErc721
-			if err := tx.Delete(&model.ContractErc721{}, "height = ?", height).Error; err != nil {
-				logrus.Errorf("delete contract erc721 failed %v", err)
-				return err
-			}
-		*/
 		// Create ChainBinlog
 		if err := tx.Create(modelChainBinlog).Error; err != nil {
 			logrus.Errorf("store chain binlog failed %v", err)
@@ -234,8 +222,8 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, chainBinlog *proto
 			return err
 		}
 
-		if prevBlock.BlockHash != fullblock.Block.ParentHash {
-			logrus.Fatalf("prev block hash not match. height:%v prev_hash:%v current_parent_hash:%v", height, prevBlock.BlockHash, fullblock.Block.ParentHash)
+		if prevBlock.Hash != fullblock.Block.ParentHash {
+			logrus.Fatalf("prev block hash not match. height:%v prev_hash:%v current_parent_hash:%v", height, prevBlock.Hash, fullblock.Block.ParentHash)
 			os.Exit(0)
 			return xerrors.New("prev block hash not match")
 		}

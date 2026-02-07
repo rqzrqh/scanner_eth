@@ -113,7 +113,7 @@ func (fw *FetchWorker) Run() {
 
 				if fullblock != nil {
 					logrus.Infof("fetch task success. nodeId:%v taskId:%v height:%v fork_version:%v hash:%v parent_hash:%v cost:%v",
-						fw.nodeId, fw.taskId, height, forkVersion, fullblock.Block.BlockHash, fullblock.Block.ParentHash, costTime.String())
+						fw.nodeId, fw.taskId, height, forkVersion, fullblock.Block.Hash, fullblock.Block.ParentHash, costTime.String())
 				} else {
 					logrus.Warnf("fetch task failed. nodeId:%v taskId:%v height:%v fork_version:%v try_count:%v", fw.nodeId, fw.taskId, height, forkVersion, tryCount)
 				}
@@ -203,18 +203,18 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	totalDifficulty := big.NewInt(0)
 
 	blk := &types.Block{
-		Height:         hexutil.MustDecodeUint64(blkJson.Number),
-		BlockHash:      blkJson.Hash,
-		ParentHash:     blkJson.ParentHash,
-		BlockTimestamp: int64(hexutil.MustDecodeUint64(blkJson.TimeStamp)),
-		TxsCount:       len(blkJson.Txs),
-		Miner:          blkJson.Miner,
-		Size:           int(hexutil.MustDecodeUint64(blkJson.Size)),
-		Nonce:          blkJson.Nonce,
-		BaseFee:        baseFee.String(),
-		BurntFees:      burntFees.String(),
-		GasLimit:       hexutil.MustDecodeUint64(blkJson.GasLimit),
-		GasUsed:        gasUsed,
+		Height:     hexutil.MustDecodeUint64(blkJson.Number),
+		Hash:       blkJson.Hash,
+		ParentHash: blkJson.ParentHash,
+		Timestamp:  int64(hexutil.MustDecodeUint64(blkJson.TimeStamp)),
+		TxCount:    len(blkJson.Txs),
+		Miner:      blkJson.Miner,
+		Size:       int(hexutil.MustDecodeUint64(blkJson.Size)),
+		Nonce:      blkJson.Nonce,
+		BaseFee:    baseFee.String(),
+		BurntFees:  burntFees.String(),
+		GasLimit:   hexutil.MustDecodeUint64(blkJson.GasLimit),
+		GasUsed:    gasUsed,
 
 		UnclesCount: len(blkJson.Uncles),
 

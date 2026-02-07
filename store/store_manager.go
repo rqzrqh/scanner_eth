@@ -118,7 +118,7 @@ func (sm *StoreManager) Run() {
 						}
 
 						prevHash := fullblock.Block.ParentHash
-						blockHash := fullblock.Block.BlockHash
+						blockHash := fullblock.Block.Hash
 
 						logrus.Infof("store fullblock success. height:%v hash:%v prev_hash:%v cost:%v",
 							height, blockHash, prevHash, time.Since(startTime).String())
@@ -205,10 +205,10 @@ func convertStorageFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 	blockHeight := fullblock.Block.Height
 	modelBlock := model.Block{
 		Height:          fullblock.Block.Height,
-		BlockHash:       fullblock.Block.BlockHash,
+		Hash:            fullblock.Block.Hash,
 		ParentHash:      fullblock.Block.ParentHash,
-		BlockTimestamp:  fullblock.Block.BlockTimestamp,
-		TxsCount:        fullblock.Block.TxsCount,
+		Timestamp:       fullblock.Block.Timestamp,
+		TxCount:         fullblock.Block.TxCount,
 		Miner:           fullblock.Block.Miner,
 		Size:            fullblock.Block.Size,
 		Nonce:           fullblock.Block.Nonce,
@@ -620,10 +620,10 @@ func convertProtocolFullBlock(fullblock *types.FullBlock) *protocol.FullBlock {
 
 	protocolFullBlock := &protocol.FullBlock{
 		Height:          fullblock.Block.Height,
-		BlockHash:       fullblock.Block.BlockHash,
+		Hash:            fullblock.Block.Hash,
 		ParentHash:      fullblock.Block.ParentHash,
-		BlockTimestamp:  fullblock.Block.BlockTimestamp,
-		TxsCount:        fullblock.Block.TxsCount,
+		Timestamp:       fullblock.Block.Timestamp,
+		TxCount:         fullblock.Block.TxCount,
 		Miner:           fullblock.Block.Miner,
 		Size:            fullblock.Block.Size,
 		Nonce:           fullblock.Block.Nonce,

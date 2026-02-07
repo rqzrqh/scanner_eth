@@ -25,7 +25,7 @@ type LocalChain struct {
 // TODO check hash chain
 func NewLocalChain(reversibleSize int, blkDigestList []*BlockDigest) *LocalChain {
 	if len(blkDigestList) == 0 {
-		logrus.Errorf("memory incoming empty block digest list")
+		logrus.Errorf("local incoming empty block digest list")
 		os.Exit(0)
 	}
 
@@ -84,7 +84,7 @@ func (lc *LocalChain) Grow(height uint64, hash string, parentHash string) error 
 func (lc *LocalChain) Revert(height uint64) {
 
 	if height != lc.endHeight {
-		logrus.Errorf("memory revert failed. height not equal %v %v", height, lc.endHeight)
+		logrus.Errorf("local revert failed. height not equal %v %v", height, lc.endHeight)
 		os.Exit(0)
 	}
 
@@ -92,7 +92,7 @@ func (lc *LocalChain) Revert(height uint64) {
 	lc.endHeight--
 
 	if len(lc.reversibleSection) == 0 {
-		logrus.Errorf("memory revert out of limit")
+		logrus.Errorf("local revert out of limit")
 		os.Exit(0)
 	}
 }

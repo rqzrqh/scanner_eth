@@ -19,10 +19,10 @@ type FullBlock struct {
 
 type Block struct {
 	Height          uint64
-	BlockHash       string
+	Hash            string
 	ParentHash      string
-	BlockTimestamp  int64
-	TxsCount        int
+	Timestamp       int64
+	TxCount         int
 	Miner           string
 	Size            int
 	Nonce           string

@@ -60,7 +60,7 @@ func (fm *FetchManager) addBlock(data *types.FullBlock, forkVersion uint64) {
 
 		fm.eventID++
 
-		if err := fm.localChain.Grow(nextHeight, fullblock.Block.BlockHash, fullblock.Block.ParentHash); err != nil {
+		if err := fm.localChain.Grow(nextHeight, fullblock.Block.Hash, fullblock.Block.ParentHash); err != nil {
 			fm.forkVersion++
 			logrus.Infof("local chain revert. height:%v fork_version:%v event_id:%v", currentHeight, fm.forkVersion, fm.eventID)
 			fm.taskManager.clear()

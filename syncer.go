@@ -184,7 +184,7 @@ func loadStartBlock(clients []*rpc.Client, db *gorm.DB, startHeight uint64, reve
 
 		block := &model.Block{
 			Height:     startBlockHeight,
-			BlockHash:  startBlockHash,
+			Hash:       startBlockHash,
 			ParentHash: startBlockParentHash,
 		}
 
@@ -209,7 +209,7 @@ func loadStartBlock(clients []*rpc.Client, db *gorm.DB, startHeight uint64, reve
 	for _, v := range lookbackBlockList {
 		blk := &fetch.BlockDigest{
 			Height:     v.Height,
-			Hash:       v.BlockHash,
+			Hash:       v.Hash,
 			ParentHash: v.ParentHash,
 		}
 		blkDigestList = append(blkDigestList, blk)
