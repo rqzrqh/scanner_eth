@@ -27,7 +27,7 @@ type Syncer struct {
 	pm  *publish.PublishManager
 }
 
-func newSyncer(conf *config.Config, clients []*rpc.Client, db *gorm.DB, w *kafka.Writer, chainId int64, genesisBlockHash string, messageId uint64) *Syncer {
+func newSyncer(conf *config.Config, clients []*rpc.Client, db *gorm.DB, w *kafka.Writer, chainId int64, genesisBlockHash string, messageId uint64, optionalTables map[string]struct{}) *Syncer {
 
 	reversibleBlocks := conf.Chain.ReversibleBlocks
 	startHeight, endHeight, enableInternalTx := conf.Fetch.StartHeight, conf.Fetch.EndHeight, conf.Fetch.EnableInternalTx
@@ -44,6 +44,8 @@ func newSyncer(conf *config.Config, clients []*rpc.Client, db *gorm.DB, w *kafka
 
 	fetch.InitAbi()
 	fetch.SetEnableInternalTx(enableInternalTx)
+
+	store.SetOptionalFeatures(optionalTables)
 
 	checkNodeChainInfo(clients, chainId, genesisBlockHash)
 

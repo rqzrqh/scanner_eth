@@ -25,6 +25,22 @@ store:
   batch_size: 100
   worker_count: 8
   auto_create_tables: true # prd environment set false
+  # all parsed data has been published to mq
+  # block,chain_binlog,scanner_info are necessary to store, the rest is optional.
+  optional:
+    - "tx"
+    - "tx_internal"
+    - "event_log"
+    - "balance_native"
+    - "balance_erc20"
+    - "balance_erc1155"
+    - "event_erc20_transfer"
+    - "event_erc721_transfer"
+    - "event_erc1155_transfer"
+    - "contract"
+    - "contract_erc20"
+    - "contract_erc721"
+    - "token_erc721"
 
 publish:
   kafka_servers:

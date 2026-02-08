@@ -26,11 +26,12 @@ type Fetch struct {
 }
 
 type Store struct {
-	Host             string `mapstructure:"host"`
-	ChannelSize      int    `mapstructure:"channel_size"`
-	BatchSize        int    `mapstructure:"batch_size"`
-	WorkerCount      int    `mapstructure:"worker_count"`
-	AutoCreateTables bool   `mapstructure:"auto_create_tables"`
+	Host             string   `mapstructure:"host"`
+	ChannelSize      int      `mapstructure:"channel_size"`
+	BatchSize        int      `mapstructure:"batch_size"`
+	WorkerCount      int      `mapstructure:"worker_count"`
+	AutoCreateTables bool     `mapstructure:"auto_create_tables"`
+	Optional         []string `mapstructure:"optional"`
 }
 
 type Publish struct {

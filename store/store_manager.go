@@ -12,6 +12,38 @@ import (
 	"gorm.io/gorm"
 )
 
+var (
+	optinalTx                   bool
+	optinalTxInternal           bool
+	optinalEventLog             bool
+	optinalBalanceNative        bool
+	optinalBalanceErc20         bool
+	optinalBalanceErc1155       bool
+	optinalEventErc20Transfer   bool
+	optinalEventErc721Transfer  bool
+	optinalEventErc1155Transfer bool
+	optinalContract             bool
+	optinalContractErc20        bool
+	optinalContractErc721       bool
+	optinalTokenErc721          bool
+)
+
+func SetOptionalFeatures(optinalFeature map[string]struct{}) {
+	_, optinalTx = optinalFeature[model.Tx.TableName(model.Tx{})]
+	_, optinalTxInternal = optinalFeature[model.TxInternal.TableName(model.TxInternal{})]
+	_, optinalEventLog = optinalFeature[model.EventLog.TableName(model.EventLog{})]
+	_, optinalBalanceNative = optinalFeature[model.BalanceNative.TableName(model.BalanceNative{})]
+	_, optinalBalanceErc20 = optinalFeature[model.BalanceErc20.TableName(model.BalanceErc20{})]
+	_, optinalBalanceErc1155 = optinalFeature[model.BalanceErc1155.TableName(model.BalanceErc1155{})]
+	_, optinalEventErc20Transfer = optinalFeature[model.EventErc20Transfer.TableName(model.EventErc20Transfer{})]
+	_, optinalEventErc721Transfer = optinalFeature[model.EventErc721Transfer.TableName(model.EventErc721Transfer{})]
+	_, optinalEventErc1155Transfer = optinalFeature[model.EventErc1155Transfer.TableName(model.EventErc1155Transfer{})]
+	_, optinalContract = optinalFeature[model.Contract.TableName(model.Contract{})]
+	_, optinalContractErc20 = optinalFeature[model.ContractErc20.TableName(model.ContractErc20{})]
+	_, optinalContractErc721 = optinalFeature[model.ContractErc721.TableName(model.ContractErc721{})]
+	_, optinalTokenErc721 = optinalFeature[model.TokenErc721.TableName(model.TokenErc721{})]
+}
+
 type StorageFullBlock struct {
 	Block                    model.Block
 	TxList                   []model.Tx
@@ -226,184 +258,209 @@ func convertStorageFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
 	}
 
 	txList := make([]model.Tx, 0, len(fullblock.TxList))
-	for _, tx := range fullblock.TxList {
-		modelTx := model.Tx{
-			Height:               blockHeight,
-			TxHash:               tx.TxHash,
-			TxIndex:              tx.TxIndex,
-			TxType:               tx.TxType,
-			From:                 tx.From,
-			To:                   tx.To,
-			Nonce:                tx.Nonce,
-			GasLimit:             tx.GasLimit,
-			GasPrice:             tx.GasPrice,
-			GasUsed:              tx.GasUsed,
-			BaseFee:              tx.BaseFee,
-			BurntFees:            tx.BurntFees,
-			MaxFeePerGas:         tx.MaxFeePerGas,
-			MaxPriorityFeePerGas: tx.MaxPriorityFeePerGas,
-			Value:                tx.Value,
-			Input:                tx.Input,
-			ExecStatus:           tx.ExecStatus,
-			IsCallContract:       tx.IsCallContract,
-			IsCreateContract:     tx.IsCreateContract,
+	if optinalTx {
+		for _, tx := range fullblock.TxList {
+			modelTx := model.Tx{
+				Height:               blockHeight,
+				TxHash:               tx.TxHash,
+				TxIndex:              tx.TxIndex,
+				TxType:               tx.TxType,
+				From:                 tx.From,
+				To:                   tx.To,
+				Nonce:                tx.Nonce,
+				GasLimit:             tx.GasLimit,
+				GasPrice:             tx.GasPrice,
+				GasUsed:              tx.GasUsed,
+				BaseFee:              tx.BaseFee,
+				BurntFees:            tx.BurntFees,
+				MaxFeePerGas:         tx.MaxFeePerGas,
+				MaxPriorityFeePerGas: tx.MaxPriorityFeePerGas,
+				Value:                tx.Value,
+				Input:                tx.Input,
+				ExecStatus:           tx.ExecStatus,
+				IsCallContract:       tx.IsCallContract,
+				IsCreateContract:     tx.IsCreateContract,
+			}
+			txList = append(txList, modelTx)
 		}
-		txList = append(txList, modelTx)
 	}
 
 	// TxInternalList conversion (if exists in types.FullBlock)
 	txInternalList := make([]model.TxInternal, 0)
-	// Uncomment and adjust if TxInternalList exists in fullblock:
-	// for _, txInternal := range fullblock.TxInternalList {
-	// 	modelTxInternal := model.TxInternal{
-	// 		Height:    blockHeight,
-	// 		BlockHash: blockHash,
-	// 		// ... map other fields
-	// 	}
-	// 	txInternalList = append(txInternalList, modelTxInternal)
-	// }
+	if optinalTxInternal {
+		// for _, txInternal := range fullblock.TxInternalList {
+		// 	modelTxInternal := model.TxInternal{
+		// 		Height:    blockHeight,
+		// 		BlockHash: blockHash,
+		// 		// ... map other fields
+		// 	}
+		// 	txInternalList = append(txInternalList, modelTxInternal)
+		// }
+	}
 
 	eventLogList := make([]model.EventLog, 0, len(fullblock.EventLogList))
-	for _, log := range fullblock.EventLogList {
-		modelLog := model.EventLog{
-			Height:       blockHeight,
-			TxHash:       log.TxHash,
-			IndexInTx:    log.IndexInTx,
-			IndexInBlock: log.IndexInBlock,
-			ContractAddr: log.ContractAddr,
-			TopicCount:   log.TopicCount,
-			Topic0:       log.Topic0,
-			Topic1:       log.Topic1,
-			Topic2:       log.Topic2,
-			Topic3:       log.Topic3,
-			Data:         log.Data,
+	if optinalEventLog {
+		for _, log := range fullblock.EventLogList {
+			modelLog := model.EventLog{
+				Height:       blockHeight,
+				TxHash:       log.TxHash,
+				IndexInTx:    log.IndexInTx,
+				IndexInBlock: log.IndexInBlock,
+				ContractAddr: log.ContractAddr,
+				TopicCount:   log.TopicCount,
+				Topic0:       log.Topic0,
+				Topic1:       log.Topic1,
+				Topic2:       log.Topic2,
+				Topic3:       log.Topic3,
+				Data:         log.Data,
+			}
+			eventLogList = append(eventLogList, modelLog)
 		}
-		eventLogList = append(eventLogList, modelLog)
 	}
 
 	eventErc20TransferList := make([]model.EventErc20Transfer, 0, len(fullblock.EventErc20TransferList))
-	for _, transfer := range fullblock.EventErc20TransferList {
-		modelTransfer := model.EventErc20Transfer{
-			Height:       blockHeight,
-			TxHash:       transfer.TxHash,
-			IndexInBlock: transfer.IndexInBlock,
-			ContractAddr: transfer.ContractAddr,
-			From:         transfer.From,
-			To:           transfer.To,
-			Amount:       transfer.Amount,
+	if optinalEventErc20Transfer {
+		for _, transfer := range fullblock.EventErc20TransferList {
+			modelTransfer := model.EventErc20Transfer{
+				Height:       blockHeight,
+				TxHash:       transfer.TxHash,
+				IndexInBlock: transfer.IndexInBlock,
+				ContractAddr: transfer.ContractAddr,
+				From:         transfer.From,
+				To:           transfer.To,
+				Amount:       transfer.Amount,
+			}
+			eventErc20TransferList = append(eventErc20TransferList, modelTransfer)
 		}
-		eventErc20TransferList = append(eventErc20TransferList, modelTransfer)
 	}
 
 	eventErc721TransferList := make([]model.EventErc721Transfer, 0, len(fullblock.EventErc721TransferList))
-	for _, transfer := range fullblock.EventErc721TransferList {
-		modelTransfer := model.EventErc721Transfer{
-			Height:       blockHeight,
-			TxHash:       transfer.TxHash,
-			IndexInBlock: transfer.IndexInBlock,
-			ContractAddr: transfer.ContractAddr,
-			From:         transfer.From,
-			To:           transfer.To,
-			TokenId:      transfer.TokenId,
+	if optinalEventErc721Transfer {
+		for _, transfer := range fullblock.EventErc721TransferList {
+			modelTransfer := model.EventErc721Transfer{
+				Height:       blockHeight,
+				TxHash:       transfer.TxHash,
+				IndexInBlock: transfer.IndexInBlock,
+				ContractAddr: transfer.ContractAddr,
+				From:         transfer.From,
+				To:           transfer.To,
+				TokenId:      transfer.TokenId,
+			}
+			eventErc721TransferList = append(eventErc721TransferList, modelTransfer)
 		}
-		eventErc721TransferList = append(eventErc721TransferList, modelTransfer)
 	}
 
 	eventErc1155TransferList := make([]model.EventErc1155Transfer, 0, len(fullblock.EventErc1155TransferList))
-	for _, transfer := range fullblock.EventErc1155TransferList {
-		modelTransfer := model.EventErc1155Transfer{
-			Height:       blockHeight,
-			TxHash:       transfer.TxHash,
-			IndexInBlock: transfer.IndexInBlock,
-			IndexInBatch: transfer.IndexInBatch,
-			ContractAddr: transfer.ContractAddr,
-			Operator:     transfer.Operator,
-			From:         transfer.From,
-			To:           transfer.To,
-			TokenId:      transfer.TokenId,
-			Amount:       transfer.Amount,
+	if optinalEventErc1155Transfer {
+		for _, transfer := range fullblock.EventErc1155TransferList {
+			modelTransfer := model.EventErc1155Transfer{
+				Height:       blockHeight,
+				TxHash:       transfer.TxHash,
+				IndexInBlock: transfer.IndexInBlock,
+				IndexInBatch: transfer.IndexInBatch,
+				ContractAddr: transfer.ContractAddr,
+				Operator:     transfer.Operator,
+				From:         transfer.From,
+				To:           transfer.To,
+				TokenId:      transfer.TokenId,
+				Amount:       transfer.Amount,
+			}
+			eventErc1155TransferList = append(eventErc1155TransferList, modelTransfer)
 		}
-		eventErc1155TransferList = append(eventErc1155TransferList, modelTransfer)
 	}
 
 	contractList := make([]model.Contract, 0, len(fullblock.ContractList))
-	for _, contract := range fullblock.ContractList {
-		modelContract := model.Contract{
-			Height:       blockHeight,
-			TxHash:       contract.TxHash,
-			ContractAddr: contract.ContractAddr,
-			CreatorAddr:  contract.CreatorAddr,
-			ExecStatus:   contract.ExecStatus,
+	if optinalContract {
+		for _, contract := range fullblock.ContractList {
+			modelContract := model.Contract{
+				Height:       blockHeight,
+				TxHash:       contract.TxHash,
+				ContractAddr: contract.ContractAddr,
+				CreatorAddr:  contract.CreatorAddr,
+				ExecStatus:   contract.ExecStatus,
+			}
+			contractList = append(contractList, modelContract)
 		}
-		contractList = append(contractList, modelContract)
 	}
 
 	contractErc20List := make([]model.ContractErc20, 0, len(fullblock.ContractErc20List))
-	for _, contract := range fullblock.ContractErc20List {
-		modelContract := model.ContractErc20{
-			ContractAddr: contract.ContractAddr,
-			Name:         contract.Name,
-			Symbol:       contract.Symbol,
-			Decimals:     contract.Decimals,
-			TotalSupply:  contract.TotalSupply,
+	if optinalContractErc20 {
+		for _, contract := range fullblock.ContractErc20List {
+			modelContract := model.ContractErc20{
+				ContractAddr: contract.ContractAddr,
+				Name:         contract.Name,
+				Symbol:       contract.Symbol,
+				Decimals:     contract.Decimals,
+				TotalSupply:  contract.TotalSupply,
+			}
+			contractErc20List = append(contractErc20List, modelContract)
 		}
-		contractErc20List = append(contractErc20List, modelContract)
 	}
 
 	contractErc721List := make([]model.ContractErc721, 0, len(fullblock.ContractErc721List))
-	for _, contract := range fullblock.ContractErc721List {
-		modelContract := model.ContractErc721{
-			ContractAddr: contract.ContractAddr,
-			Name:         contract.Name,
-			Symbol:       contract.Symbol,
+	if optinalContractErc721 {
+		for _, contract := range fullblock.ContractErc721List {
+			modelContract := model.ContractErc721{
+				ContractAddr: contract.ContractAddr,
+				Name:         contract.Name,
+				Symbol:       contract.Symbol,
+			}
+			contractErc721List = append(contractErc721List, modelContract)
 		}
-		contractErc721List = append(contractErc721List, modelContract)
 	}
 
 	balanceNativeList := make([]model.BalanceNative, 0, len(fullblock.BalanceNativeList))
-	for _, balance := range fullblock.BalanceNativeList {
-		modelBalance := model.BalanceNative{
-			Addr:         balance.Addr,
-			Balance:      balance.Balance,
-			UpdateHeight: balance.UpdateHeight,
+	if optinalBalanceNative {
+		for _, balance := range fullblock.BalanceNativeList {
+			modelBalance := model.BalanceNative{
+				Addr:         balance.Addr,
+				Balance:      balance.Balance,
+				UpdateHeight: balance.UpdateHeight,
+			}
+			balanceNativeList = append(balanceNativeList, modelBalance)
 		}
-		balanceNativeList = append(balanceNativeList, modelBalance)
 	}
 
 	balanceErc20List := make([]model.BalanceErc20, 0, len(fullblock.BalanceErc20List))
-	for _, balance := range fullblock.BalanceErc20List {
-		modelBalance := model.BalanceErc20{
-			Addr:         balance.Addr,
-			ContractAddr: balance.ContractAddr,
-			Balance:      balance.Balance,
-			UpdateHeight: balance.UpdateHeight,
+	if optinalBalanceErc20 {
+		for _, balance := range fullblock.BalanceErc20List {
+			modelBalance := model.BalanceErc20{
+				Addr:         balance.Addr,
+				ContractAddr: balance.ContractAddr,
+				Balance:      balance.Balance,
+				UpdateHeight: balance.UpdateHeight,
+			}
+			balanceErc20List = append(balanceErc20List, modelBalance)
 		}
-		balanceErc20List = append(balanceErc20List, modelBalance)
 	}
 
 	balanceErc1155List := make([]model.BalanceErc1155, 0, len(fullblock.BalanceErc1155List))
-	for _, balance := range fullblock.BalanceErc1155List {
-		modelBalance := model.BalanceErc1155{
-			Addr:         balance.Addr,
-			ContractAddr: balance.ContractAddr,
-			TokenId:      balance.TokenId,
-			Balance:      balance.Balance,
-			UpdateHeight: balance.UpdateHeight,
+	if optinalBalanceErc1155 {
+		for _, balance := range fullblock.BalanceErc1155List {
+			modelBalance := model.BalanceErc1155{
+				Addr:         balance.Addr,
+				ContractAddr: balance.ContractAddr,
+				TokenId:      balance.TokenId,
+				Balance:      balance.Balance,
+				UpdateHeight: balance.UpdateHeight,
+			}
+			balanceErc1155List = append(balanceErc1155List, modelBalance)
 		}
-		balanceErc1155List = append(balanceErc1155List, modelBalance)
 	}
 
 	tokenErc721List := make([]model.TokenErc721, 0, len(fullblock.TokenErc721List))
-	for _, token := range fullblock.TokenErc721List {
-		modelToken := model.TokenErc721{
-			ContractAddr:  token.ContractAddr,
-			TokenId:       token.TokenId,
-			OwnerAddr:     token.OwnerAddr,
-			TokenUri:      token.TokenUri,
-			TokenMetaData: token.TokenMetaData,
-			UpdateHeight:  token.UpdateHeight,
+	if optinalTokenErc721 {
+		for _, token := range fullblock.TokenErc721List {
+			modelToken := model.TokenErc721{
+				ContractAddr:  token.ContractAddr,
+				TokenId:       token.TokenId,
+				OwnerAddr:     token.OwnerAddr,
+				TokenUri:      token.TokenUri,
+				TokenMetaData: token.TokenMetaData,
+				UpdateHeight:  token.UpdateHeight,
+			}
+			tokenErc721List = append(tokenErc721List, modelToken)
 		}
-		tokenErc721List = append(tokenErc721List, modelToken)
 	}
 
 	return &StorageFullBlock{

@@ -114,6 +114,32 @@ func main() {
 		logrus.Infof("database auto migrate success")
 	}
 
+	allOptionalTables := make(map[string]struct{}, 0)
+	allOptionalTables[model.Tx.TableName(model.Tx{})] = struct{}{}
+	allOptionalTables[model.TxInternal.TableName(model.TxInternal{})] = struct{}{}
+	allOptionalTables[model.EventLog.TableName(model.EventLog{})] = struct{}{}
+	allOptionalTables[model.BalanceNative.TableName(model.BalanceNative{})] = struct{}{}
+	allOptionalTables[model.BalanceErc20.TableName(model.BalanceErc20{})] = struct{}{}
+	allOptionalTables[model.BalanceErc1155.TableName(model.BalanceErc1155{})] = struct{}{}
+	allOptionalTables[model.EventErc20Transfer.TableName(model.EventErc20Transfer{})] = struct{}{}
+	allOptionalTables[model.EventErc721Transfer.TableName(model.EventErc721Transfer{})] = struct{}{}
+	allOptionalTables[model.EventErc1155Transfer.TableName(model.EventErc1155Transfer{})] = struct{}{}
+	allOptionalTables[model.Contract.TableName(model.Contract{})] = struct{}{}
+	allOptionalTables[model.ContractErc20.TableName(model.ContractErc20{})] = struct{}{}
+	allOptionalTables[model.ContractErc721.TableName(model.ContractErc721{})] = struct{}{}
+	allOptionalTables[model.TokenErc721.TableName(model.TokenErc721{})] = struct{}{}
+
+	// check
+	logrus.Infof("optional list:%v", conf.Store.Optional)
+	optionalTables := make(map[string]struct{}, 0)
+	for _, table := range conf.Store.Optional {
+		if _, exist := allOptionalTables[table]; !exist {
+			logrus.Errorf("optional table:%v not exist", table)
+			os.Exit(0)
+		}
+		optionalTables[table] = struct{}{}
+	}
+
 	initScannerInfo(db, conf.Chain.ChainId, conf.Chain.GenesisBlockHash)
 
 	logrus.Infof("init scanner info success")
@@ -161,7 +187,7 @@ func main() {
 	}
 	//err = w.Close()
 
-	s := newSyncer(conf, clients, db, w, chainId, genesisBlockHash, messageId)
+	s := newSyncer(conf, clients, db, w, chainId, genesisBlockHash, messageId, optionalTables)
 	s.Run()
 
 	logrus.Infof("start success")
