@@ -342,6 +342,24 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		}
 	}
 
+	balanceErc1155List := make([]*types.BalanceErc1155, 0)
+	{
+		for contractAddr, v := range txBalanceErc1155Address {
+			for tokenId, addr := range v {
+				balanceErc1155List = append(balanceErc1155List, &types.BalanceErc1155{
+					Addr:         addr,
+					ContractAddr: contractAddr,
+					TokenId:      tokenId,
+				})
+			}
+		}
+
+		if err := fetchErc1155BalancesBatch(client, balanceErc1155List, height); err != nil {
+			logrus.Warnf("fetch erc1155balance failed. nodeId:%v taskId:%v height:%v err:%v", nodeId, taskId, height, err)
+			return nil
+		}
+	}
+
 	// get new erc20 contract info
 	contractErc20List := make([]*types.ContractErc20, 0, len(erc20ContractAddrs))
 	{
@@ -392,10 +410,6 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		}
 	}
 
-	fmt.Println("erc1155 contract count:", len(txBalanceErc1155Address))
-
-	balanceErc1155List := make([]*types.BalanceErc1155, 0)
-
 	fullblock := &types.FullBlock{
 		Block:                    blk,
 		TxList:                   txList,
@@ -420,7 +434,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 
 func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, height uint64, baseFee *big.Int) (
 	[]*types.Tx, []*types.EventLog, []*types.EventErc20Transfer, []*types.EventErc721Transfer, []*types.EventErc1155Transfer, []*types.Contract,
-	map[string]struct{}, map[string]map[string]struct{}, map[string]map[string]map[string]struct{}, map[string]struct{}, map[string]struct{}, map[TokenErc721KeyValue]TokenErc721KeyValue,
+	map[string]struct{}, map[string]map[string]struct{}, map[string]map[string]string, map[string]struct{}, map[string]struct{}, map[TokenErc721KeyValue]TokenErc721KeyValue,
 ) {
 
 	txList := make([]*types.Tx, 0, len(jsonTxList))
@@ -432,7 +446,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 
 	balanceNativeAddress := make(map[string]struct{}, 0)
 	balanceErc20Address := make(map[string]map[string]struct{}, 0)
-	balanceErc1155Address := make(map[string]map[string]map[string]struct{}, 0)
+	balanceErc1155Address := make(map[string]map[string]string, 0)
 
 	erc20ContractAddrs := make(map[string]struct{}, 0)
 	erc721ContractAddrs := make(map[string]struct{}, 0)
@@ -648,11 +662,15 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 				tokenId := transferSingleData.Id.String()
 
 				// balance erc1155
+				if _, ok := balanceErc1155Address[contractAddr]; !ok {
+					balanceErc1155Address[contractAddr] = make(map[string]string, 0)
+				}
+
 				if sender != util.ZeroAddress {
-					balanceErc1155Address[sender][contractAddr][tokenId] = struct{}{}
+					balanceErc1155Address[contractAddr][tokenId] = sender
 				}
 				if receiver != util.ZeroAddress {
-					balanceErc1155Address[receiver][contractAddr][tokenId] = struct{}{}
+					balanceErc1155Address[contractAddr][tokenId] = receiver
 				}
 
 				// tx erc1155
@@ -699,14 +717,18 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 				sender := strings.ToLower(common.HexToAddress(topic2).Hex())
 				receiver := strings.ToLower(common.HexToAddress(topic3).Hex())
 
+				if _, ok := balanceErc1155Address[contractAddr]; !ok {
+					balanceErc1155Address[contractAddr] = make(map[string]string, 0)
+				}
+
 				for index, id := range ids {
 					tokenId := id.String()
 
 					if sender != util.ZeroAddress {
-						balanceErc1155Address[sender][contractAddr][tokenId] = struct{}{}
+						balanceErc1155Address[contractAddr][tokenId] = sender
 					}
 					if receiver != util.ZeroAddress {
-						balanceErc1155Address[receiver][contractAddr][tokenId] = struct{}{}
+						balanceErc1155Address[contractAddr][tokenId] = receiver
 					}
 
 					// tx erc1155
@@ -917,6 +939,83 @@ func fetchErc20BalancesBatch(client *rpc.Client, bs []*types.BalanceErc20, heigh
 			b.Balance = v.String()
 		} else {
 			logrus.Warnf("erc20 balanceOf ret type error err:%v contract:%v addr:%v", err, b.ContractAddr, b.Addr)
+		}
+	}
+
+	return nil
+}
+
+func fetchErc1155BalancesBatch(client *rpc.Client, bs []*types.BalanceErc1155, height uint64) error {
+	hexBalances := make([]hexutil.Bytes, len(bs))
+	elems := make([]rpc.BatchElem, 0, len(bs))
+	for i, v := range bs {
+		b := v
+
+		tkn := new(big.Int)
+		tkn.SetString(b.TokenId, 10)
+
+		input, err := erc1155ABI.Pack("balanceOf", common.HexToAddress(b.Addr), tkn)
+		if err != nil {
+			return fmt.Errorf("panic erc1155 balanceOf input err:%v", err)
+		}
+		arg := map[string]interface{}{
+			"from": common.HexToAddress(b.Addr),
+			"to":   common.HexToAddress(b.ContractAddr),
+			"data": hexutil.Bytes(input),
+		}
+
+		elem := rpc.BatchElem{
+			Method: "eth_call",
+			Args:   []interface{}{arg, "latest"},
+			Result: &hexBalances[i],
+		}
+		elems = append(elems, elem)
+	}
+
+	var blockNumber hexutil.Uint64
+	heightReq := rpc.BatchElem{
+		Method: "eth_blockNumber",
+		Args:   []interface{}{},
+		Result: &blockNumber,
+	}
+	elems = append(elems, heightReq)
+
+	err := client.BatchCallContext(context.Background(), elems)
+	if err != nil {
+		return fmt.Errorf("rpc erc1155 balances err:%v", err)
+	}
+
+	for _, elem := range elems {
+		if elem.Error != nil && !util.HitNoMoreRetryErrors(elem.Error) {
+			return fmt.Errorf("erc1155 balances elem err:%v elem:%v", elem.Error, elem)
+		}
+	}
+
+	if uint64(blockNumber) < height {
+		return fmt.Errorf("latest height:%v got cur chain height:%v", height, uint64(blockNumber))
+	}
+
+	for i, b := range bs {
+		b.UpdateHeight = uint64(blockNumber)
+		if len(hexBalances[i]) == 0 {
+			b.Balance = "0"
+			continue
+		}
+
+		rets, err := erc1155ABI.Unpack("balanceOf", hexBalances[i])
+		if err != nil {
+			logrus.Warnf("unpack erc1155 balanceOf err:%v contract:%v addr:%v", err, b.ContractAddr, b.Addr)
+			continue
+		}
+		if len(rets) == 0 {
+			logrus.Warnf("erc1155 balanceOf ret size err:%v contract:%v addr:%v", err, b.ContractAddr, b.Addr)
+			continue
+		}
+
+		if v, ok := rets[0].(*big.Int); ok {
+			b.Balance = v.String()
+		} else {
+			logrus.Warnf("erc1155 balanceOf ret type error err:%v contract:%v addr:%v", err, b.ContractAddr, b.Addr)
 		}
 	}
 

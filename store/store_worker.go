@@ -122,6 +122,7 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, chainBinlog *proto
 		splitEventErc1155Transfer(fullblock.EventErc1155TransferList, batchSize, height, storeTaskChannel, taskSet)
 		splitBalanceNative(fullblock.BalanceNativeList, batchSize, height, storeTaskChannel, taskSet)
 		splitBalanceErc20(fullblock.BalanceErc20List, batchSize, height, storeTaskChannel, taskSet)
+		splitBalanceErc1155(fullblock.BalanceErc1155List, batchSize, height, storeTaskChannel, taskSet)
 		splitContract(fullblock.ContractList, batchSize, height, storeTaskChannel, taskSet)
 		splitContractErc20(fullblock.ContractErc20List, batchSize, height, storeTaskChannel, taskSet)
 		splitContractErc721(fullblock.ContractErc721List, batchSize, height, storeTaskChannel, taskSet)
@@ -365,6 +366,20 @@ func splitBalanceErc20(modelList []model.BalanceErc20, batchSize int, height uin
 	logrus.Debugf("split balance erc20. height:%v count:%v", height, count)
 }
 
+func splitBalanceErc1155(modelList []model.BalanceErc1155, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
+	count := len(modelList)
+
+	list := make([]interface{}, 0)
+	for _, v := range modelList {
+		list = append(list, v)
+	}
+
+	// balance erc1155 should not be split, overwise cause database error(primary error?)
+	splitTask(BalanceErc1155, list, batchSize, height, storeTaskChannel, taskSet)
+
+	logrus.Debugf("split balance erc1155. height:%v count:%v", height, count)
+}
+
 func splitContract(modelList []model.Contract, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
 	count := len(modelList)
 
@@ -424,6 +439,7 @@ const (
 	EventLog
 	BalanceNative
 	BalanceErc20
+	BalanceErc1155
 	EventErc20Transfer
 	EventErc721Transfer
 	EventErc1155Transfer
@@ -517,6 +533,13 @@ func (sw *StoreWorker) Run() {
 					data := make([]model.BalanceErc20, 0)
 					for _, v := range tsk.data {
 						data = append(data, v.(model.BalanceErc20))
+					}
+					// update
+					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
+				case BalanceErc1155:
+					data := make([]model.BalanceErc1155, 0)
+					for _, v := range tsk.data {
+						data = append(data, v.(model.BalanceErc1155))
 					}
 					// update
 					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
