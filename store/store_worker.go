@@ -123,10 +123,10 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, chainBinlog *proto
 		splitBalanceNative(fullblock.BalanceNativeList, batchSize, height, storeTaskChannel, taskSet)
 		splitBalanceErc20(fullblock.BalanceErc20List, batchSize, height, storeTaskChannel, taskSet)
 		splitBalanceErc1155(fullblock.BalanceErc1155List, batchSize, height, storeTaskChannel, taskSet)
+		splitTokenErc721(fullblock.TokenErc721List, batchSize, height, storeTaskChannel, taskSet)
 		splitContract(fullblock.ContractList, batchSize, height, storeTaskChannel, taskSet)
 		splitContractErc20(fullblock.ContractErc20List, batchSize, height, storeTaskChannel, taskSet)
 		splitContractErc721(fullblock.ContractErc721List, batchSize, height, storeTaskChannel, taskSet)
-		splitTokenErc721(fullblock.TokenErc721List, batchSize, height, storeTaskChannel, taskSet)
 
 		dispatchComplete <- taskSet
 
@@ -194,7 +194,7 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, chainBinlog *proto
 
 	if err := db.Transaction(func(tx *gorm.DB) error {
 
-		if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&fullblock.Block).Error; err != nil {
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&fullblock.Block).Error; err != nil {
 			logrus.Errorf("store chain block failed %v", err)
 			return err
 		}
@@ -440,13 +440,13 @@ const (
 	BalanceNative
 	BalanceErc20
 	BalanceErc1155
+	TokenErc721
 	EventErc20Transfer
 	EventErc721Transfer
 	EventErc1155Transfer
 	Contract
 	ContractErc20
 	ContractErc721
-	TokenErc721
 )
 
 type StoreTask struct {
@@ -497,76 +497,77 @@ func (sw *StoreWorker) Run() {
 					for _, v := range tsk.data {
 						data = append(data, v.(model.Tx))
 					}
-					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
+					err = sw.db.Clauses(clause.OnConflict{DoNothing: true}).Create(data).Error
 				case EventLog:
 					data := make([]model.EventLog, 0)
 					for _, v := range tsk.data {
 						data = append(data, v.(model.EventLog))
 					}
-					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
+					err = sw.db.Clauses(clause.OnConflict{DoNothing: true}).Create(data).Error
 				case EventErc20Transfer:
 					data := make([]model.EventErc20Transfer, 0)
 					for _, v := range tsk.data {
 						data = append(data, v.(model.EventErc20Transfer))
 					}
-					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
+					err = sw.db.Clauses(clause.OnConflict{DoNothing: true}).Create(data).Error
 				case EventErc721Transfer:
 					data := make([]model.EventErc721Transfer, 0)
 					for _, v := range tsk.data {
 						data = append(data, v.(model.EventErc721Transfer))
 					}
-					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
+					err = sw.db.Clauses(clause.OnConflict{DoNothing: true}).Create(data).Error
 				case EventErc1155Transfer:
 					data := make([]model.EventErc1155Transfer, 0)
 					for _, v := range tsk.data {
 						data = append(data, v.(model.EventErc1155Transfer))
 					}
-					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
+					err = sw.db.Clauses(clause.OnConflict{DoNothing: true}).Create(data).Error
 				case BalanceNative:
 					data := make([]model.BalanceNative, 0)
 					for _, v := range tsk.data {
 						data = append(data, v.(model.BalanceNative))
 					}
 					// update
-					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
+					err = sw.db.Clauses(clause.OnConflict{DoUpdates: clause.AssignmentColumns([]string{"balance", "update_height"})}).Create(data).Error
 				case BalanceErc20:
 					data := make([]model.BalanceErc20, 0)
 					for _, v := range tsk.data {
 						data = append(data, v.(model.BalanceErc20))
 					}
 					// update
-					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
+					err = sw.db.Clauses(clause.OnConflict{DoUpdates: clause.AssignmentColumns([]string{"balance", "update_height"})}).Create(data).Error
 				case BalanceErc1155:
 					data := make([]model.BalanceErc1155, 0)
 					for _, v := range tsk.data {
 						data = append(data, v.(model.BalanceErc1155))
 					}
 					// update
-					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
-				case Contract:
-					data := make([]model.Contract, 0)
-					for _, v := range tsk.data {
-						data = append(data, v.(model.Contract))
-					}
-					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
-				case ContractErc20:
-					data := make([]model.ContractErc20, 0)
-					for _, v := range tsk.data {
-						data = append(data, v.(model.ContractErc20))
-					}
-					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
-				case ContractErc721:
-					data := make([]model.ContractErc721, 0)
-					for _, v := range tsk.data {
-						data = append(data, v.(model.ContractErc721))
-					}
-					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
+					err = sw.db.Clauses(clause.OnConflict{DoUpdates: clause.AssignmentColumns([]string{"addr", "balance", "update_height"})}).Create(data).Error
 				case TokenErc721:
 					data := make([]model.TokenErc721, 0)
 					for _, v := range tsk.data {
 						data = append(data, v.(model.TokenErc721))
 					}
-					err = sw.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(data).Error
+					// update
+					err = sw.db.Clauses(clause.OnConflict{DoUpdates: clause.AssignmentColumns([]string{"owner_addr", "token_uri", "token_meta_data", "update_height"})}).Create(data).Error
+				case Contract:
+					data := make([]model.Contract, 0)
+					for _, v := range tsk.data {
+						data = append(data, v.(model.Contract))
+					}
+					err = sw.db.Clauses(clause.OnConflict{DoNothing: true}).Create(data).Error
+				case ContractErc20:
+					data := make([]model.ContractErc20, 0)
+					for _, v := range tsk.data {
+						data = append(data, v.(model.ContractErc20))
+					}
+					err = sw.db.Clauses(clause.OnConflict{DoNothing: true}).Create(data).Error
+				case ContractErc721:
+					data := make([]model.ContractErc721, 0)
+					for _, v := range tsk.data {
+						data = append(data, v.(model.ContractErc721))
+					}
+					err = sw.db.Clauses(clause.OnConflict{DoNothing: true}).Create(data).Error
 				default:
 					panic("unknown task type")
 				}
