@@ -61,9 +61,12 @@ func newSyncer(conf *config.Config, clients []*rpc.Client, db *gorm.DB, w *kafka
 
 	remoteChainUpdateChannel := make(chan *types.RemoteChainUpdate, 100)
 	maxUnorganizedBlockCount := 50 * len(clients)
-	blkDigestList := loadStartBlock(clients, db, startHeight, reversibleBlocks)
+	blkDigestList := loadLatestBlock(clients, db, startHeight, reversibleBlocks)
 
-	logrus.Infof("load start block success. count:%v", len(blkDigestList))
+	logrus.Infof("load latest block success. count:%v", len(blkDigestList))
+	for _, blk := range blkDigestList {
+		logrus.Infof("latest block height:%v hash:%v parentHash:%v", blk.Height, blk.Hash, blk.ParentHash)
+	}
 
 	localChain := fetch.NewLocalChain(reversibleBlocks, blkDigestList)
 	fm := fetch.NewFetchManager(clients, localChain, endHeight, maxUnorganizedBlockCount, remoteChainUpdateChannel, storeOperationChannel)
@@ -122,16 +125,16 @@ func checkNodeChainInfo(clients []*rpc.Client, dbChainId int64, dbGenesisBlockHa
 	}
 }
 
-func loadStartBlock(clients []*rpc.Client, db *gorm.DB, startHeight uint64, reversibleBlocks int) []*fetch.BlockDigest {
+func loadLatestBlock(clients []*rpc.Client, db *gorm.DB, startHeight uint64, reversibleBlocks int) []*fetch.BlockDigest {
 	blkDigestList := make([]*fetch.BlockDigest, 0)
 
-	var lookbackBlockList []*model.Block
-	if err := db.Select("height").Order("height desc").Limit(reversibleBlocks).Find(&lookbackBlockList).Error; err != nil {
-		logrus.Errorf("failed to lookback blocks from db %v", err)
+	var latestBlockList []*model.Block
+	if err := db.Order("height desc").Limit(reversibleBlocks).Find(&latestBlockList).Error; err != nil {
+		logrus.Errorf("failed to load latest blocks from db %v", err)
 		os.Exit(0)
 	}
 
-	if len(lookbackBlockList) == 0 {
+	if len(latestBlockList) == 0 {
 
 		var fetchHeight uint64
 		// meaning from beginning
@@ -203,12 +206,12 @@ func loadStartBlock(clients []*rpc.Client, db *gorm.DB, startHeight uint64, reve
 		blkDigestList = append(blkDigestList, blk)
 
 	} else {
-		sort.Slice(lookbackBlockList, func(i, j int) bool {
-			return lookbackBlockList[i].Height < lookbackBlockList[j].Height
+		sort.Slice(latestBlockList, func(i, j int) bool {
+			return latestBlockList[i].Height < latestBlockList[j].Height
 		})
 	}
 
-	for _, v := range lookbackBlockList {
+	for _, v := range latestBlockList {
 		blk := &fetch.BlockDigest{
 			Height:     v.Height,
 			Hash:       v.Hash,

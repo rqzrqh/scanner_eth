@@ -51,11 +51,13 @@ func (lc *LocalChain) Grow(height uint64, hash string, parentHash string) error 
 
 	endBlk := lc.reversibleSection[lc.endHeight]
 	if len(parentHash) != len(endBlk.Hash) {
+		logrus.Errorf("grow failed. hash len not equal. height:%v parentHash:%v endBlk.Hash:%v", height, parentHash, endBlk.Hash)
 		return xerrors.New("grow failed. hash len not equal")
 	}
 
 	for i := 0; i < len(parentHash); i++ {
 		if parentHash[i] != endBlk.Hash[i] {
+			logrus.Errorf("grow failed. hash not equal. height:%v parentHash:%v endBlk.Hash:%v", height, parentHash, endBlk.Hash)
 			return xerrors.New("grow failed. hash not equal")
 		}
 	}
