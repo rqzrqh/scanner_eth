@@ -231,6 +231,40 @@ func (sm *StoreManager) Run() {
 			}
 		}
 	}()
+
+	// read all binlogs from db and publish
+	messageId := uint64(0)
+	for {
+		var binlogs []*model.ChainBinlog
+		if err := sm.db.Where("message_id > ?", messageId).Order("message_id asc").Limit(100).Find(&binlogs).Error; err != nil {
+			logrus.Errorf("failed to get binlogs from db %v", err)
+			os.Exit(0)
+		}
+		if len(binlogs) == 0 {
+			break
+		}
+
+		for _, binlog := range binlogs {
+
+			logrus.Infof("restore binlog from db. binlog_record_id:%v message_id:%v height:%v", binlog.Id, binlog.MessageId, binlog.Height)
+
+			publishOperation := &types.PublishOperation{
+				BinlogRecordId: binlog.Id,
+				MessageId:      binlog.MessageId,
+				Height:         binlog.Height,
+				BinlogData:     binlog.BinlogData,
+			}
+			sm.publishOperationChannel <- publishOperation
+		}
+
+		messageId = binlogs[len(binlogs)-1].MessageId
+	}
+
+	if messageId != 0 && messageId != sm.messageId {
+		logrus.Errorf("message id not equal with scannerInfo. db:%v current:%v", messageId, sm.messageId)
+		os.Exit(0)
+	}
+
 }
 
 func convertStorageFullBlock(fullblock *types.FullBlock) *StorageFullBlock {
