@@ -2,8 +2,7 @@ package log
 
 import (
 	"fmt"
-	"io/ioutil"
-	"os"
+	"io"
 	"runtime"
 	"scanner_eth/config"
 	"strings"
@@ -31,7 +30,7 @@ func callerFormatter(f *runtime.Frame) string {
 	return " @" + funcName + " " + fileName
 }
 
-func AddField(key, value string) {
+func addField(key, value string) {
 	if len(key) == 0 {
 		return
 	}
@@ -42,34 +41,35 @@ func AddField(key, value string) {
 	defaultFieldMap[key] = value
 }
 
-func DisableDefaultConsole() {
-	logrus.SetOutput(ioutil.Discard)
-}
-
-func getHookLevel(level int) []logrus.Level {
-	if level < 0 || level > 5 {
-		level = 5
+func getHookLevel(logLevel string) []logrus.Level {
+	level, err := logrus.ParseLevel(logLevel)
+	if err != nil {
+		level = logrus.InfoLevel
 	}
+
 	return logrus.AllLevels[:level+1]
 }
 
-func init() {
+func InitLogger(name string, env string, config config.Log) error {
+
+	if config.Console.Enable {
+		addConsoleOut(config.Console.Level)
+	}
+
+	if config.File.Enable {
+		addFileOut(config.File.Name, config.File.MaxSize, config.File.MaxBackups, config.File.MaxAge, config.File.Level)
+	}
+
 	logrus.SetReportCaller(true)
-	logrus.SetLevel(logrus.DebugLevel)
-	logrus.SetOutput(os.Stdout)
+	logrus.SetLevel(logrus.TraceLevel)
 	logrus.SetFormatter(&logrus.TextFormatter{
 		DisableTimestamp: false,
 		CallerPrettyfier: callerPrettyfier,
 	})
-}
+	logrus.SetOutput(io.Discard)
 
-func Init(name string, env string, config config.Log) error {
-	if config.Stdout.Enable {
-		AddConsoleOut(config.Stdout.Level)
-	}
-
-	AddField("app", name)
-	AddField("env", env)
+	addField("app", name)
+	addField("env", env)
 
 	return nil
 }

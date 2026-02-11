@@ -1,7 +1,6 @@
 app_name: scanner_bsc_testnet
 
 chain:
-  name: "bsc_testnet"
   chain_id: 97
   genesis_block_hash: "0x6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe34"
   reversible_blocks: 5
@@ -50,17 +49,13 @@ publish:
 
 #panic=0, fatal=1, error=2, warn=3, info=4, debug=5, trace=6, 
 log:
-  stdout:
+  console:
     enable: true
-    level: 5
+    level: debug
   file:
     enable: true
-    path: "./log/app.log"
-    level: 5
-  kafka:
-    enable: false
-    topic: "applog"
-    kafka_servers:
-      - "127.0.0.1:9092"
-    level: 5
-
+    name: "./logs/app.log"
+    max_size: 100 #MB
+    max_backups: 30
+    max_age: 30 #day
+    level: info

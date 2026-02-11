@@ -8,9 +8,17 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func AddConsoleOut(level int) {
-	DisableDefaultConsole()
+func addConsoleOut(level string) {
 	logrus.AddHook(newConsoleHook(level))
+}
+
+func newConsoleHook(level string) *consoleHook {
+	plainFormatter := &nested.Formatter{
+		NoFieldsColors:        true,
+		CustomCallerFormatter: callerFormatter,
+	}
+
+	return &consoleHook{plainFormatter, getHookLevel(level)}
 }
 
 type consoleHook struct {
@@ -39,13 +47,4 @@ func (c *consoleHook) Fire(entry *logrus.Entry) error {
 
 func (c *consoleHook) Levels() []logrus.Level {
 	return c.levels
-}
-
-func newConsoleHook(level int) *consoleHook {
-	plainFormatter := &nested.Formatter{
-		NoFieldsColors:        true,
-		CustomCallerFormatter: callerFormatter,
-	}
-
-	return &consoleHook{plainFormatter, getHookLevel(level)}
 }

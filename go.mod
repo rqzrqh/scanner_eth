@@ -9,8 +9,10 @@ require (
 	github.com/segmentio/kafka-go v0.4.50
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/viper v1.21.0
+	github.com/thomas-tacquet/gormv2-logrus v1.2.4
 	golang.org/x/sync v0.19.0
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/gorm v1.31.1
 )
@@ -52,5 +54,5 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/crypto v0.36.0 // indirect
 	golang.org/x/sys v0.36.0 // indirect
-	golang.org/x/text v0.28.0 // indirect
+	golang.org/x/text v0.29.0 // indirect
 )

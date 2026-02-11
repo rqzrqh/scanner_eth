@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	syslog "log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,10 +16,11 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/segmentio/kafka-go"
 	"github.com/sirupsen/logrus"
+	gormv2logrus "github.com/thomas-tacquet/gormv2-logrus"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
-	"gorm.io/gorm/logger"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 var (
@@ -44,27 +44,24 @@ func main() {
 
 	fmt.Println("load config success")
 
-	// show loglevel
+	log.InitLogger(conf.AppName, env, conf.Log)
 
-	if err := log.Init(conf.AppName, env, conf.Log); err != nil {
-		fmt.Println("log init failed.", err)
-		os.Exit(0)
+	logrus.Infof("init log success")
+
+	logrusLogger := logrus.New()
+
+	opts := gormv2logrus.GormOptions{
+		SlowThreshold: 200 * time.Millisecond,
+		LogLevel:      gormlogger.Info,
+		TruncateLen:   1000,
+		LogLatency:    true,
 	}
 
-	logrus.Info("init log success")
-
-	newLogger := logger.New(
-		syslog.New(os.Stdout, "\r\n", syslog.LstdFlags), // io writer（日志输出的目标，前缀和日志包含的内容——译者注）
-		logger.Config{
-			SlowThreshold:             1000 * time.Second,
-			LogLevel:                  logger.Warn,
-			IgnoreRecordNotFoundError: true, // 忽略ErrRecordNotFound（记录未找到）错误
-			Colorful:                  true,
-		},
-	)
+	gormLogger := gormv2logrus.NewGormlog(gormv2logrus.WithGormOptions(opts), gormv2logrus.WithLogrus(logrusLogger))
+	gormLogger.LogMode(gormlogger.Warn)
 
 	db, err := gorm.Open(mysql.Open(conf.Store.Host), &gorm.Config{
-		Logger: newLogger,
+		Logger: gormLogger,
 	})
 
 	if err != nil {
@@ -130,7 +127,7 @@ func main() {
 	allOptionalTables[model.TokenErc721.TableName(model.TokenErc721{})] = struct{}{}
 
 	// check
-	logrus.Infof("optional list:%v", conf.Store.Optional)
+	logrus.Infof("optional:%v", conf.Store.Optional)
 	optionalTables := make(map[string]struct{}, 0)
 	for _, table := range conf.Store.Optional {
 		if _, exist := allOptionalTables[table]; !exist {

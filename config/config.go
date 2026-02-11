@@ -11,7 +11,6 @@ import (
 )
 
 type Chain struct {
-	Name             string `mapstructure:"name"`
 	ChainId          int64  `mapstructure:"chain_id"`
 	GenesisBlockHash string `mapstructure:"genesis_block_hash"`
 	ReversibleBlocks int    `mapstructure:"reversible_blocks"`
@@ -41,32 +40,27 @@ type Publish struct {
 	ChannelSize  int      `mapstructure:"channel_size"`
 }
 
-type stdout struct {
-	Enable bool `mapstructure:"enable"`
-	Level  int  `mapstructure:"level"`
+type console struct {
+	Enable bool   `mapstructure:"enable"`
+	Level  string `mapstructure:"level"`
 }
 
 type file struct {
-	Enable bool   `mapstructure:"enable"`
-	Path   string `mapstructure:"path"`
-	Level  int    `mapstructure:"level"`
-}
-
-type kafka struct {
-	Enable  bool     `mapstructure:"enable"`
-	Level   int      `mapstructure:"level"`
-	Brokers []string `mapstructure:"kafka_servers"`
-	Topic   string   `mapstructure:"topic"`
+	Enable     bool   `mapstructure:"enable"`
+	Name       string `mapstructure:"name"`
+	MaxSize    int    `mapstructure:"max_size"`
+	MaxBackups int    `mapstructure:"max_backups"`
+	MaxAge     int    `mapstructure:"max_age"`
+	Level      string `mapstructure:"level"`
 }
 
 type Log struct {
-	Stdout stdout `mapstructure:"stdout"`
-	File   file   `mapstructure:"stdout"`
-	Kafka  kafka  `mapstructure:"kafka"`
+	Console console `mapstructure:"console"`
+	File    file    `mapstructure:"file"`
 }
 
 type Config struct {
-	AppName string  `mapstructure:"stdout"`
+	AppName string  `mapstructure:"app_name"`
 	Chain   Chain   `mapstructure:"chain"`
 	Fetch   Fetch   `mapstructure:"fetch"`
 	Store   Store   `mapstructure:"store"`
