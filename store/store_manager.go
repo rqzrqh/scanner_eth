@@ -67,6 +67,7 @@ type StoreManager struct {
 	db                              *gorm.DB
 	chainId                         int64
 	messageId                       uint64
+	publishedMessageId              uint64
 	batchSize                       int
 	storeOperationChannel           chan *types.StoreOperation
 	publishFeedbackOperationChannel <-chan *types.PublishFeedbackOperation
@@ -76,7 +77,7 @@ type StoreManager struct {
 	storeWorkers                    []*StoreWorker
 }
 
-func NewStoreManager(db *gorm.DB, chainId int64, messageId uint64, batchSize int, storeWorkerCount int, storeOperationChannel chan *types.StoreOperation, publishFeedbackOperationChannel <-chan *types.PublishFeedbackOperation,
+func NewStoreManager(db *gorm.DB, chainId int64, messageId uint64, publishedMessageId uint64, batchSize int, storeWorkerCount int, storeOperationChannel chan *types.StoreOperation, publishFeedbackOperationChannel <-chan *types.PublishFeedbackOperation,
 	publishOperationChannel chan<- *types.PublishOperation) *StoreManager {
 
 	storeTaskChannel := make(chan *StoreTask, 10)
@@ -91,6 +92,7 @@ func NewStoreManager(db *gorm.DB, chainId int64, messageId uint64, batchSize int
 	return &StoreManager{
 		chainId:                         chainId,
 		messageId:                       messageId,
+		publishedMessageId:              publishedMessageId,
 		db:                              db,
 		batchSize:                       batchSize,
 		storeOperationChannel:           storeOperationChannel,
@@ -213,27 +215,54 @@ func (sm *StoreManager) Run() {
 				messageId := op.MessageId
 				height := op.Height
 
+				if (sm.publishedMessageId + 1) != messageId {
+					logrus.Errorf("published message id not continuous. published_message_id:%v message_id:%v height:%v", sm.publishedMessageId, messageId, height)
+					os.Exit(0)
+				}
+
+				expectMessageId := sm.publishedMessageId
+
 				tryCount := 0
 				for {
 					tryCount++
 					startTime := time.Now()
 
-					if err := sm.db.Delete(&model.ChainBinlog{}, binlogRecordId).Error; err != nil {
-						logrus.Errorf("delete chain binlog failed. binlog_record_id:%v message_id:%v height:%v err:%v tryCount:%v", binlogRecordId, messageId, height, err, tryCount)
+					if err := sm.db.Transaction(func(tx *gorm.DB) error {
+						if err := tx.Delete(&model.ChainBinlog{}, binlogRecordId).Error; err != nil {
+							logrus.Errorf("delete chain binlog failed. binlog_record_id:%v message_id:%v height:%v err:%v tryCount:%v", binlogRecordId, messageId, height, err, tryCount)
+							return err
+						}
+
+						var result *gorm.DB
+						if result = tx.Model(&model.ScannerInfo{}).Where("chain_id = ? AND published_message_id = ?", sm.chainId, expectMessageId).Update("published_message_id", messageId); result.Error != nil {
+							logrus.Fatalf("update scanner info failed %v", result.Error)
+							return result.Error
+						}
+
+						if result.RowsAffected == 0 {
+							logrus.Fatalf("update scanner info failed, expect published message id not match, may be there are multiple processes. expect:%v", expectMessageId)
+							os.Exit(0)
+						}
+
+						return nil
+					}); err != nil {
+						logrus.Errorf("binlog feedback failed %v", err)
 						time.Sleep(3 * time.Second)
 						continue
 					}
 
-					logrus.Infof("delete chain binlog success. binlog_record_id:%v message_id:%v height:%v cost:%v",
+					logrus.Infof("binlog feedback success. binlog_record_id:%v message_id:%v height:%v cost:%v",
 						binlogRecordId, messageId, height, time.Since(startTime).String())
 					break
 				}
+
+				sm.publishedMessageId = messageId
 			}
 		}
 	}()
 
 	// read all binlogs from db and publish
-	messageId := uint64(0)
+	messageId := sm.publishedMessageId
 	for {
 		var binlogs []*model.ChainBinlog
 		if err := sm.db.Where("message_id > ?", messageId).Order("message_id asc").Limit(100).Find(&binlogs).Error; err != nil {
@@ -260,11 +289,10 @@ func (sm *StoreManager) Run() {
 		messageId = binlogs[len(binlogs)-1].MessageId
 	}
 
-	if messageId != 0 && messageId != sm.messageId {
+	if messageId != sm.messageId {
 		logrus.Errorf("message id not equal with scannerInfo. db:%v current:%v", messageId, sm.messageId)
 		os.Exit(0)
 	}
-
 }
 
 func convertStorageFullBlock(fullblock *types.FullBlock) *StorageFullBlock {

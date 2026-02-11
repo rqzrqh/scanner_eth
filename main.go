@@ -170,9 +170,9 @@ func main() {
 
 	logrus.Infof("create rpc client success")
 
-	chainId, genesisBlockHash, messageId := getScannerInfo(db)
+	chainId, genesisBlockHash, messageId, publishedMessageId := getScannerInfo(db)
 
-	logrus.Infof("get chain info success. chainId:%v genesisBlockHash:%v messageId:%v", chainId, genesisBlockHash, messageId)
+	logrus.Infof("get chain info success. chainId:%v genesisBlockHash:%v messageId:%v publishedMessageId:%v", chainId, genesisBlockHash, messageId, publishedMessageId)
 
 	w := &kafka.Writer{
 		Addr:         kafka.TCP(conf.Publish.KafkaBrokers...),
@@ -187,7 +187,7 @@ func main() {
 	}
 	//err = w.Close()
 
-	s := newSyncer(conf, clients, db, w, chainId, genesisBlockHash, messageId, optionalTables)
+	s := newSyncer(conf, clients, db, w, chainId, genesisBlockHash, messageId, publishedMessageId, optionalTables)
 	s.Run()
 
 	logrus.Infof("start success")
@@ -206,9 +206,10 @@ func initScannerInfo(db *gorm.DB, chainId int64, genesisBlockHash string) {
 	}
 	if len(scannerInfos) == 0 {
 		scannerInfo := &model.ScannerInfo{
-			ChainId:          chainId,
-			GenesisBlockHash: genesisBlockHash,
-			MessageId:        0,
+			ChainId:            chainId,
+			GenesisBlockHash:   genesisBlockHash,
+			MessageId:          0,
+			PublishedMessageId: 0,
 		}
 		if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(scannerInfo).Error; err != nil {
 			logrus.Errorf("insert scanner info to db failed. err:%v", err)
@@ -227,12 +228,12 @@ func initScannerInfo(db *gorm.DB, chainId int64, genesisBlockHash string) {
 	}
 }
 
-func getScannerInfo(db *gorm.DB) (int64, string, uint64) {
+func getScannerInfo(db *gorm.DB) (int64, string, uint64, uint64) {
 	var scannerInfo model.ScannerInfo
 	if err := db.First(&scannerInfo).Error; err != nil {
 		logrus.Errorf("load scanner info from db failed. err:%v", err)
 		os.Exit(0)
 	}
 
-	return scannerInfo.ChainId, scannerInfo.GenesisBlockHash, scannerInfo.MessageId
+	return scannerInfo.ChainId, scannerInfo.GenesisBlockHash, scannerInfo.MessageId, scannerInfo.PublishedMessageId
 }

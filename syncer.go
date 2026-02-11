@@ -27,7 +27,7 @@ type Syncer struct {
 	pm  *publish.PublishManager
 }
 
-func newSyncer(conf *config.Config, clients []*rpc.Client, db *gorm.DB, w *kafka.Writer, chainId int64, genesisBlockHash string, messageId uint64, optionalTables map[string]struct{}) *Syncer {
+func newSyncer(conf *config.Config, clients []*rpc.Client, db *gorm.DB, w *kafka.Writer, chainId int64, genesisBlockHash string, messageId uint64, publishedMessageId uint64, optionalTables map[string]struct{}) *Syncer {
 
 	reversibleBlocks := conf.Chain.ReversibleBlocks
 	startHeight, endHeight, enableInternalTx := conf.Fetch.StartHeight, conf.Fetch.EndHeight, conf.Fetch.EnableInternalTx
@@ -57,7 +57,7 @@ func newSyncer(conf *config.Config, clients []*rpc.Client, db *gorm.DB, w *kafka
 	publishOperationChannel := make(chan *types.PublishOperation, 100)
 	pm := publish.NewPublishManager(w, publishOperationChannel, publishFeedbackOperationChannel)
 
-	sm := store.NewStoreManager(db, chainId, messageId, storeBatchSize, storeWorkerCount, storeOperationChannel, publishFeedbackOperationChannel, publishOperationChannel)
+	sm := store.NewStoreManager(db, chainId, messageId, publishedMessageId, storeBatchSize, storeWorkerCount, storeOperationChannel, publishFeedbackOperationChannel, publishOperationChannel)
 
 	remoteChainUpdateChannel := make(chan *types.RemoteChainUpdate, 100)
 	maxUnorganizedBlockCount := 50 * len(clients)
