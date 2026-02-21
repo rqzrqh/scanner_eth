@@ -4,14 +4,13 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"os"
+	"scanner_eth/filter"
 	"scanner_eth/types"
 	"scanner_eth/util"
 	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	eth_types "github.com/ethereum/go-ethereum/core/types"
@@ -19,42 +18,9 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const erc20Transfer = `0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef`
-const erc1155SingleTransfer = `0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62`
-const erc1155BatchTransfer = `0x4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb`
-const erc721Transfer = erc20Transfer
-
-const jsonStrErc20ABI = `[{"constant":true,"inputs":[],"name":"name","outputs":[{"name":"","type":"string"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"guy","type":"address"},{"name":"wad","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[],"name":"totalSupply","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"src","type":"address"},{"name":"dst","type":"address"},{"name":"wad","type":"uint256"}],"name":"transferFrom","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":false,"inputs":[{"name":"wad","type":"uint256"}],"name":"withdraw","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[{"name":"","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[],"name":"symbol","outputs":[{"name":"","type":"string"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"dst","type":"address"},{"name":"wad","type":"uint256"}],"name":"transfer","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":false,"inputs":[],"name":"deposit","outputs":[],"payable":true,"stateMutability":"payable","type":"function"},{"constant":true,"inputs":[{"name":"","type":"address"},{"name":"","type":"address"}],"name":"allowance","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"payable":true,"stateMutability":"payable","type":"fallback"},{"anonymous":false,"inputs":[{"indexed":true,"name":"src","type":"address"},{"indexed":true,"name":"guy","type":"address"},{"indexed":false,"name":"wad","type":"uint256"}],"name":"Approval","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"name":"src","type":"address"},{"indexed":true,"name":"dst","type":"address"},{"indexed":false,"name":"wad","type":"uint256"}],"name":"Transfer","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"name":"dst","type":"address"},{"indexed":false,"name":"wad","type":"uint256"}],"name":"Deposit","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"name":"src","type":"address"},{"indexed":false,"name":"wad","type":"uint256"}],"name":"Withdrawal","type":"event"}]`
-const jsonStrErc721ABI = `[{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"owner","type":"address"},{"indexed":true,"internalType":"address","name":"approved","type":"address"},{"indexed":true,"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"Approval","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"owner","type":"address"},{"indexed":true,"internalType":"address","name":"operator","type":"address"},{"indexed":false,"internalType":"bool","name":"approved","type":"bool"}],"name":"ApprovalForAll","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"DODONFTBurn","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"creator","type":"address"},{"indexed":false,"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"DODONFTMint","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"previousOwner","type":"address"},{"indexed":true,"internalType":"address","name":"newOwner","type":"address"}],"name":"OwnershipTransferPrepared","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"previousOwner","type":"address"},{"indexed":true,"internalType":"address","name":"newOwner","type":"address"}],"name":"OwnershipTransferred","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"from","type":"address"},{"indexed":true,"internalType":"address","name":"to","type":"address"},{"indexed":true,"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"Transfer","type":"event"},{"inputs":[],"name":"_CUR_TOKENID_","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"_NEW_OWNER_","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"_OWNER_","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"approve","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"owner","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"burn","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"claimOwnership","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"getApproved","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"owner","type":"address"},{"internalType":"string","name":"name","type":"string"},{"internalType":"string","name":"symbol","type":"string"}],"name":"init","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"newOwner","type":"address"}],"name":"initOwner","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"owner","type":"address"},{"internalType":"address","name":"operator","type":"address"}],"name":"isApprovedForAll","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"string","name":"uri","type":"string"}],"name":"mint","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"name","outputs":[{"internalType":"string","name":"","type":"string"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"ownerOf","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"from","type":"address"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"safeTransferFrom","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"from","type":"address"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"tokenId","type":"uint256"},{"internalType":"bytes","name":"_data","type":"bytes"}],"name":"safeTransferFrom","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"operator","type":"address"},{"internalType":"bool","name":"approved","type":"bool"}],"name":"setApprovalForAll","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"bytes4","name":"interfaceId","type":"bytes4"}],"name":"supportsInterface","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"symbol","outputs":[{"internalType":"string","name":"","type":"string"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"index","type":"uint256"}],"name":"tokenByIndex","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"owner","type":"address"},{"internalType":"uint256","name":"index","type":"uint256"}],"name":"tokenOfOwnerByIndex","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"tokenURI","outputs":[{"internalType":"string","name":"","type":"string"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"totalSupply","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"from","type":"address"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"transferFrom","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"newOwner","type":"address"}],"name":"transferOwnership","outputs":[],"stateMutability":"nonpayable","type":"function"}]`
-const jsonStrErc1155ABI = `[{"inputs":[{"internalType":"address","name":"_logic","type":"address"},{"internalType":"address","name":"admin_","type":"address"},{"internalType":"bytes","name":"_data","type":"bytes"}],"stateMutability":"payable","type":"constructor"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"previousAdmin","type":"address"},{"indexed":false,"internalType":"address","name":"newAdmin","type":"address"}],"name":"AdminChanged","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"beacon","type":"address"}],"name":"BeaconUpgraded","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"implementation","type":"address"}],"name":"Upgraded","type":"event"},{"stateMutability":"payable","type":"fallback"},{"inputs":[],"name":"admin","outputs":[{"internalType":"address","name":"admin_","type":"address"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"newAdmin","type":"address"}],"name":"changeAdmin","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"implementation","outputs":[{"internalType":"address","name":"implementation_","type":"address"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"newImplementation","type":"address"}],"name":"upgradeTo","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"newImplementation","type":"address"},{"internalType":"bytes","name":"data","type":"bytes"}],"name":"upgradeToAndCall","outputs":[],"stateMutability":"payable","type":"function"},{"stateMutability":"payable","type":"receive"}]`
-
 var (
-	erc20ABI, erc721ABI, erc1155ABI abi.ABI
-	enableInternalTx                bool
+	enableInternalTx bool
 )
-
-func InitAbi() {
-	var r *strings.Reader
-	var err error
-
-	r = strings.NewReader(jsonStrErc20ABI)
-	erc20ABI, err = abi.JSON(r)
-	if err != nil {
-		os.Exit(0)
-	}
-
-	r = strings.NewReader(jsonStrErc721ABI)
-	erc721ABI, err = abi.JSON(r)
-	if err != nil {
-		os.Exit(0)
-	}
-
-	r = strings.NewReader(jsonStrErc1155ABI)
-	erc1155ABI, err = abi.JSON(r)
-	if err != nil {
-		os.Exit(0)
-	}
-}
 
 func SetEnableInternalTx(enable bool) {
 	enableInternalTx = enable
@@ -137,28 +103,39 @@ func (fw *FetchWorker) fetch(height uint64) *types.FullBlock {
 	return FetchFullBlock(fw.nodeId, fw.taskId, fw.client, height)
 }
 
-func isErc20TransferEvent(topic0, topic1, topic2, topic3 string) bool {
-	return topic0 == erc20Transfer && topic1 != "" && topic2 != "" && topic3 == ""
-}
-
-func isErc721TransferEvent(topic0, topic1, topic2, topic3 string) bool {
-	return topic0 == erc721Transfer && topic1 != "" && topic2 != "" && topic3 != ""
-}
-
-func isErc1155SingleTransferEvent(topic0, topic1, topic2, topic3 string) bool {
-	return topic0 == erc1155SingleTransfer && topic1 != "" && topic2 != "" && topic3 != ""
-}
-
-func isErc1155BatchTransferEvent(topic0, topic1, topic2, topic3 string) bool {
-	return topic0 == erc1155BatchTransfer && topic1 != "" && topic2 != "" && topic3 != ""
-}
-
 func transTraceAddressToString(opcode string, traceAddress []uint64) string {
 	var res = strings.ToLower(opcode)
 	for _, addr := range traceAddress {
 		res = fmt.Sprintf("%s_%d", res, addr)
 	}
 	return res
+}
+
+type TxParseResult struct {
+	TxList                   []*types.Tx
+	EventLogList             []*types.EventLog
+	EventErc20TransferList   []*types.EventErc20Transfer
+	EventErc721TransferList  []*types.EventErc721Transfer
+	EventErc1155TransferList []*types.EventErc1155Transfer
+	ContractList             []*types.Contract
+	BalanceNativeAddress     map[string]struct{}
+	BalanceErc20Address      map[string]map[string]struct{}
+	BalanceErc1155Address    map[string]map[string]string
+	Erc20ContractAddrs       map[string]struct{}
+	Erc721ContractAddrs      map[string]struct{}
+	TokenErc721Set           map[TokenErc721KeyValue]TokenErc721KeyValue
+
+	MemeEventList           []interface{}
+	Erc20PaymentEventList   []interface{}
+	NftMarketplaceEventList []interface{}
+	HybridNftEventList      []interface{}
+	UniswapV2EventList      []interface{}
+}
+
+type InternalTxParseResult struct {
+	InternalTxList               []*types.TxInternal
+	InternalContractList         []*types.Contract
+	InternalBalanceNativeAddress map[string]struct{}
 }
 
 // parse tx and log
@@ -271,36 +248,28 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	}
 
 	// parse txs
-	txList, eventLogList, eventErc20TransferList, eventErc721TransferList, eventErc1155TransferList, txContractList, txBalanceNativeAddress, txBalanceErc20Address, txBalanceErc1155Address, erc20ContractAddrs, erc721ContractAddrs, tokenErc721Set := parseTx(blkJson.Txs, receipts, height, baseFee)
+	txParseResult := parseTx(blkJson.Txs, receipts, height, baseFee)
 
 	// parse internal txs
-	txInternalList, txInternalContractList, txInternalBalanceNativeAddress, txInternalBalanceErc20Address := parseTxInternal(txInternalJsonList, height)
+	internalTxParseResult := parseTxInternal(txInternalJsonList, height)
 
 	balanceNativeAddress := make(map[string]struct{}, 0)
 	balanceErc20Address := make(map[string]map[string]struct{}, 0)
 
-	contractList := make([]*types.Contract, 0, len(txContractList)+len(txInternalContractList))
-	contractList = append(contractList, txContractList...)
-	contractList = append(contractList, txInternalContractList...)
+	contractList := make([]*types.Contract, 0, len(txParseResult.ContractList)+len(internalTxParseResult.InternalContractList))
+	contractList = append(contractList, txParseResult.ContractList...)
+	contractList = append(contractList, internalTxParseResult.InternalContractList...)
 
 	// get all accounts's native token balance whose native balance has been changed
-	for k := range txBalanceNativeAddress {
+	for k := range txParseResult.BalanceNativeAddress {
 		balanceNativeAddress[k] = struct{}{}
 	}
-	for k := range txInternalBalanceNativeAddress {
+	for k := range internalTxParseResult.InternalBalanceNativeAddress {
 		balanceNativeAddress[k] = struct{}{}
 	}
 
 	// get all accounts's erc20 token balance whose erc20 balance has been changed
-	for k, v := range txBalanceErc20Address {
-		for c := range v {
-			if _, ok := balanceErc20Address[k]; !ok {
-				balanceErc20Address[k] = make(map[string]struct{}, 0)
-			}
-			balanceErc20Address[k][c] = struct{}{}
-		}
-	}
-	for k, v := range txInternalBalanceErc20Address {
+	for k, v := range txParseResult.BalanceErc20Address {
 		for c := range v {
 			if _, ok := balanceErc20Address[k]; !ok {
 				balanceErc20Address[k] = make(map[string]struct{}, 0)
@@ -344,7 +313,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 
 	balanceErc1155List := make([]*types.BalanceErc1155, 0)
 	{
-		for contractAddr, v := range txBalanceErc1155Address {
+		for contractAddr, v := range txParseResult.BalanceErc1155Address {
 			for tokenId, addr := range v {
 				balanceErc1155List = append(balanceErc1155List, &types.BalanceErc1155{
 					Addr:         addr,
@@ -361,10 +330,10 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	}
 
 	// get new erc20 contract info
-	contractErc20List := make([]*types.ContractErc20, 0, len(erc20ContractAddrs))
+	contractErc20List := make([]*types.ContractErc20, 0, len(txParseResult.Erc20ContractAddrs))
 	{
 		// TODO check if in database
-		for k := range erc20ContractAddrs {
+		for k := range txParseResult.Erc20ContractAddrs {
 			addr := common.HexToAddress(k)
 			contractErc20, err := fetchContractErc20(client, &addr, height)
 			if err != nil {
@@ -376,10 +345,10 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	}
 
 	// get new erc721 contract info
-	contractErc721List := make([]*types.ContractErc721, 0, len(erc721ContractAddrs))
+	contractErc721List := make([]*types.ContractErc721, 0, len(txParseResult.Erc721ContractAddrs))
 	{
 		// TODO check if in database
-		for k := range erc721ContractAddrs {
+		for k := range txParseResult.Erc721ContractAddrs {
 			addr := common.HexToAddress(k)
 			contractErc721, err := fetchContractErc721(client, &addr)
 			if err != nil {
@@ -391,9 +360,9 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	}
 
 	// get new erc721 token info
-	tokenErc721List := make([]*types.TokenErc721, 0, len(tokenErc721Set))
+	tokenErc721List := make([]*types.TokenErc721, 0, len(txParseResult.TokenErc721Set))
 	{
-		for k := range tokenErc721Set {
+		for k := range txParseResult.TokenErc721Set {
 			contractAddr := common.HexToAddress(k.ContractAddr)
 			var ok bool
 			var tokenId *big.Int
@@ -412,12 +381,12 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 
 	fullblock := &types.FullBlock{
 		Block:                    blk,
-		TxList:                   txList,
-		TxInternalList:           txInternalList,
-		EventLogList:             eventLogList,
-		EventErc20TransferList:   eventErc20TransferList,
-		EventErc721TransferList:  eventErc721TransferList,
-		EventErc1155TransferList: eventErc1155TransferList,
+		TxList:                   txParseResult.TxList,
+		TxInternalList:           internalTxParseResult.InternalTxList,
+		EventLogList:             txParseResult.EventLogList,
+		EventErc20TransferList:   txParseResult.EventErc20TransferList,
+		EventErc721TransferList:  txParseResult.EventErc721TransferList,
+		EventErc1155TransferList: txParseResult.EventErc1155TransferList,
 
 		ContractList:       contractList,
 		ContractErc20List:  contractErc20List,
@@ -432,10 +401,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	return fullblock
 }
 
-func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, height uint64, baseFee *big.Int) (
-	[]*types.Tx, []*types.EventLog, []*types.EventErc20Transfer, []*types.EventErc721Transfer, []*types.EventErc1155Transfer, []*types.Contract,
-	map[string]struct{}, map[string]map[string]struct{}, map[string]map[string]string, map[string]struct{}, map[string]struct{}, map[TokenErc721KeyValue]TokenErc721KeyValue,
-) {
+func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, height uint64, baseFee *big.Int) *TxParseResult {
 
 	txList := make([]*types.Tx, 0, len(jsonTxList))
 	eventLogList := make([]*types.EventLog, 0)
@@ -451,6 +417,12 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 	erc20ContractAddrs := make(map[string]struct{}, 0)
 	erc721ContractAddrs := make(map[string]struct{}, 0)
 	tokenErc721Set := make(map[TokenErc721KeyValue]TokenErc721KeyValue, 0)
+
+	erc20PaymentEventList := make([]interface{}, 0)
+	memeEventList := make([]interface{}, 0)
+	uniswapV2EventList := make([]interface{}, 0)
+	hybridNftEventList := make([]interface{}, 0)
+	nftMarketplaceEventList := make([]interface{}, 0)
 
 	for _, txJson := range jsonTxList {
 		txHash := txJson.Hash
@@ -562,13 +534,15 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 
 			balanceNativeAddress[contractAddr] = struct{}{}
 
+			topicCount := len(txLog.Topics)
+
 			// event log
 			eventLog := &types.EventLog{
 				TxHash:       txHash,
 				IndexInTx:    uint(indexInTx),
 				IndexInBlock: uint(txLog.Index),
 				ContractAddr: contractAddr,
-				TopicCount:   uint(len(txLog.Topics)),
+				TopicCount:   uint(topicCount),
 				Topic0:       topic0,
 				Topic1:       topic1,
 				Topic2:       topic2,
@@ -576,15 +550,194 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 				Data:         txLog.Data,
 			}
 			eventLogList = append(eventLogList, eventLog)
+			/*
+				if isErc20TransferEvent(topic0, topic1, topic2, topic3) {
+					sender := strings.ToLower(common.HexToAddress(topic1).Hex())
+					receiver := strings.ToLower(common.HexToAddress(topic2).Hex())
+					tokenAmount := new(big.Int)
+					tokenAmount.SetBytes(txLog.Data)
 
-			if isErc20TransferEvent(topic0, topic1, topic2, topic3) {
-				sender := strings.ToLower(common.HexToAddress(topic1).Hex())
-				receiver := strings.ToLower(common.HexToAddress(topic2).Hex())
-				tokenAmount := new(big.Int)
-				tokenAmount.SetBytes(txLog.Data)
+					// erc20 balance
+					if tokenAmount.Uint64() != 0 {
+						if _, ok := balanceErc20Address[sender]; !ok {
+							balanceErc20Address[sender] = make(map[string]struct{}, 0)
+						}
+						if _, ok := balanceErc20Address[receiver]; !ok {
+							balanceErc20Address[receiver] = make(map[string]struct{}, 0)
+						}
 
-				// erc20 balance
-				if tokenAmount.Uint64() != 0 {
+						balanceErc20Address[sender][contractAddr] = struct{}{}
+						balanceErc20Address[receiver][contractAddr] = struct{}{}
+					}
+
+					// tx erc20
+					eventErc20Transfer := &types.EventErc20Transfer{
+						TxHash:       txHash,
+						IndexInBlock: uint(txLog.Index),
+						ContractAddr: contractAddr,
+						From:         sender,
+						To:           receiver,
+						Amount:       tokenAmount.String(),
+					}
+					eventErc20TransferList = append(eventErc20TransferList, eventErc20Transfer)
+
+					if contractAddr != util.ZeroAddress {
+						erc20ContractAddrs[contractAddr] = struct{}{}
+					}
+
+					balanceNativeAddress[sender] = struct{}{}
+					balanceNativeAddress[receiver] = struct{}{}
+					balanceNativeAddress[contractAddr] = struct{}{}
+
+				} else if isErc721TransferEvent(topic0, topic1, topic2, topic3) {
+					sender := strings.ToLower(common.HexToAddress(topic1).Hex())
+					receiver := strings.ToLower(common.HexToAddress(topic2).Hex())
+					tokenId := common.HexToHash(topic3).Big().String()
+
+					// tx erc721
+					eventErc721Transfer := &types.EventErc721Transfer{
+						TxHash:       txHash,
+						ContractAddr: contractAddr,
+						From:         sender,
+						To:           receiver,
+						TokenId:      tokenId,
+						IndexInBlock: uint(txLog.Index),
+					}
+					eventErc721TransferList = append(eventErc721TransferList, eventErc721Transfer)
+
+					tokenErc721KeyValue := TokenErc721KeyValue{
+						ContractAddr: contractAddr,
+						TokenId:      tokenId,
+					}
+					tokenErc721Set[tokenErc721KeyValue] = tokenErc721KeyValue
+
+					if contractAddr != util.ZeroAddress {
+						erc721ContractAddrs[contractAddr] = struct{}{}
+					}
+
+					balanceNativeAddress[sender] = struct{}{}
+					balanceNativeAddress[receiver] = struct{}{}
+					balanceNativeAddress[contractAddr] = struct{}{}
+
+				} else if isErc1155SingleTransferEvent(topic0, topic1, topic2, topic3) {
+					var transferSingleData struct {
+						Id    *big.Int
+						Value *big.Int
+					}
+
+					if err := erc1155ABI.UnpackIntoInterface(&transferSingleData, "TransferSingle", txLog.Data); err != nil {
+						logrus.Errorf("erc1155 single err:%v height:%v", err, height)
+						continue
+					}
+
+					operator := strings.ToLower(common.HexToAddress(topic1).Hex())
+					sender := strings.ToLower(common.HexToAddress(topic2).Hex())
+					receiver := strings.ToLower(common.HexToAddress(topic3).Hex())
+					tokenId := transferSingleData.Id.String()
+
+					// balance erc1155
+					if _, ok := balanceErc1155Address[contractAddr]; !ok {
+						balanceErc1155Address[contractAddr] = make(map[string]string, 0)
+					}
+
+					if sender != util.ZeroAddress {
+						balanceErc1155Address[contractAddr][tokenId] = sender
+					}
+					if receiver != util.ZeroAddress {
+						balanceErc1155Address[contractAddr][tokenId] = receiver
+					}
+
+					// tx erc1155
+					tokens := transferSingleData.Value
+					amount := tokens.String()
+
+					eventErc1155Transfer := &types.EventErc1155Transfer{
+						TxHash:       txHash,
+						IndexInBlock: uint(txLog.Index),
+						ContractAddr: contractAddr,
+						Operator:     operator,
+						From:         sender,
+						To:           receiver,
+						TokenId:      tokenId,
+						Amount:       amount,
+						IndexInBatch: -1,
+					}
+					eventErc1155TransferList = append(eventErc1155TransferList, eventErc1155Transfer)
+
+					balanceNativeAddress[operator] = struct{}{}
+					balanceNativeAddress[sender] = struct{}{}
+					balanceNativeAddress[receiver] = struct{}{}
+					balanceNativeAddress[contractAddr] = struct{}{}
+
+				} else if isErc1155BatchTransferEvent(topic0, topic1, topic2, topic3) {
+						var transferBatchData struct {
+							Ids    []*big.Int
+							Values []*big.Int
+						}
+
+						if err := erc1155ABI.UnpackIntoInterface(&transferBatchData, "TransferBatch", txLog.Data); err != nil {
+							logrus.Errorf("erc1155 batch UnpackIntoInterface err:%v height:%v", err, height)
+							continue
+						}
+
+						ids := transferBatchData.Ids
+						values := transferBatchData.Values
+						if len(values) != len(ids) {
+							logrus.Warnf("erc1155 batch nonstandard tx_hash:%v index:%v height:%v", txHash, txLog.Index, height)
+							continue
+						}
+
+						operator := strings.ToLower(common.HexToAddress(topic1).Hex())
+						sender := strings.ToLower(common.HexToAddress(topic2).Hex())
+						receiver := strings.ToLower(common.HexToAddress(topic3).Hex())
+
+						if _, ok := balanceErc1155Address[contractAddr]; !ok {
+							balanceErc1155Address[contractAddr] = make(map[string]string, 0)
+						}
+
+						for index, id := range ids {
+							tokenId := id.String()
+
+							if sender != util.ZeroAddress {
+								balanceErc1155Address[contractAddr][tokenId] = sender
+							}
+							if receiver != util.ZeroAddress {
+								balanceErc1155Address[contractAddr][tokenId] = receiver
+							}
+
+							// tx erc1155
+							amount := values[index].String()
+
+							eventErc1155Transfer := &types.EventErc1155Transfer{
+								TxHash:       txHash,
+								IndexInBlock: uint(txLog.Index),
+								IndexInBatch: index,
+								ContractAddr: contractAddr,
+								Operator:     operator,
+								From:         sender,
+								To:           receiver,
+								TokenId:      tokenId,
+								Amount:       amount,
+							}
+							eventErc1155TransferList = append(eventErc1155TransferList, eventErc1155Transfer)
+						}
+
+						balanceNativeAddress[operator] = struct{}{}
+						balanceNativeAddress[sender] = struct{}{}
+						balanceNativeAddress[receiver] = struct{}{}
+						balanceNativeAddress[contractAddr] = struct{}{}
+					}
+			*/
+
+			// erc20 transfer
+			eventErc20Transfer := filter.FilterErc20TransferEvent(txHash, txLog, contractAddr, height, topic0, topic1, topic2, topic3)
+			if eventErc20Transfer != nil {
+				eventErc20TransferList = append(eventErc20TransferList, eventErc20Transfer)
+
+				sender := eventErc20Transfer.From
+				receiver := eventErc20Transfer.To
+
+				if eventErc20Transfer.Amount != "0" {
 					if _, ok := balanceErc20Address[sender]; !ok {
 						balanceErc20Address[sender] = make(map[string]struct{}, 0)
 					}
@@ -596,17 +749,6 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 					balanceErc20Address[receiver][contractAddr] = struct{}{}
 				}
 
-				// tx erc20
-				eventErc20Transfer := &types.EventErc20Transfer{
-					TxHash:       txHash,
-					IndexInBlock: uint(txLog.Index),
-					ContractAddr: contractAddr,
-					From:         sender,
-					To:           receiver,
-					Amount:       tokenAmount.String(),
-				}
-				eventErc20TransferList = append(eventErc20TransferList, eventErc20Transfer)
-
 				if contractAddr != util.ZeroAddress {
 					erc20ContractAddrs[contractAddr] = struct{}{}
 				}
@@ -615,25 +757,17 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 				balanceNativeAddress[receiver] = struct{}{}
 				balanceNativeAddress[contractAddr] = struct{}{}
 
-			} else if isErc721TransferEvent(topic0, topic1, topic2, topic3) {
-				sender := strings.ToLower(common.HexToAddress(topic1).Hex())
-				receiver := strings.ToLower(common.HexToAddress(topic2).Hex())
-				tokenId := common.HexToHash(topic3).Big().String()
+				continue
+			}
 
-				// tx erc721
-				eventErc721Transfer := &types.EventErc721Transfer{
-					TxHash:       txHash,
-					ContractAddr: contractAddr,
-					From:         sender,
-					To:           receiver,
-					TokenId:      tokenId,
-					IndexInBlock: uint(txLog.Index),
-				}
+			// erc721 transfer
+			eventErc721Transfer := filter.FilterErc721TransferEvent(txHash, txLog, contractAddr, height, topic0, topic1, topic2, topic3)
+			if eventErc721Transfer != nil {
 				eventErc721TransferList = append(eventErc721TransferList, eventErc721Transfer)
 
 				tokenErc721KeyValue := TokenErc721KeyValue{
 					ContractAddr: contractAddr,
-					TokenId:      tokenId,
+					TokenId:      eventErc721Transfer.TokenId,
 				}
 				tokenErc721Set[tokenErc721KeyValue] = tokenErc721KeyValue
 
@@ -641,130 +775,145 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 					erc721ContractAddrs[contractAddr] = struct{}{}
 				}
 
-				balanceNativeAddress[sender] = struct{}{}
-				balanceNativeAddress[receiver] = struct{}{}
+				balanceNativeAddress[eventErc721Transfer.From] = struct{}{}
+				balanceNativeAddress[eventErc721Transfer.To] = struct{}{}
 				balanceNativeAddress[contractAddr] = struct{}{}
 
-			} else if isErc1155SingleTransferEvent(topic0, topic1, topic2, topic3) {
-				var transferSingleData struct {
-					Id    *big.Int
-					Value *big.Int
-				}
+				continue
+			}
 
-				if err := erc1155ABI.UnpackIntoInterface(&transferSingleData, "TransferSingle", txLog.Data); err != nil {
-					logrus.Errorf("erc1155 single err:%v height:%v", err, height)
-					continue
-				}
-
-				operator := strings.ToLower(common.HexToAddress(topic1).Hex())
-				sender := strings.ToLower(common.HexToAddress(topic2).Hex())
-				receiver := strings.ToLower(common.HexToAddress(topic3).Hex())
-				tokenId := transferSingleData.Id.String()
-
-				// balance erc1155
-				if _, ok := balanceErc1155Address[contractAddr]; !ok {
-					balanceErc1155Address[contractAddr] = make(map[string]string, 0)
-				}
-
-				if sender != util.ZeroAddress {
-					balanceErc1155Address[contractAddr][tokenId] = sender
-				}
-				if receiver != util.ZeroAddress {
-					balanceErc1155Address[contractAddr][tokenId] = receiver
-				}
-
-				// tx erc1155
-				tokens := transferSingleData.Value
-				amount := tokens.String()
-
-				eventErc1155Transfer := &types.EventErc1155Transfer{
-					TxHash:       txHash,
-					IndexInBlock: uint(txLog.Index),
-					ContractAddr: contractAddr,
-					Operator:     operator,
-					From:         sender,
-					To:           receiver,
-					TokenId:      tokenId,
-					Amount:       amount,
-					IndexInBatch: -1,
-				}
+			// erc1155 single transfer
+			eventErc1155Transfer := filter.FilterErc1155SingleTransferEvent(txHash, txLog, contractAddr, height, topic0, topic1, topic2, topic3)
+			if eventErc1155Transfer != nil {
 				eventErc1155TransferList = append(eventErc1155TransferList, eventErc1155Transfer)
 
-				balanceNativeAddress[operator] = struct{}{}
-				balanceNativeAddress[sender] = struct{}{}
-				balanceNativeAddress[receiver] = struct{}{}
-				balanceNativeAddress[contractAddr] = struct{}{}
+				balanceNativeAddress[eventErc1155Transfer.Operator] = struct{}{}
+				balanceNativeAddress[eventErc1155Transfer.From] = struct{}{}
+				balanceNativeAddress[eventErc1155Transfer.To] = struct{}{}
+				balanceNativeAddress[eventErc1155Transfer.ContractAddr] = struct{}{}
 
-			} else if isErc1155BatchTransferEvent(topic0, topic1, topic2, topic3) {
-				var transferBatchData struct {
-					Ids    []*big.Int
-					Values []*big.Int
+				if _, ok := balanceErc1155Address[eventErc1155Transfer.ContractAddr]; !ok {
+					balanceErc1155Address[eventErc1155Transfer.ContractAddr] = make(map[string]string, 0)
+				}
+				if eventErc1155Transfer.From != util.ZeroAddress {
+					balanceErc1155Address[eventErc1155Transfer.ContractAddr][eventErc1155Transfer.TokenId] = eventErc1155Transfer.From
+				}
+				if eventErc1155Transfer.To != util.ZeroAddress {
+					balanceErc1155Address[eventErc1155Transfer.ContractAddr][eventErc1155Transfer.TokenId] = eventErc1155Transfer.To
 				}
 
-				if err := erc1155ABI.UnpackIntoInterface(&transferBatchData, "TransferBatch", txLog.Data); err != nil {
-					logrus.Errorf("erc1155 batch UnpackIntoInterface err:%v height:%v", err, height)
-					continue
-				}
+				continue
+			}
 
-				ids := transferBatchData.Ids
-				values := transferBatchData.Values
-				if len(values) != len(ids) {
-					logrus.Warnf("erc1155 batch nonstandard tx_hash:%v index:%v height:%v", txHash, txLog.Index, height)
-					continue
-				}
+			// erc1155 batch transfer
+			eventErc1155Transfers := filter.FilterErc1155BatchTransferEvent(txHash, txLog, contractAddr, height, topic0, topic1, topic2, topic3)
+			if len(eventErc1155Transfers) > 0 {
+				eventErc1155TransferList = append(eventErc1155TransferList, eventErc1155Transfers...)
+				for _, transfer := range eventErc1155Transfers {
+					balanceNativeAddress[transfer.Operator] = struct{}{}
+					balanceNativeAddress[transfer.From] = struct{}{}
+					balanceNativeAddress[transfer.To] = struct{}{}
+					balanceNativeAddress[transfer.ContractAddr] = struct{}{}
 
-				operator := strings.ToLower(common.HexToAddress(topic1).Hex())
-				sender := strings.ToLower(common.HexToAddress(topic2).Hex())
-				receiver := strings.ToLower(common.HexToAddress(topic3).Hex())
-
-				if _, ok := balanceErc1155Address[contractAddr]; !ok {
-					balanceErc1155Address[contractAddr] = make(map[string]string, 0)
-				}
-
-				for index, id := range ids {
-					tokenId := id.String()
-
-					if sender != util.ZeroAddress {
-						balanceErc1155Address[contractAddr][tokenId] = sender
+					if _, ok := balanceErc1155Address[transfer.ContractAddr]; !ok {
+						balanceErc1155Address[transfer.ContractAddr] = make(map[string]string, 0)
 					}
-					if receiver != util.ZeroAddress {
-						balanceErc1155Address[contractAddr][tokenId] = receiver
+					if transfer.From != util.ZeroAddress {
+						balanceErc1155Address[transfer.ContractAddr][transfer.TokenId] = transfer.From
 					}
-
-					// tx erc1155
-					amount := values[index].String()
-
-					eventErc1155Transfer := &types.EventErc1155Transfer{
-						TxHash:       txHash,
-						IndexInBlock: uint(txLog.Index),
-						IndexInBatch: index,
-						ContractAddr: contractAddr,
-						Operator:     operator,
-						From:         sender,
-						To:           receiver,
-						TokenId:      tokenId,
-						Amount:       amount,
+					if transfer.To != util.ZeroAddress {
+						balanceErc1155Address[transfer.ContractAddr][transfer.TokenId] = transfer.To
 					}
-					eventErc1155TransferList = append(eventErc1155TransferList, eventErc1155Transfer)
 				}
 
-				balanceNativeAddress[operator] = struct{}{}
-				balanceNativeAddress[sender] = struct{}{}
-				balanceNativeAddress[receiver] = struct{}{}
-				balanceNativeAddress[contractAddr] = struct{}{}
+				continue
+			}
+
+			// erc20 payment event
+			erc20PaymentEvent := filter.FilterErc20PaymentEvent(txHash, txLog, contractAddr, height, topic0, topic1, topic2, topic3, topicCount)
+			if erc20PaymentEvent != nil {
+				erc20PaymentEventList = append(erc20PaymentEventList, erc20PaymentEvent)
+				continue
+			}
+
+			// meme event
+			memeEvent := filter.FilterMemeEvent(txHash, txLog, contractAddr, height, topic0, topic1, topic2, topic3, topicCount)
+			if memeEvent != nil {
+				memeEventList = append(memeEventList, memeEvent)
+				/*
+					if v, ok := memeEvent.(*types.MemeTokenLaunched); ok {
+						eventTokenLaunchedList = append(eventTokenLaunchedList, v)
+					} else if v, ok := memeEvent.(*types.MemeTrade); ok {
+						eventMemeTradeList = append(eventMemeTradeList, v)
+					} else if v, ok := memeEvent.(*types.MemeLiquiditySwapped); ok {
+						eventMemeLiquiditySwappedList = append(eventMemeLiquiditySwappedList, v)
+					} else {
+						logrus.Panic("unknown meme event type")
+					}
+				*/
+				continue
+			}
+
+			// uniswapv2 event
+			uniswapv2Event := filter.FilterUniswapV2Event(txHash, txLog, contractAddr, height, topic0, topic1, topic2, topic3, topicCount)
+			if uniswapv2Event != nil {
+				uniswapV2EventList = append(uniswapV2EventList, uniswapv2Event)
+				continue
+			}
+
+			// hybrid nft event
+			hybridNftEvent := filter.FilterHybridNftEvent(txHash, txLog, contractAddr, height, topic0, topic1, topic2, topic3, topicCount)
+			if hybridNftEvent != nil {
+				/*
+					if _, ok := hybridNftEvent.(*types.HybridPublicConfigChanged); ok {
+					} else if _, ok := hybridNftEvent.(*types.HybridWhitelistConfigChanged); ok {
+					} else {
+						logrus.Panic("unknown hybrid nft event type")
+					}
+				*/
+				hybridNftEventList = append(hybridNftEventList, hybridNftEvent)
+
+				continue
+			}
+
+			// nft marketplace event
+			nftMarketplaceEvent := filter.FilterNftMarketplaceEvent(txHash, txLog, contractAddr, height, topic0, topic1, topic2, topic3, topicCount)
+			if nftMarketplaceEvent != nil {
+				nftMarketplaceEventList = append(nftMarketplaceEventList, nftMarketplaceEvent)
+				continue
 			}
 		}
 	}
 
-	return txList, eventLogList, eventErc20TransferList, eventErc721TransferList, eventErc1155TransferList, contractList, balanceNativeAddress, balanceErc20Address, balanceErc1155Address, erc20ContractAddrs, erc721ContractAddrs, tokenErc721Set
+	txParseResult := TxParseResult{
+		TxList:                   txList,
+		EventLogList:             eventLogList,
+		EventErc20TransferList:   eventErc20TransferList,
+		EventErc721TransferList:  eventErc721TransferList,
+		EventErc1155TransferList: eventErc1155TransferList,
+		ContractList:             contractList,
+		BalanceNativeAddress:     balanceNativeAddress,
+		BalanceErc20Address:      balanceErc20Address,
+		BalanceErc1155Address:    balanceErc1155Address,
+		Erc20ContractAddrs:       erc20ContractAddrs,
+		Erc721ContractAddrs:      erc721ContractAddrs,
+		TokenErc721Set:           tokenErc721Set,
+
+		Erc20PaymentEventList:   erc20PaymentEventList,
+		MemeEventList:           memeEventList,
+		UniswapV2EventList:      uniswapV2EventList,
+		HybridNftEventList:      hybridNftEventList,
+		NftMarketplaceEventList: nftMarketplaceEventList,
+	}
+
+	return &txParseResult
 }
 
-func parseTxInternal(jsonTxInternalList []*TxInternalJson, height uint64) ([]*types.TxInternal, []*types.Contract, map[string]struct{}, map[string]map[string]struct{}) {
+func parseTxInternal(jsonTxInternalList []*TxInternalJson, height uint64) *InternalTxParseResult {
 	txInternalList := make([]*types.TxInternal, 0)
 	contractList := make([]*types.Contract, 0)
 
 	balanceNativeAddress := make(map[string]struct{}, 0)
-	balanceErc20Address := make(map[string]map[string]struct{}, 0)
 	/*
 		for _, v := range jsonTxInternalList {
 			txHash := v.TxHash
@@ -814,7 +963,14 @@ func parseTxInternal(jsonTxInternalList []*TxInternalJson, height uint64) ([]*ty
 			}
 		}
 	*/
-	return txInternalList, contractList, balanceNativeAddress, balanceErc20Address
+
+	internalTxParseResult := &InternalTxParseResult{
+		InternalTxList:               txInternalList,
+		InternalContractList:         contractList,
+		InternalBalanceNativeAddress: balanceNativeAddress,
+	}
+
+	return internalTxParseResult
 }
 
 func fetchBalanceNative(client *rpc.Client, balancesNative []*types.BalanceNative, height uint64) error {
@@ -877,7 +1033,7 @@ func fetchErc20BalancesBatch(client *rpc.Client, bs []*types.BalanceErc20, heigh
 	elems := make([]rpc.BatchElem, 0, len(bs))
 	for i, v := range bs {
 		b := v
-		input, err := erc20ABI.Pack("balanceOf", common.HexToAddress(b.Addr))
+		input, err := filter.Erc20ABI.Pack("balanceOf", common.HexToAddress(b.Addr))
 		if err != nil {
 			return fmt.Errorf("panic erc20 balanceOf input err:%v", err)
 		}
@@ -925,7 +1081,7 @@ func fetchErc20BalancesBatch(client *rpc.Client, bs []*types.BalanceErc20, heigh
 			continue
 		}
 
-		rets, err := erc20ABI.Unpack("balanceOf", hexBalances[i])
+		rets, err := filter.Erc20ABI.Unpack("balanceOf", hexBalances[i])
 		if err != nil {
 			logrus.Warnf("unpack erc20 balanceOf err:%v contract:%v addr:%v", err, b.ContractAddr, b.Addr)
 			continue
@@ -954,7 +1110,7 @@ func fetchErc1155BalancesBatch(client *rpc.Client, bs []*types.BalanceErc1155, h
 		tkn := new(big.Int)
 		tkn.SetString(b.TokenId, 10)
 
-		input, err := erc1155ABI.Pack("balanceOf", common.HexToAddress(b.Addr), tkn)
+		input, err := filter.Erc1155ABI.Pack("balanceOf", common.HexToAddress(b.Addr), tkn)
 		if err != nil {
 			return fmt.Errorf("panic erc1155 balanceOf input err:%v", err)
 		}
@@ -1002,7 +1158,7 @@ func fetchErc1155BalancesBatch(client *rpc.Client, bs []*types.BalanceErc1155, h
 			continue
 		}
 
-		rets, err := erc1155ABI.Unpack("balanceOf", hexBalances[i])
+		rets, err := filter.Erc1155ABI.Unpack("balanceOf", hexBalances[i])
 		if err != nil {
 			logrus.Warnf("unpack erc1155 balanceOf err:%v contract:%v addr:%v", err, b.ContractAddr, b.Addr)
 			continue
@@ -1046,7 +1202,7 @@ func fetchContractErc20(client *rpc.Client, addr *common.Address, height uint64)
 	methods := []string{"name", "symbol", "decimals", "totalSupply"}
 	elems := make([]rpc.BatchElem, 0)
 	for _, method := range methods {
-		input, _ := erc20ABI.Pack(method)
+		input, _ := filter.Erc20ABI.Pack(method)
 		var ret hexutil.Bytes
 		msg := ethereum.CallMsg{
 			To:   addr,
@@ -1096,7 +1252,7 @@ func fetchContractErc20(client *rpc.Client, addr *common.Address, height uint64)
 			continue
 		}
 
-		rets, err := erc20ABI.Unpack(methods[i], *ret)
+		rets, err := filter.Erc20ABI.Unpack(methods[i], *ret)
 		if err != nil {
 			logrus.Infof("erc20 info unpack failed. err:%v addr:%v method:%v ret:%v", err, addr.Hex(), methods[i], *ret)
 			continue
@@ -1163,7 +1319,7 @@ func fetchContractErc721(client *rpc.Client, addr *common.Address) (*types.Contr
 	methods := []string{"name", "symbol"}
 	elems := make([]rpc.BatchElem, 0)
 	for _, method := range methods {
-		input, _ := erc721ABI.Pack(method)
+		input, _ := filter.Erc721ABI.Pack(method)
 		var ret hexutil.Bytes
 		msg := ethereum.CallMsg{
 			To:   addr,
@@ -1195,7 +1351,7 @@ func fetchContractErc721(client *rpc.Client, addr *common.Address) (*types.Contr
 			logrus.Warnf("erc721 info ret empty addr:%v elem:%v method:%v", addr.Hex(), elem, methods[i])
 			continue
 		}
-		rets, err := erc721ABI.Unpack(methods[i], *ret)
+		rets, err := filter.Erc721ABI.Unpack(methods[i], *ret)
 		if err != nil {
 			logrus.Warnf("erc721 info unpack err:%v addr:%v method:%v", err, addr.Hex(), methods[i])
 			continue
@@ -1228,7 +1384,7 @@ func fetchTokenErc721(client *rpc.Client, contractAddr *common.Address, tokenId 
 	methods := []string{"ownerOf", "tokenURI"}
 	elems := make([]rpc.BatchElem, 0)
 	for _, method := range methods {
-		input, _ := erc721ABI.Pack(method, tokenId)
+		input, _ := filter.Erc721ABI.Pack(method, tokenId)
 		var ret hexutil.Bytes
 		msg := ethereum.CallMsg{
 			To:   contractAddr,
@@ -1274,7 +1430,7 @@ func fetchTokenErc721(client *rpc.Client, contractAddr *common.Address, tokenId 
 			logrus.Warnf("token erc721 info ret empty addr:%v elem:%v method:%v", contractAddr.Hex(), elem, methods[i])
 			continue
 		}
-		rets, err := erc721ABI.Unpack(methods[i], *ret)
+		rets, err := filter.Erc721ABI.Unpack(methods[i], *ret)
 		if err != nil {
 			logrus.Warnf("token erc721 info unpack err:%v addr:%v method:%v", err, contractAddr.Hex(), methods[i])
 			continue

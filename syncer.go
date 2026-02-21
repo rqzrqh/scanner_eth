@@ -6,6 +6,7 @@ import (
 	"os"
 	"scanner_eth/config"
 	"scanner_eth/fetch"
+	"scanner_eth/filter"
 	"scanner_eth/model"
 	"scanner_eth/publish"
 	"scanner_eth/store"
@@ -42,7 +43,12 @@ func newSyncer(conf *config.Config, clients []*rpc.Client, db *gorm.DB, w *kafka
 		os.Exit(0)
 	}
 
-	fetch.InitAbi()
+	filter.InitBaseFilter()
+	filter.InitMemeEventFilter(conf.Filter.Meme.ContractAddress)
+	filter.InitErc20PaymentEventFilter(conf.Filter.Erc20Payment.ContractAddress)
+	filter.InitHybridNftEventFilter(conf.Filter.HybridNft.ContractAddress)
+	filter.InitUniswapV2EventFilter(conf.Filter.UniswapV2.RouterAddress)
+
 	fetch.SetEnableInternalTx(enableInternalTx)
 
 	store.SetOptionalFeatures(optionalTables)

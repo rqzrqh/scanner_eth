@@ -1,20 +1,22 @@
 package types
 
 type FullBlock struct {
-	Block                    *Block
-	TxList                   []*Tx
-	TxInternalList           []*TxInternal
+	Block          *Block
+	TxList         []*Tx
+	TxInternalList []*TxInternal
+
+	TokenErc721List    []*TokenErc721
+	ContractList       []*Contract
+	ContractErc20List  []*ContractErc20
+	ContractErc721List []*ContractErc721
+	BalanceNativeList  []*BalanceNative
+	BalanceErc20List   []*BalanceErc20
+	BalanceErc1155List []*BalanceErc1155
+
 	EventLogList             []*EventLog
 	EventErc20TransferList   []*EventErc20Transfer
 	EventErc721TransferList  []*EventErc721Transfer
 	EventErc1155TransferList []*EventErc1155Transfer
-	TokenErc721List          []*TokenErc721
-	ContractList             []*Contract
-	ContractErc20List        []*ContractErc20
-	ContractErc721List       []*ContractErc721
-	BalanceNativeList        []*BalanceNative
-	BalanceErc20List         []*BalanceErc20
-	BalanceErc1155List       []*BalanceErc1155
 }
 
 type Block struct {
@@ -87,36 +89,6 @@ type EventLog struct {
 	Topic2       string
 	Topic3       string
 	Data         []byte
-}
-
-type EventErc20Transfer struct {
-	TxHash       string
-	IndexInBlock uint
-	ContractAddr string
-	From         string
-	To           string
-	Amount       string
-}
-
-type EventErc721Transfer struct {
-	TxHash       string
-	IndexInBlock uint
-	ContractAddr string
-	From         string
-	To           string
-	TokenId      string
-}
-
-type EventErc1155Transfer struct {
-	TxHash       string
-	IndexInBlock uint
-	IndexInBatch int
-	ContractAddr string
-	Operator     string
-	From         string
-	To           string
-	TokenId      string
-	Amount       string
 }
 
 type Contract struct {

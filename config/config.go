@@ -16,6 +16,34 @@ type Chain struct {
 	ReversibleBlocks int    `mapstructure:"reversible_blocks"`
 }
 
+type Meme struct {
+	ContractAddress string `mapstructure:"contract_address"`
+}
+
+type NftMarketplace struct {
+	ContractAddress string `mapstructure:"contract_address"`
+}
+
+type HybridNft struct {
+	ContractAddress string `mapstructure:"contract_address"`
+}
+
+type Erc20Payment struct {
+	ContractAddress string `mapstructure:"contract_address"`
+}
+
+type UniswapV2 struct {
+	RouterAddress string `mapstructure:"router_address"`
+}
+
+type Filter struct {
+	Meme           Meme           `mapstructure:"meme"`
+	NftMarketplace NftMarketplace `mapstructure:"nft_marketplace"`
+	HybridNft      HybridNft      `mapstructure:"hybrid_nft"`
+	Erc20Payment   Erc20Payment   `mapstructure:"erc20_payment"`
+	UniswapV2      UniswapV2      `mapstructure:"uniswapv2"`
+}
+
 type Fetch struct {
 	RpcNodes         []string      `mapstructure:"rpc_nodes"`
 	Timeout          time.Duration `mapstructure:"timeout"`
@@ -62,6 +90,7 @@ type Log struct {
 type Config struct {
 	AppName string  `mapstructure:"app_name"`
 	Chain   Chain   `mapstructure:"chain"`
+	Filter  Filter  `mapstructure:"filter"`
 	Fetch   Fetch   `mapstructure:"fetch"`
 	Store   Store   `mapstructure:"store"`
 	Publish Publish `mapstructure:"publish"`
