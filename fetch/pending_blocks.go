@@ -2,22 +2,22 @@ package fetch
 
 import (
 	"fmt"
-	"scanner_eth/types"
+	"scanner_eth/protocol"
 
 	"golang.org/x/xerrors"
 )
 
 type PendingBlocks struct {
-	dataSet map[uint64]*types.FullBlock
+	dataSet map[uint64]*protocol.FullBlock
 }
 
 func NewPendingBlocks() *PendingBlocks {
 	return &PendingBlocks{
-		dataSet: make(map[uint64]*types.FullBlock),
+		dataSet: make(map[uint64]*protocol.FullBlock),
 	}
 }
 
-func (pb *PendingBlocks) addBlock(fullblock *types.FullBlock) error {
+func (pb *PendingBlocks) addBlock(fullblock *protocol.FullBlock) error {
 	height := fullblock.Block.Height
 	if _, exist := pb.dataSet[height]; exist {
 		errlog := fmt.Sprintf("PendingBlocks add block is exist")
@@ -29,7 +29,7 @@ func (pb *PendingBlocks) addBlock(fullblock *types.FullBlock) error {
 	return nil
 }
 
-func (pb *PendingBlocks) getBlock(height uint64) (*types.FullBlock, error) {
+func (pb *PendingBlocks) getBlock(height uint64) (*protocol.FullBlock, error) {
 	if blk, exist := pb.dataSet[height]; exist {
 		return blk, nil
 	}
@@ -39,7 +39,7 @@ func (pb *PendingBlocks) getBlock(height uint64) (*types.FullBlock, error) {
 
 func (pb *PendingBlocks) clear() {
 	pb.dataSet = nil
-	pb.dataSet = make(map[uint64]*types.FullBlock)
+	pb.dataSet = make(map[uint64]*protocol.FullBlock)
 }
 
 func (pb *PendingBlocks) removeData(height uint64) {

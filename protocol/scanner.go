@@ -16,6 +16,12 @@ type ChainBinlog struct {
 }
 
 type FullBlock struct {
+	Block      *Block    `json:"block"`
+	FullTxList []*FullTx `json:"full_tx_list"`
+	StateSet   *StateSet `json:"state_set"`
+}
+
+type Block struct {
 	Height          uint64 `json:"height"`
 	Hash            string `json:"hash"`
 	ParentHash      string `json:"parent_hash"`
@@ -35,9 +41,6 @@ type FullBlock struct {
 	TransactionRoot string `json:"transaction_root"`
 	ReceiptRoot     string `json:"receipt_root"`
 	ExtraData       string `json:"extra_data"`
-
-	FullTxList []*FullTx `json:"full_tx_list"`
-	StateSet   *StateSet `json:"state_set"`
 }
 
 type FullTx struct {
@@ -49,7 +52,6 @@ type FullTx struct {
 
 type Tx struct {
 	TxHash               string `json:"tx_hash"`
-	TxIndex              int    `json:"tx_index"`
 	TxType               int    `json:"tx_type"`
 	From                 string `json:"from"`
 	To                   string `json:"to"`
@@ -69,7 +71,6 @@ type Tx struct {
 }
 
 type TxInternal struct {
-	Index        int    `json:"index"`
 	From         string `json:"from"`
 	To           string `json:"to"`
 	OpCode       string `json:"op_code"`
@@ -84,10 +85,16 @@ type TxInternal struct {
 }
 
 type FullEventLog struct {
-	EventLog             *EventLog             `json:"event_log"`
-	EventErc20Transfer   *EventErc20Transfer   `json:"event_erc20_transfer"`
-	EventErc721Transfer  *EventErc721Transfer  `json:"event_erc721_transfer"`
-	EventErc1155Transfer *EventErc1155Transfer `json:"event_erc1155_transfer"`
+	EventLog              *EventLog               `json:"event_log"`
+	EventErc20Transfer    *EventErc20Transfer     `json:"event_erc20_transfer"`
+	EventErc721Transfer   *EventErc721Transfer    `json:"event_erc721_transfer"`
+	EventErc1155Transfers []*EventErc1155Transfer `json:"event_erc1155_transfer"`
+
+	MemeEvent           interface{}
+	Erc20PaymentEvent   interface{}
+	HybridNftEvent      interface{}
+	NftMarketplaceEvent interface{}
+	UniswapV2Event      interface{}
 }
 
 type EventLog struct {
@@ -99,33 +106,6 @@ type EventLog struct {
 	Topic2       string `json:"topic2"`
 	Topic3       string `json:"topic3"`
 	Data         []byte `json:"data"`
-}
-
-type EventErc20Transfer struct {
-	IndexInBlock uint   `json:"index_in_block"`
-	ContractAddr string `json:"contract_addr"`
-	From         string `json:"from"`
-	To           string `json:"to"`
-	Amount       string `json:"amount"`
-}
-
-type EventErc721Transfer struct {
-	IndexInBlock uint   `json:"index_in_block"`
-	ContractAddr string `json:"contract_addr"`
-	From         string `json:"from"`
-	To           string `json:"to"`
-	TokenId      string `json:"token_id"`
-}
-
-type EventErc1155Transfer struct {
-	IndexInBlock uint   `json:"index_in_block"`
-	IndexInBatch int    `json:"index_in_batch"`
-	ContractAddr string `json:"contract_addr"`
-	Operator     string `json:"operator"`
-	From         string `json:"from"`
-	To           string `json:"to"`
-	TokenId      string `json:"token_id"`
-	Amount       string `json:"amount"`
 }
 
 type Contract struct {

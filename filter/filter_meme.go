@@ -3,7 +3,7 @@ package filter
 import (
 	"math/big"
 	"os"
-	"scanner_eth/types"
+	"scanner_eth/protocol"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -45,7 +45,7 @@ func FilterMemeEvent(txHash string, eventLog *eth_types.Log, contractAddr string
 	return nil
 }
 
-func filterTokenLaunched(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string, topicCount int) *types.MemeTokenLaunched {
+func filterTokenLaunched(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string, topicCount int) *protocol.MemeTokenLaunched {
 	//eventLog := fullEvent.EventLog
 	eventName := "TokenLaunched"
 
@@ -72,7 +72,7 @@ func filterTokenLaunched(txHash string, eventLog *eth_types.Log, contractAddr st
 		os.Exit(0)
 	}
 
-	event := &types.MemeTokenLaunched{
+	event := &protocol.MemeTokenLaunched{
 		Token:         token,
 		Name:          eventNonIndexedData.Name,
 		Symbol:        eventNonIndexedData.Symbol,
@@ -87,7 +87,7 @@ func filterTokenLaunched(txHash string, eventLog *eth_types.Log, contractAddr st
 	return event
 }
 
-func filterTrade(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string, topicCount int) *types.MemeTrade {
+func filterTrade(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string, topicCount int) *protocol.MemeTrade {
 
 	//eventLog := fullEvent.EventLog
 	eventName := "Trade"
@@ -114,7 +114,7 @@ func filterTrade(txHash string, eventLog *eth_types.Log, contractAddr string, he
 		os.Exit(0)
 	}
 
-	event := &types.MemeTrade{
+	event := &protocol.MemeTrade{
 		Token:         token,
 		EthAmount:     eventNonIndexedData.EthAmount,
 		EthFeeAmount:  eventNonIndexedData.EthFeeAmount,
@@ -127,7 +127,7 @@ func filterTrade(txHash string, eventLog *eth_types.Log, contractAddr string, he
 	return event
 }
 
-func filterLiquiditySwapped(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string, topicCount int) *types.MemeLiquiditySwapped {
+func filterLiquiditySwapped(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string, topicCount int) *protocol.MemeLiquiditySwapped {
 	eventName := "LiquiditySwapped"
 
 	// TODO check addr
@@ -149,7 +149,7 @@ func filterLiquiditySwapped(txHash string, eventLog *eth_types.Log, contractAddr
 		os.Exit(0)
 	}
 
-	event := &types.MemeLiquiditySwapped{
+	event := &protocol.MemeLiquiditySwapped{
 		Token:         token,
 		EthAmount:     eventNonIndexedData.EthAmount,
 		TokenAmount:   eventNonIndexedData.TokenAmount,

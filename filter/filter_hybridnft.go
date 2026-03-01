@@ -3,7 +3,7 @@ package filter
 import (
 	"math/big"
 	"os"
-	"scanner_eth/types"
+	"scanner_eth/protocol"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -50,7 +50,7 @@ func FilterHybridNftEvent(txHash string, eventLog *eth_types.Log, contractAddr s
 	return nil
 }
 
-func filterPublicConfig(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string, topicCount int) *types.HybridPublicConfigChanged {
+func filterPublicConfig(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string, topicCount int) *protocol.HybridPublicConfigChanged {
 
 	eventName := "ConfigChanged"
 
@@ -72,7 +72,7 @@ func filterPublicConfig(txHash string, eventLog *eth_types.Log, contractAddr str
 		os.Exit(0)
 	}
 
-	event := &types.HybridPublicConfigChanged{
+	event := &protocol.HybridPublicConfigChanged{
 		RoyaltyBasisPoints: eventNonIndexedData.RoyaltyBasisPoints,
 		MaxSupply:          eventNonIndexedData.MaxSupply,
 		MaxMintPerWallet:   eventNonIndexedData.MaxMintPerWallet,
@@ -84,7 +84,7 @@ func filterPublicConfig(txHash string, eventLog *eth_types.Log, contractAddr str
 	return event
 }
 
-func filterWhitelistConfig(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string, topicCount int) *types.HybridWhitelistConfigChanged {
+func filterWhitelistConfig(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string, topicCount int) *protocol.HybridWhitelistConfigChanged {
 
 	eventName := "ConfigChanged"
 
@@ -108,7 +108,7 @@ func filterWhitelistConfig(txHash string, eventLog *eth_types.Log, contractAddr 
 		os.Exit(0)
 	}
 
-	event := &types.HybridWhitelistConfigChanged{
+	event := &protocol.HybridWhitelistConfigChanged{
 		RoyaltyBasisPoints: eventNonIndexedData.RoyaltyBasisPoints,
 		MaxSupply:          eventNonIndexedData.MaxSupply,
 		MaxMintPerWallet:   eventNonIndexedData.MaxMintPerWallet,

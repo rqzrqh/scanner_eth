@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"scanner_eth/filter"
-	"scanner_eth/types"
+	"scanner_eth/protocol"
 	"scanner_eth/util"
 	"strings"
 	"time"
@@ -36,7 +36,7 @@ type FetchResult struct {
 	TaskId      int
 	ForkVersion uint64
 	Height      uint64
-	FullBlock   *types.FullBlock
+	FullBlock   *protocol.FullBlock
 	CostTime    time.Duration
 }
 
@@ -99,7 +99,7 @@ func (fw *FetchWorker) Run() {
 	}()
 }
 
-func (fw *FetchWorker) fetch(height uint64) *types.FullBlock {
+func (fw *FetchWorker) fetch(height uint64) *protocol.FullBlock {
 	return FetchFullBlock(fw.nodeId, fw.taskId, fw.client, height)
 }
 
@@ -112,29 +112,19 @@ func transTraceAddressToString(opcode string, traceAddress []uint64) string {
 }
 
 type TxParseResult struct {
-	TxList                   []*types.Tx
-	EventLogList             []*types.EventLog
-	EventErc20TransferList   []*types.EventErc20Transfer
-	EventErc721TransferList  []*types.EventErc721Transfer
-	EventErc1155TransferList []*types.EventErc1155Transfer
-	ContractList             []*types.Contract
-	BalanceNativeAddress     map[string]struct{}
-	BalanceErc20Address      map[string]map[string]struct{}
-	BalanceErc1155Address    map[string]map[string]string
-	Erc20ContractAddrs       map[string]struct{}
-	Erc721ContractAddrs      map[string]struct{}
-	TokenErc721Set           map[TokenErc721KeyValue]TokenErc721KeyValue
-
-	MemeEventList           []interface{}
-	Erc20PaymentEventList   []interface{}
-	NftMarketplaceEventList []interface{}
-	HybridNftEventList      []interface{}
-	UniswapV2EventList      []interface{}
+	FullTxList            []*protocol.FullTx
+	ContractList          []*protocol.Contract
+	BalanceNativeAddress  map[string]struct{}
+	BalanceErc20Address   map[string]map[string]struct{}
+	BalanceErc1155Address map[string]map[string]string
+	Erc20ContractAddrs    map[string]struct{}
+	Erc721ContractAddrs   map[string]struct{}
+	TokenErc721Set        map[TokenErc721KeyValue]TokenErc721KeyValue
 }
 
 type InternalTxParseResult struct {
-	InternalTxList               []*types.TxInternal
-	InternalContractList         []*types.Contract
+	InternalTxList               []*protocol.TxInternal
+	InternalContractList         []*protocol.Contract
 	InternalBalanceNativeAddress map[string]struct{}
 }
 
@@ -142,7 +132,7 @@ type InternalTxParseResult struct {
 // fetch receipts and internal tx
 // fetch latest state, like erc20/erc721/erc1155 token info
 // the reason why not fetch the state of one specific height is fast node always lack historical state, only archive node has it.
-func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *types.FullBlock {
+func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *protocol.FullBlock {
 	blkJson := &BlockJson{}
 	// fetch block with txs
 	{
@@ -179,7 +169,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	difficulty := big.NewInt(0)
 	totalDifficulty := big.NewInt(0)
 
-	blk := &types.Block{
+	blk := &protocol.Block{
 		Height:     hexutil.MustDecodeUint64(blkJson.Number),
 		Hash:       blkJson.Hash,
 		ParentHash: blkJson.ParentHash,
@@ -256,9 +246,11 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	balanceNativeAddress := make(map[string]struct{}, 0)
 	balanceErc20Address := make(map[string]map[string]struct{}, 0)
 
-	contractList := make([]*types.Contract, 0, len(txParseResult.ContractList)+len(internalTxParseResult.InternalContractList))
+	contractList := make([]*protocol.Contract, 0, len(txParseResult.ContractList)+len(internalTxParseResult.InternalContractList))
 	contractList = append(contractList, txParseResult.ContractList...)
 	contractList = append(contractList, internalTxParseResult.InternalContractList...)
+
+	// merge contract
 
 	// get all accounts's native token balance whose native balance has been changed
 	for k := range txParseResult.BalanceNativeAddress {
@@ -279,10 +271,10 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	}
 
 	// fetch native token balance
-	balanceNativeList := make([]*types.BalanceNative, 0, len(balanceNativeAddress))
+	balanceNativeList := make([]*protocol.BalanceNative, 0, len(balanceNativeAddress))
 	{
 		for addr := range balanceNativeAddress {
-			balanceNativeList = append(balanceNativeList, &types.BalanceNative{
+			balanceNativeList = append(balanceNativeList, &protocol.BalanceNative{
 				Addr: addr,
 			})
 		}
@@ -294,11 +286,11 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	}
 
 	// fetch erc20 token balance
-	balanceErc20List := make([]*types.BalanceErc20, 0)
+	balanceErc20List := make([]*protocol.BalanceErc20, 0)
 	{
 		for addr, v := range balanceErc20Address {
 			for contractAddr := range v {
-				balanceErc20List = append(balanceErc20List, &types.BalanceErc20{
+				balanceErc20List = append(balanceErc20List, &protocol.BalanceErc20{
 					Addr:         addr,
 					ContractAddr: contractAddr,
 				})
@@ -311,11 +303,11 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 		}
 	}
 
-	balanceErc1155List := make([]*types.BalanceErc1155, 0)
+	balanceErc1155List := make([]*protocol.BalanceErc1155, 0)
 	{
 		for contractAddr, v := range txParseResult.BalanceErc1155Address {
 			for tokenId, addr := range v {
-				balanceErc1155List = append(balanceErc1155List, &types.BalanceErc1155{
+				balanceErc1155List = append(balanceErc1155List, &protocol.BalanceErc1155{
 					Addr:         addr,
 					ContractAddr: contractAddr,
 					TokenId:      tokenId,
@@ -330,7 +322,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	}
 
 	// get new erc20 contract info
-	contractErc20List := make([]*types.ContractErc20, 0, len(txParseResult.Erc20ContractAddrs))
+	contractErc20List := make([]*protocol.ContractErc20, 0, len(txParseResult.Erc20ContractAddrs))
 	{
 		// TODO check if in database
 		for k := range txParseResult.Erc20ContractAddrs {
@@ -345,7 +337,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	}
 
 	// get new erc721 contract info
-	contractErc721List := make([]*types.ContractErc721, 0, len(txParseResult.Erc721ContractAddrs))
+	contractErc721List := make([]*protocol.ContractErc721, 0, len(txParseResult.Erc721ContractAddrs))
 	{
 		// TODO check if in database
 		for k := range txParseResult.Erc721ContractAddrs {
@@ -360,7 +352,7 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 	}
 
 	// get new erc721 token info
-	tokenErc721List := make([]*types.TokenErc721, 0, len(txParseResult.TokenErc721Set))
+	tokenErc721List := make([]*protocol.TokenErc721, 0, len(txParseResult.TokenErc721Set))
 	{
 		for k := range txParseResult.TokenErc721Set {
 			contractAddr := common.HexToAddress(k.ContractAddr)
@@ -378,24 +370,32 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 			tokenErc721List = append(tokenErc721List, tokenErc721)
 		}
 	}
+	/*
+		// TODO optimize
+		for _, tx := range txParseResult.TxList {
+			txInternalList := make([]*protocol.TxInternal, 0)
+			for _, txInternal := range internalTxParseResult.InternalTxList {
+				if tx.TxHash == txInternal.TxHash {
+					txInternalList = append(txInternalList, txInternal)
+				}
+			}
 
-	fullblock := &types.FullBlock{
-		Block:                    blk,
-		TxList:                   txParseResult.TxList,
-		TxInternalList:           internalTxParseResult.InternalTxList,
-		EventLogList:             txParseResult.EventLogList,
-		EventErc20TransferList:   txParseResult.EventErc20TransferList,
-		EventErc721TransferList:  txParseResult.EventErc721TransferList,
-		EventErc1155TransferList: txParseResult.EventErc1155TransferList,
+			tx.TxInternalList = txInternalList
+		}
+	*/
+	fullblock := &protocol.FullBlock{
+		Block:      blk,
+		FullTxList: txParseResult.FullTxList,
 
-		ContractList:       contractList,
-		ContractErc20List:  contractErc20List,
-		ContractErc721List: contractErc721List,
+		StateSet: &protocol.StateSet{
+			ContractErc20List:  contractErc20List,
+			ContractErc721List: contractErc721List,
 
-		BalanceNativeList:  balanceNativeList,
-		BalanceErc20List:   balanceErc20List,
-		BalanceErc1155List: balanceErc1155List,
-		TokenErc721List:    tokenErc721List,
+			BalanceNativeList:  balanceNativeList,
+			BalanceErc20List:   balanceErc20List,
+			BalanceErc1155List: balanceErc1155List,
+			TokenErc721List:    tokenErc721List,
+		},
 	}
 
 	return fullblock
@@ -403,12 +403,8 @@ func FetchFullBlock(nodeId int, taskId int, client *rpc.Client, height uint64) *
 
 func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, height uint64, baseFee *big.Int) *TxParseResult {
 
-	txList := make([]*types.Tx, 0, len(jsonTxList))
-	eventLogList := make([]*types.EventLog, 0)
-	eventErc20TransferList := make([]*types.EventErc20Transfer, 0)
-	eventErc721TransferList := make([]*types.EventErc721Transfer, 0)
-	eventErc1155TransferList := make([]*types.EventErc1155Transfer, 0)
-	contractList := make([]*types.Contract, 0)
+	fullTxList := make([]*protocol.FullTx, 0, len(jsonTxList))
+	contractList := make([]*protocol.Contract, 0)
 
 	balanceNativeAddress := make(map[string]struct{}, 0)
 	balanceErc20Address := make(map[string]map[string]struct{}, 0)
@@ -417,12 +413,6 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 	erc20ContractAddrs := make(map[string]struct{}, 0)
 	erc721ContractAddrs := make(map[string]struct{}, 0)
 	tokenErc721Set := make(map[TokenErc721KeyValue]TokenErc721KeyValue, 0)
-
-	erc20PaymentEventList := make([]interface{}, 0)
-	memeEventList := make([]interface{}, 0)
-	uniswapV2EventList := make([]interface{}, 0)
-	hybridNftEventList := make([]interface{}, 0)
-	nftMarketplaceEventList := make([]interface{}, 0)
 
 	for _, txJson := range jsonTxList {
 		txHash := txJson.Hash
@@ -439,8 +429,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 		if toHex == "" || toHex == "0x" || receipt.ContractAddress.Hex() != util.ZeroAddress {
 			if receipt.Status == 1 {
 				isCreateContract = true
-				contract := &types.Contract{
-					TxHash:       txHash,
+				contract := &protocol.Contract{
 					ContractAddr: strings.ToLower(receipt.ContractAddress.Hex()),
 					CreatorAddr:  fromAddr,
 					ExecStatus:   receipt.Status,
@@ -461,7 +450,8 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 			txType = hexutil.MustDecodeUint64(txJson.Type)
 		}
 
-		txIndex := hexutil.MustDecodeUint64(txJson.TransactionIndex)
+		// TODO need it?
+		//txIndex := hexutil.MustDecodeUint64(txJson.TransactionIndex)
 		value := hexutil.MustDecodeBig(txJson.Value)
 		nonce := hexutil.MustDecodeUint64(txJson.Nonce)
 		gasLimit := hexutil.MustDecodeUint64(txJson.Gas)
@@ -483,10 +473,9 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 		}
 
 		// tx
-		tx := &types.Tx{
+		tx := &protocol.Tx{
 			TxType:               int(txType),
 			TxHash:               txHash,
-			TxIndex:              int(txIndex),
 			From:                 fromAddr,
 			To:                   toAddr,
 			Nonce:                nonce,
@@ -503,7 +492,6 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 			IsCallContract:       isCallContract,
 			IsCreateContract:     isCreateContract,
 		}
-		txList = append(txList, tx)
 
 		// balance
 		balanceNativeAddress[fromAddr] = struct{}{}
@@ -511,7 +499,19 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 			balanceNativeAddress[toAddr] = struct{}{}
 		}
 
-		for indexInTx, txLog := range receipt.Logs {
+		fullEventList := make([]*protocol.FullEventLog, 0, len(receipt.Logs))
+		/*
+			eventErc20TransferList := make([]*protocol.EventErc20Transfer, 0)
+			eventErc721TransferList := make([]*protocol.EventErc721Transfer, 0)
+			eventErc1155TransferList := make([]*protocol.EventErc1155Transfer, 0)
+			erc20PaymentEventList := make([]interface{}, 0)
+			memeEventList := make([]interface{}, 0)
+			uniswapV2EventList := make([]interface{}, 0)
+			hybridNftEventList := make([]interface{}, 0)
+			nftMarketplaceEventList := make([]interface{}, 0)
+		*/
+
+		for _, txLog := range receipt.Logs {
 			// first one is event signature, left is indexed field, up to 3
 			var topic0, topic1, topic2, topic3 string
 			switch len(txLog.Topics) {
@@ -537,9 +537,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 			topicCount := len(txLog.Topics)
 
 			// event log
-			eventLog := &types.EventLog{
-				TxHash:       txHash,
-				IndexInTx:    uint(indexInTx),
+			eventLog := &protocol.EventLog{
 				IndexInBlock: uint(txLog.Index),
 				ContractAddr: contractAddr,
 				TopicCount:   uint(topicCount),
@@ -549,7 +547,11 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 				Topic3:       topic3,
 				Data:         txLog.Data,
 			}
-			eventLogList = append(eventLogList, eventLog)
+
+			fullEventLog := &protocol.FullEventLog{
+				EventLog: eventLog,
+			}
+
 			/*
 				if isErc20TransferEvent(topic0, topic1, topic2, topic3) {
 					sender := strings.ToLower(common.HexToAddress(topic1).Hex())
@@ -571,7 +573,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 					}
 
 					// tx erc20
-					eventErc20Transfer := &types.EventErc20Transfer{
+					eventErc20Transfer := &protocol.EventErc20Transfer{
 						TxHash:       txHash,
 						IndexInBlock: uint(txLog.Index),
 						ContractAddr: contractAddr,
@@ -595,7 +597,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 					tokenId := common.HexToHash(topic3).Big().String()
 
 					// tx erc721
-					eventErc721Transfer := &types.EventErc721Transfer{
+					eventErc721Transfer := &protocol.EventErc721Transfer{
 						TxHash:       txHash,
 						ContractAddr: contractAddr,
 						From:         sender,
@@ -651,7 +653,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 					tokens := transferSingleData.Value
 					amount := tokens.String()
 
-					eventErc1155Transfer := &types.EventErc1155Transfer{
+					eventErc1155Transfer := &protocol.EventErc1155Transfer{
 						TxHash:       txHash,
 						IndexInBlock: uint(txLog.Index),
 						ContractAddr: contractAddr,
@@ -708,7 +710,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 							// tx erc1155
 							amount := values[index].String()
 
-							eventErc1155Transfer := &types.EventErc1155Transfer{
+							eventErc1155Transfer := &protocol.EventErc1155Transfer{
 								TxHash:       txHash,
 								IndexInBlock: uint(txLog.Index),
 								IndexInBatch: index,
@@ -732,7 +734,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 			// erc20 transfer
 			eventErc20Transfer := filter.FilterErc20TransferEvent(txHash, txLog, contractAddr, height, topic0, topic1, topic2, topic3)
 			if eventErc20Transfer != nil {
-				eventErc20TransferList = append(eventErc20TransferList, eventErc20Transfer)
+				fullEventLog.EventErc20Transfer = eventErc20Transfer
 
 				sender := eventErc20Transfer.From
 				receiver := eventErc20Transfer.To
@@ -763,7 +765,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 			// erc721 transfer
 			eventErc721Transfer := filter.FilterErc721TransferEvent(txHash, txLog, contractAddr, height, topic0, topic1, topic2, topic3)
 			if eventErc721Transfer != nil {
-				eventErc721TransferList = append(eventErc721TransferList, eventErc721Transfer)
+				fullEventLog.EventErc721Transfer = eventErc721Transfer
 
 				tokenErc721KeyValue := TokenErc721KeyValue{
 					ContractAddr: contractAddr,
@@ -785,7 +787,9 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 			// erc1155 single transfer
 			eventErc1155Transfer := filter.FilterErc1155SingleTransferEvent(txHash, txLog, contractAddr, height, topic0, topic1, topic2, topic3)
 			if eventErc1155Transfer != nil {
+				eventErc1155TransferList := make([]*protocol.EventErc1155Transfer, 0)
 				eventErc1155TransferList = append(eventErc1155TransferList, eventErc1155Transfer)
+				fullEventLog.EventErc1155Transfers = eventErc1155TransferList
 
 				balanceNativeAddress[eventErc1155Transfer.Operator] = struct{}{}
 				balanceNativeAddress[eventErc1155Transfer.From] = struct{}{}
@@ -808,7 +812,8 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 			// erc1155 batch transfer
 			eventErc1155Transfers := filter.FilterErc1155BatchTransferEvent(txHash, txLog, contractAddr, height, topic0, topic1, topic2, topic3)
 			if len(eventErc1155Transfers) > 0 {
-				eventErc1155TransferList = append(eventErc1155TransferList, eventErc1155Transfers...)
+				fullEventLog.EventErc1155Transfers = eventErc1155Transfers
+
 				for _, transfer := range eventErc1155Transfers {
 					balanceNativeAddress[transfer.Operator] = struct{}{}
 					balanceNativeAddress[transfer.From] = struct{}{}
@@ -832,20 +837,20 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 			// erc20 payment event
 			erc20PaymentEvent := filter.FilterErc20PaymentEvent(txHash, txLog, contractAddr, height, topic0, topic1, topic2, topic3, topicCount)
 			if erc20PaymentEvent != nil {
-				erc20PaymentEventList = append(erc20PaymentEventList, erc20PaymentEvent)
+				fullEventLog.Erc20PaymentEvent = erc20PaymentEvent
 				continue
 			}
 
 			// meme event
 			memeEvent := filter.FilterMemeEvent(txHash, txLog, contractAddr, height, topic0, topic1, topic2, topic3, topicCount)
 			if memeEvent != nil {
-				memeEventList = append(memeEventList, memeEvent)
+				fullEventLog.MemeEvent = memeEvent
 				/*
-					if v, ok := memeEvent.(*types.MemeTokenLaunched); ok {
+					if v, ok := memeEvent.(*protocol.MemeTokenLaunched); ok {
 						eventTokenLaunchedList = append(eventTokenLaunchedList, v)
-					} else if v, ok := memeEvent.(*types.MemeTrade); ok {
+					} else if v, ok := memeEvent.(*protocol.MemeTrade); ok {
 						eventMemeTradeList = append(eventMemeTradeList, v)
-					} else if v, ok := memeEvent.(*types.MemeLiquiditySwapped); ok {
+					} else if v, ok := memeEvent.(*protocol.MemeLiquiditySwapped); ok {
 						eventMemeLiquiditySwappedList = append(eventMemeLiquiditySwappedList, v)
 					} else {
 						logrus.Panic("unknown meme event type")
@@ -857,61 +862,59 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 			// uniswapv2 event
 			uniswapv2Event := filter.FilterUniswapV2Event(txHash, txLog, contractAddr, height, topic0, topic1, topic2, topic3, topicCount)
 			if uniswapv2Event != nil {
-				uniswapV2EventList = append(uniswapV2EventList, uniswapv2Event)
+				fullEventLog.UniswapV2Event = uniswapv2Event
 				continue
 			}
 
 			// hybrid nft event
 			hybridNftEvent := filter.FilterHybridNftEvent(txHash, txLog, contractAddr, height, topic0, topic1, topic2, topic3, topicCount)
 			if hybridNftEvent != nil {
+				fullEventLog.HybridNftEvent = hybridNftEvent
 				/*
-					if _, ok := hybridNftEvent.(*types.HybridPublicConfigChanged); ok {
-					} else if _, ok := hybridNftEvent.(*types.HybridWhitelistConfigChanged); ok {
+					if _, ok := hybridNftEvent.(*protocol.HybridPublicConfigChanged); ok {
+					} else if _, ok := hybridNftEvent.(*protocol.HybridWhitelistConfigChanged); ok {
 					} else {
 						logrus.Panic("unknown hybrid nft event type")
 					}
 				*/
-				hybridNftEventList = append(hybridNftEventList, hybridNftEvent)
-
 				continue
 			}
 
 			// nft marketplace event
 			nftMarketplaceEvent := filter.FilterNftMarketplaceEvent(txHash, txLog, contractAddr, height, topic0, topic1, topic2, topic3, topicCount)
 			if nftMarketplaceEvent != nil {
-				nftMarketplaceEventList = append(nftMarketplaceEventList, nftMarketplaceEvent)
+				fullEventLog.NftMarketplaceEvent = nftMarketplaceEvent
 				continue
 			}
 		}
+
+		fullTx := protocol.FullTx{
+			Tx:               tx,
+			FullEventLogList: fullEventList,
+			TxInternalList:   nil,
+			ContractList:     nil,
+		}
+
+		fullTxList = append(fullTxList, &fullTx)
 	}
 
 	txParseResult := TxParseResult{
-		TxList:                   txList,
-		EventLogList:             eventLogList,
-		EventErc20TransferList:   eventErc20TransferList,
-		EventErc721TransferList:  eventErc721TransferList,
-		EventErc1155TransferList: eventErc1155TransferList,
-		ContractList:             contractList,
-		BalanceNativeAddress:     balanceNativeAddress,
-		BalanceErc20Address:      balanceErc20Address,
-		BalanceErc1155Address:    balanceErc1155Address,
-		Erc20ContractAddrs:       erc20ContractAddrs,
-		Erc721ContractAddrs:      erc721ContractAddrs,
-		TokenErc721Set:           tokenErc721Set,
-
-		Erc20PaymentEventList:   erc20PaymentEventList,
-		MemeEventList:           memeEventList,
-		UniswapV2EventList:      uniswapV2EventList,
-		HybridNftEventList:      hybridNftEventList,
-		NftMarketplaceEventList: nftMarketplaceEventList,
+		FullTxList:            fullTxList,
+		ContractList:          contractList,
+		BalanceNativeAddress:  balanceNativeAddress,
+		BalanceErc20Address:   balanceErc20Address,
+		BalanceErc1155Address: balanceErc1155Address,
+		Erc20ContractAddrs:    erc20ContractAddrs,
+		Erc721ContractAddrs:   erc721ContractAddrs,
+		TokenErc721Set:        tokenErc721Set,
 	}
 
 	return &txParseResult
 }
 
 func parseTxInternal(jsonTxInternalList []*TxInternalJson, height uint64) *InternalTxParseResult {
-	txInternalList := make([]*types.TxInternal, 0)
-	contractList := make([]*types.Contract, 0)
+	txInternalList := make([]*protocol.TxInternal, 0)
+	contractList := make([]*protocol.Contract, 0)
 
 	balanceNativeAddress := make(map[string]struct{}, 0)
 	/*
@@ -927,7 +930,7 @@ func parseTxInternal(jsonTxInternalList []*TxInternalJson, height uint64) *Inter
 						if tiLog.To == util.ZeroAddress {
 							logrus.Fatal("internal tx empty txhash:%v from:%v to:%v", txHash, fromAddr, toAddr)
 						}
-						contract := &types.Contract{
+						contract := &protocol.Contract{
 							TxHash:       txHash,
 							ContractAddr: toAddr,
 							CreatorAddr:  fromAddr,
@@ -937,7 +940,7 @@ func parseTxInternal(jsonTxInternalList []*TxInternalJson, height uint64) *Inter
 					}
 				}
 
-				modelTxInternal := &types.TxInternal{
+				modelTxInternal := &protocol.TxInternal{
 					TxHash:       txHash,
 					Index:        tiIdx,
 					From:         fromAddr,
@@ -973,7 +976,7 @@ func parseTxInternal(jsonTxInternalList []*TxInternalJson, height uint64) *Inter
 	return internalTxParseResult
 }
 
-func fetchBalanceNative(client *rpc.Client, balancesNative []*types.BalanceNative, height uint64) error {
+func fetchBalanceNative(client *rpc.Client, balancesNative []*protocol.BalanceNative, height uint64) error {
 	hexBalances := make([]hexutil.Big, len(balancesNative))
 
 	elems := make([]rpc.BatchElem, 0, len(balancesNative)+1)
@@ -1028,7 +1031,7 @@ func fetchBalanceNative(client *rpc.Client, balancesNative []*types.BalanceNativ
 	return err
 }
 
-func fetchErc20BalancesBatch(client *rpc.Client, bs []*types.BalanceErc20, height uint64) error {
+func fetchErc20BalancesBatch(client *rpc.Client, bs []*protocol.BalanceErc20, height uint64) error {
 	hexBalances := make([]hexutil.Bytes, len(bs))
 	elems := make([]rpc.BatchElem, 0, len(bs))
 	for i, v := range bs {
@@ -1101,7 +1104,7 @@ func fetchErc20BalancesBatch(client *rpc.Client, bs []*types.BalanceErc20, heigh
 	return nil
 }
 
-func fetchErc1155BalancesBatch(client *rpc.Client, bs []*types.BalanceErc1155, height uint64) error {
+func fetchErc1155BalancesBatch(client *rpc.Client, bs []*protocol.BalanceErc1155, height uint64) error {
 	hexBalances := make([]hexutil.Bytes, len(bs))
 	elems := make([]rpc.BatchElem, 0, len(bs))
 	for i, v := range bs {
@@ -1198,7 +1201,7 @@ func toCallArg(msg ethereum.CallMsg) interface{} {
 	return arg
 }
 
-func fetchContractErc20(client *rpc.Client, addr *common.Address, height uint64) (*types.ContractErc20, error) {
+func fetchContractErc20(client *rpc.Client, addr *common.Address, height uint64) (*protocol.ContractErc20, error) {
 	methods := []string{"name", "symbol", "decimals", "totalSupply"}
 	elems := make([]rpc.BatchElem, 0)
 	for _, method := range methods {
@@ -1233,7 +1236,7 @@ func fetchContractErc20(client *rpc.Client, addr *common.Address, height uint64)
 		return nil, fmt.Errorf("get erc20 info height too low")
 	}
 
-	contractErc20 := &types.ContractErc20{}
+	contractErc20 := &protocol.ContractErc20{}
 	contractErc20.ContractAddr = strings.ToLower(addr.Hex())
 
 	for i, elem := range elems {
@@ -1315,7 +1318,7 @@ func toCallArg2(msg ethereum.CallMsg) interface{} {
 	return arg
 }
 
-func fetchContractErc721(client *rpc.Client, addr *common.Address) (*types.ContractErc721, error) {
+func fetchContractErc721(client *rpc.Client, addr *common.Address) (*protocol.ContractErc721, error) {
 	methods := []string{"name", "symbol"}
 	elems := make([]rpc.BatchElem, 0)
 	for _, method := range methods {
@@ -1338,7 +1341,7 @@ func fetchContractErc721(client *rpc.Client, addr *common.Address) (*types.Contr
 		return nil, fmt.Errorf("batch call get erc721 info failed. err:%v addr:%v", err, addr.Hex())
 	}
 
-	contractErc721 := &types.ContractErc721{}
+	contractErc721 := &protocol.ContractErc721{}
 	contractErc721.ContractAddr = strings.ToLower(addr.Hex())
 
 	for i, elem := range elems {
@@ -1380,7 +1383,7 @@ func fetchContractErc721(client *rpc.Client, addr *common.Address) (*types.Contr
 	return contractErc721, nil
 }
 
-func fetchTokenErc721(client *rpc.Client, contractAddr *common.Address, tokenId *big.Int) (*types.TokenErc721, error) {
+func fetchTokenErc721(client *rpc.Client, contractAddr *common.Address, tokenId *big.Int) (*protocol.TokenErc721, error) {
 	methods := []string{"ownerOf", "tokenURI"}
 	elems := make([]rpc.BatchElem, 0)
 	for _, method := range methods {
@@ -1411,7 +1414,7 @@ func fetchTokenErc721(client *rpc.Client, contractAddr *common.Address, tokenId 
 		return nil, fmt.Errorf("batch call get token erc721 info failed. err:%v addr:%v token_id:%v", err, contractAddr.Hex(), tokenId.String())
 	}
 
-	tokenErc721 := &types.TokenErc721{}
+	tokenErc721 := &protocol.TokenErc721{}
 	tokenErc721.ContractAddr = strings.ToLower(contractAddr.Hex())
 	tokenErc721.TokenId = tokenId.String()
 	tokenErc721.UpdateHeight = uint64(blockNumber)

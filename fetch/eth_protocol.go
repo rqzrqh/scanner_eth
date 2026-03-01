@@ -47,6 +47,7 @@ type TxJson struct {
 }
 
 type TxInternalJson struct {
+	TxHash  string            `json:"transactionHash"`
 	Type    string            `json:"type"`
 	From    string            `json:"from"`
 	To      string            `json:"to,omitempty"`

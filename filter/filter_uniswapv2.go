@@ -3,7 +3,7 @@ package filter
 import (
 	"math/big"
 	"os"
-	"scanner_eth/types"
+	"scanner_eth/protocol"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -39,7 +39,7 @@ func FilterUniswapV2Event(txHash string, eventLog *eth_types.Log, contractAddr s
 	return nil
 }
 
-func filterSwap(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string, topicCount int) *types.UniswapV2Swap {
+func filterSwap(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string, topicCount int) *protocol.UniswapV2Swap {
 	eventName := "Swap"
 
 	// TODO check addr
@@ -62,7 +62,7 @@ func filterSwap(txHash string, eventLog *eth_types.Log, contractAddr string, hei
 		os.Exit(0)
 	}
 
-	event := &types.UniswapV2Swap{
+	event := &protocol.UniswapV2Swap{
 		Pair:       common.HexToAddress(contractAddr),
 		Sender:     sender,
 		Amount0In:  eventNonIndexedData.Amount0In,

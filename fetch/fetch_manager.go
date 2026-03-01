@@ -1,6 +1,7 @@
 package fetch
 
 import (
+	"scanner_eth/protocol"
 	"scanner_eth/types"
 
 	"github.com/ethereum/go-ethereum/rpc"
@@ -37,7 +38,7 @@ func NewFetchManager(clients []*rpc.Client, localChain *LocalChain, endHeight ui
 	}
 }
 
-func (fm *FetchManager) addBlock(data *types.FullBlock, forkVersion uint64) {
+func (fm *FetchManager) addBlock(data *protocol.FullBlock, forkVersion uint64) {
 
 	if forkVersion != fm.forkVersion {
 		logrus.Infof("addblock find old fork version. height:%v version:%v currentVersion:%v", data.Block.Height, forkVersion, fm.forkVersion)

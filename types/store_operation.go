@@ -1,5 +1,7 @@
 package types
 
+import "scanner_eth/protocol"
+
 type StoreOperationType byte
 
 const (
@@ -10,5 +12,5 @@ const (
 type StoreOperation struct {
 	Type      StoreOperationType
 	Height    uint64
-	FullBlock *FullBlock
+	FullBlock *protocol.FullBlock
 }
