@@ -54,8 +54,8 @@ func filterTokenLaunched(txHash string, eventLog *eth_types.Log, contractAddr st
 		return nil
 	}
 
-	token := common.HexToAddress(topic1)
-	creator := common.HexToAddress(topic2)
+	token := strings.ToLower(common.HexToAddress(topic1).Hex())
+	creator := strings.ToLower(common.HexToAddress(topic2).Hex())
 
 	var eventNonIndexedData struct {
 		Name          string
@@ -77,11 +77,11 @@ func filterTokenLaunched(txHash string, eventLog *eth_types.Log, contractAddr st
 		Name:          eventNonIndexedData.Name,
 		Symbol:        eventNonIndexedData.Symbol,
 		Creator:       creator,
-		VReserveEth:   eventNonIndexedData.VReserveEth,
-		VReserveToken: eventNonIndexedData.VReserveToken,
-		TotalSupply:   eventNonIndexedData.TotalSupply,
-		AutoBuyAmount: eventNonIndexedData.AutoBuyAmount,
-		Pair:          eventNonIndexedData.Pair,
+		VReserveEth:   eventNonIndexedData.VReserveEth.String(),
+		VReserveToken: eventNonIndexedData.VReserveToken.String(),
+		TotalSupply:   eventNonIndexedData.TotalSupply.String(),
+		AutoBuyAmount: eventNonIndexedData.AutoBuyAmount.String(),
+		Pair:          strings.ToLower(eventNonIndexedData.Pair.Hex()),
 	}
 
 	return event
@@ -97,8 +97,8 @@ func filterTrade(txHash string, eventLog *eth_types.Log, contractAddr string, he
 		return nil
 	}
 
-	token := common.HexToAddress(topic1)
-	user := common.HexToAddress(topic2)
+	token := strings.ToLower(common.HexToAddress(topic1).Hex())
+	user := strings.ToLower(common.HexToAddress(topic2).Hex())
 
 	var eventNonIndexedData struct {
 		EthAmount     *big.Int
@@ -116,13 +116,13 @@ func filterTrade(txHash string, eventLog *eth_types.Log, contractAddr string, he
 
 	event := &protocol.MemeTrade{
 		Token:         token,
-		EthAmount:     eventNonIndexedData.EthAmount,
-		EthFeeAmount:  eventNonIndexedData.EthFeeAmount,
-		TokenAmount:   eventNonIndexedData.TokenAmount,
+		EthAmount:     eventNonIndexedData.EthAmount.String(),
+		EthFeeAmount:  eventNonIndexedData.EthFeeAmount.String(),
+		TokenAmount:   eventNonIndexedData.TokenAmount.String(),
 		IsBuy:         eventNonIndexedData.IsBuy,
 		User:          user,
-		VReserveEth:   eventNonIndexedData.VReserveEth,
-		VReserveToken: eventNonIndexedData.VReserveToken,
+		VReserveEth:   eventNonIndexedData.VReserveEth.String(),
+		VReserveToken: eventNonIndexedData.VReserveToken.String(),
 	}
 	return event
 }
@@ -135,7 +135,7 @@ func filterLiquiditySwapped(txHash string, eventLog *eth_types.Log, contractAddr
 		return nil
 	}
 
-	token := common.HexToAddress(topic1)
+	token := strings.ToLower(common.HexToAddress(topic1).Hex())
 
 	var eventNonIndexedData struct {
 		TokenAmount   *big.Int
@@ -151,10 +151,10 @@ func filterLiquiditySwapped(txHash string, eventLog *eth_types.Log, contractAddr
 
 	event := &protocol.MemeLiquiditySwapped{
 		Token:         token,
-		EthAmount:     eventNonIndexedData.EthAmount,
-		TokenAmount:   eventNonIndexedData.TokenAmount,
-		VReserveEth:   eventNonIndexedData.VReserveEth,
-		VReserveToken: eventNonIndexedData.VReserveToken,
+		EthAmount:     eventNonIndexedData.EthAmount.String(),
+		TokenAmount:   eventNonIndexedData.TokenAmount.String(),
+		VReserveEth:   eventNonIndexedData.VReserveEth.String(),
+		VReserveToken: eventNonIndexedData.VReserveToken.String(),
 	}
 	return event
 }

@@ -71,8 +71,7 @@ func FilterErc20TransferEvent(txHash string, eventLog *eth_types.Log, contractAd
 	}
 	sender := strings.ToLower(common.HexToAddress(topic1).Hex())
 	receiver := strings.ToLower(common.HexToAddress(topic2).Hex())
-	tokenAmount := new(big.Int)
-	tokenAmount.SetBytes(eventLog.Data)
+	tokenAmount := new(big.Int).SetBytes(eventLog.Data)
 	/*
 		// erc20 balance
 		if tokenAmount.Uint64() != 0 {
@@ -117,7 +116,7 @@ func FilterErc721TransferEvent(txHash string, eventLog *eth_types.Log, contractA
 
 	sender := strings.ToLower(common.HexToAddress(topic1).Hex())
 	receiver := strings.ToLower(common.HexToAddress(topic2).Hex())
-	tokenId := common.HexToHash(topic3).Big().String()
+	tokenId := new(big.Int).SetBytes(common.HexToHash(topic3).Bytes()).String()
 
 	// tx erc721
 	eventErc721Transfer := &protocol.EventErc721Transfer{

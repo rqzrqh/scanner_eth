@@ -1,6 +1,7 @@
 package filter
 
 import (
+	"encoding/hex"
 	"os"
 	"scanner_eth/protocol"
 	"strings"
@@ -8,7 +9,6 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
-	"github.com/ethereum/go-ethereum/common"
 	eth_types "github.com/ethereum/go-ethereum/core/types"
 	"github.com/sirupsen/logrus"
 )
@@ -49,9 +49,9 @@ func filterErc20PaymentTransfer(txHash string, eventLog *eth_types.Log, contract
 		return nil
 	}
 
-	token := common.HexToAddress(topic1)
-	from := common.HexToAddress(topic2)
-	to := common.HexToAddress(topic3)
+	token := strings.ToLower(topic1)
+	from := strings.ToLower(topic2)
+	to := strings.ToLower(topic3)
 
 	eventNonIndexedData := struct {
 		Amount *big.Int
@@ -67,9 +67,8 @@ func filterErc20PaymentTransfer(txHash string, eventLog *eth_types.Log, contract
 		Token:  token,
 		From:   from,
 		To:     to,
-		Amount: eventNonIndexedData.Amount,
-		Memo:   eventNonIndexedData.Memo,
-		//Memo:   hex.EncodeToString(eventNonIndexedData.Memo),
+		Amount: eventNonIndexedData.Amount.String(),
+		Memo:   hex.EncodeToString(eventNonIndexedData.Memo),
 	}
 
 	return []interface{}{event}

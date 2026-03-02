@@ -73,12 +73,12 @@ func filterPublicConfig(txHash string, eventLog *eth_types.Log, contractAddr str
 	}
 
 	event := &protocol.HybridPublicConfigChanged{
-		RoyaltyBasisPoints: eventNonIndexedData.RoyaltyBasisPoints,
-		MaxSupply:          eventNonIndexedData.MaxSupply,
-		MaxMintPerWallet:   eventNonIndexedData.MaxMintPerWallet,
-		MintPrice:          eventNonIndexedData.MintPrice,
-		MintStartTime:      eventNonIndexedData.MintStartTime,
-		MintEndTime:        eventNonIndexedData.MintEndTime,
+		RoyaltyBasisPoints: eventNonIndexedData.RoyaltyBasisPoints.String(),
+		MaxSupply:          eventNonIndexedData.MaxSupply.String(),
+		MaxMintPerWallet:   eventNonIndexedData.MaxMintPerWallet.String(),
+		MintPrice:          eventNonIndexedData.MintPrice.String(),
+		MintStartTime:      eventNonIndexedData.MintStartTime.String(),
+		MintEndTime:        eventNonIndexedData.MintEndTime.String(),
 	}
 
 	return event
@@ -109,14 +109,14 @@ func filterWhitelistConfig(txHash string, eventLog *eth_types.Log, contractAddr 
 	}
 
 	event := &protocol.HybridWhitelistConfigChanged{
-		RoyaltyBasisPoints: eventNonIndexedData.RoyaltyBasisPoints,
-		MaxSupply:          eventNonIndexedData.MaxSupply,
-		MaxMintPerWallet:   eventNonIndexedData.MaxMintPerWallet,
-		WhitelistPrice:     eventNonIndexedData.WhitelistPrice,
-		PublicPrice:        eventNonIndexedData.PublicPrice,
-		WhitelistStartTime: eventNonIndexedData.WhitelistStartTime,
-		WhitelistEndTime:   eventNonIndexedData.WhitelistEndTime,
-		PublicEndTime:      eventNonIndexedData.PublicEndTime,
+		RoyaltyBasisPoints: eventNonIndexedData.RoyaltyBasisPoints.String(),
+		MaxSupply:          eventNonIndexedData.MaxSupply.String(),
+		MaxMintPerWallet:   eventNonIndexedData.MaxMintPerWallet.String(),
+		WhitelistPrice:     eventNonIndexedData.WhitelistPrice.String(),
+		PublicPrice:        eventNonIndexedData.PublicPrice.String(),
+		WhitelistStartTime: eventNonIndexedData.WhitelistStartTime.String(),
+		WhitelistEndTime:   eventNonIndexedData.WhitelistEndTime.String(),
+		PublicEndTime:      eventNonIndexedData.PublicEndTime.String(),
 	}
 
 	return event

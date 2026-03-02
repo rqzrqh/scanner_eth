@@ -47,8 +47,8 @@ func filterSwap(txHash string, eventLog *eth_types.Log, contractAddr string, hei
 		return nil
 	}
 
-	sender := common.HexToAddress(topic1)
-	to := common.HexToAddress(topic2)
+	sender := strings.ToLower(common.HexToAddress(topic1).Hex())
+	to := strings.ToLower(common.HexToAddress(topic2).Hex())
 
 	var eventNonIndexedData struct {
 		Amount0In  *big.Int
@@ -63,12 +63,12 @@ func filterSwap(txHash string, eventLog *eth_types.Log, contractAddr string, hei
 	}
 
 	event := &protocol.UniswapV2Swap{
-		Pair:       common.HexToAddress(contractAddr),
+		Pair:       strings.ToLower(contractAddr),
 		Sender:     sender,
-		Amount0In:  eventNonIndexedData.Amount0In,
-		Amount1In:  eventNonIndexedData.Amount1In,
-		Amount0Out: eventNonIndexedData.Amount0Out,
-		Amount1Out: eventNonIndexedData.Amount1Out,
+		Amount0In:  eventNonIndexedData.Amount0In.String(),
+		Amount1In:  eventNonIndexedData.Amount1In.String(),
+		Amount0Out: eventNonIndexedData.Amount0Out.String(),
+		Amount1Out: eventNonIndexedData.Amount1Out.String(),
 		To:         to,
 	}
 

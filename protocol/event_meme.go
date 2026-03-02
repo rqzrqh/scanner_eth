@@ -1,38 +1,32 @@
 package protocol
 
-import (
-	"math/big"
-
-	"github.com/ethereum/go-ethereum/common"
-)
-
 type MemeTokenLaunched struct {
-	Token         common.Address
+	Token         string
 	Name          string
 	Symbol        string
-	Creator       common.Address
-	VReserveEth   *big.Int
-	VReserveToken *big.Int
-	TotalSupply   *big.Int
-	AutoBuyAmount *big.Int
-	Pair          common.Address
+	Creator       string
+	VReserveEth   string
+	VReserveToken string
+	TotalSupply   string
+	AutoBuyAmount string
+	Pair          string
 }
 
 type MemeTrade struct {
-	Token         common.Address
-	EthAmount     *big.Int
-	EthFeeAmount  *big.Int
-	TokenAmount   *big.Int
+	Token         string
+	EthAmount     string
+	EthFeeAmount  string
+	TokenAmount   string
 	IsBuy         bool
-	User          common.Address
-	VReserveEth   *big.Int
-	VReserveToken *big.Int
+	User          string
+	VReserveEth   string
+	VReserveToken string
 }
 
 type MemeLiquiditySwapped struct {
-	Token         common.Address
-	EthAmount     *big.Int
-	TokenAmount   *big.Int
-	VReserveEth   *big.Int
-	VReserveToken *big.Int
+	Token         string
+	EthAmount     string
+	TokenAmount   string
+	VReserveEth   string
+	VReserveToken string
 }

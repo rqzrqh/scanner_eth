@@ -81,9 +81,9 @@ func filterItemListed(txHash string, eventLog *eth_types.Log, contractAddr strin
 		return nil
 	}
 
-	listingId := common.HexToHash(topic1)
-	seller := common.HexToAddress(topic2)
-	nftContract := common.HexToAddress(topic3)
+	listingId := strings.ToLower(common.HexToHash(topic1).Hex())
+	seller := strings.ToLower(common.HexToAddress(topic2).Hex())
+	nftContract := strings.ToLower(common.HexToAddress(topic3).Hex())
 
 	var eventNonIndexedData struct {
 		TokenId      *big.Int
@@ -100,9 +100,9 @@ func filterItemListed(txHash string, eventLog *eth_types.Log, contractAddr strin
 		ListingId:    listingId,
 		Seller:       seller,
 		NFTContract:  nftContract,
-		TokenId:      eventNonIndexedData.TokenId,
-		Price:        eventNonIndexedData.Price,
-		PaymentToken: eventNonIndexedData.PaymentToken,
+		TokenId:      eventNonIndexedData.TokenId.String(),
+		Price:        eventNonIndexedData.Price.String(),
+		PaymentToken: strings.ToLower(eventNonIndexedData.PaymentToken.Hex()),
 	}
 
 	return []interface{}{event}
@@ -115,9 +115,9 @@ func filterItemSold(txHash string, eventLog *eth_types.Log, contractAddr string,
 		return nil
 	}
 
-	listingId := common.HexToHash(topic1)
-	buyer := common.HexToAddress(topic2)
-	seller := common.HexToAddress(topic3)
+	listingId := strings.ToLower(common.HexToHash(topic1).Hex())
+	buyer := strings.ToLower(common.HexToAddress(topic2).Hex())
+	seller := strings.ToLower(common.HexToAddress(topic3).Hex())
 
 	var eventNonIndexedData struct {
 		NFTContract  common.Address
@@ -135,10 +135,10 @@ func filterItemSold(txHash string, eventLog *eth_types.Log, contractAddr string,
 		ListingId:    listingId,
 		Buyer:        buyer,
 		Seller:       seller,
-		NFTContract:  eventNonIndexedData.NFTContract,
-		TokenId:      eventNonIndexedData.TokenId,
-		Price:        eventNonIndexedData.Price,
-		PaymentToken: eventNonIndexedData.PaymentToken,
+		NFTContract:  strings.ToLower(eventNonIndexedData.NFTContract.Hex()),
+		TokenId:      eventNonIndexedData.TokenId.String(),
+		Price:        eventNonIndexedData.Price.String(),
+		PaymentToken: strings.ToLower(eventNonIndexedData.PaymentToken.Hex()),
 	}
 
 	return []interface{}{evt}
@@ -151,9 +151,11 @@ func filterListingCancelled(txHash string, eventLog *eth_types.Log, contractAddr
 		return nil
 	}
 
+	listingId := strings.ToLower(common.HexToHash(topic1).Hex())
+
 	evt := &protocol.NftMarketplaceListingCancelled{
-		ListingId: common.HexToHash(topic1),
-		Seller:    common.HexToAddress(topic2),
+		ListingId: listingId,
+		Seller:    strings.ToLower(common.HexToAddress(topic2).Hex()),
 	}
 
 	return []interface{}{evt}
@@ -166,6 +168,8 @@ func filterPriceUpdated(txHash string, eventLog *eth_types.Log, contractAddr str
 		return nil
 	}
 
+	listingId := strings.ToLower(common.HexToHash(topic1).Hex())
+
 	var eventNonIndexedData struct {
 		NewPrice *big.Int
 	}
@@ -176,8 +180,8 @@ func filterPriceUpdated(txHash string, eventLog *eth_types.Log, contractAddr str
 	}
 
 	evt := &protocol.NftMarketplacePriceUpdated{
-		ListingId: common.HexToHash(topic1),
-		NewPrice:  eventNonIndexedData.NewPrice,
+		ListingId: listingId,
+		NewPrice:  eventNonIndexedData.NewPrice.String(),
 	}
 
 	return []interface{}{evt}
@@ -189,6 +193,8 @@ func filterOfferMade(txHash string, eventLog *eth_types.Log, contractAddr string
 	if !(topic0 == nftMarketplaceABI.Events[eventName].ID.Hex() && topicCount == 4) {
 		return nil
 	}
+
+	offerId := new(big.Int).SetBytes(common.HexToHash(topic1).Bytes()).String()
 
 	var eventNonIndexedData struct {
 		TokenId      *big.Int
@@ -202,12 +208,12 @@ func filterOfferMade(txHash string, eventLog *eth_types.Log, contractAddr string
 	}
 
 	evt := &protocol.NftMarketplaceOffer{
-		OfferId:      topicToBigInt(topic1),
-		Buyer:        common.HexToAddress(topic2),
-		NFTContract:  common.HexToAddress(topic3),
-		TokenId:      eventNonIndexedData.TokenId,
-		Price:        eventNonIndexedData.Price,
-		PaymentToken: eventNonIndexedData.PaymentToken,
+		OfferId:      offerId,
+		Buyer:        strings.ToLower(common.HexToAddress(topic2).Hex()),
+		NFTContract:  strings.ToLower(common.HexToAddress(topic3).Hex()),
+		TokenId:      eventNonIndexedData.TokenId.String(),
+		Price:        eventNonIndexedData.Price.String(),
+		PaymentToken: strings.ToLower(eventNonIndexedData.PaymentToken.Hex()),
 	}
 
 	return []interface{}{evt}
@@ -219,6 +225,8 @@ func filterOfferAccepted(txHash string, eventLog *eth_types.Log, contractAddr st
 	if !(topic0 == nftMarketplaceABI.Events[eventName].ID.Hex() && topicCount == 4) {
 		return nil
 	}
+
+	offerId := new(big.Int).SetBytes(common.HexToHash(topic1).Bytes()).String()
 
 	var eventNonIndexedData struct {
 		NFTContract  common.Address
@@ -233,13 +241,13 @@ func filterOfferAccepted(txHash string, eventLog *eth_types.Log, contractAddr st
 	}
 
 	evt := &protocol.NftMarketplaceOfferAccepted{
-		OfferId:      topicToBigInt(topic1),
-		Seller:       common.HexToAddress(topic2),
-		Buyer:        common.HexToAddress(topic3),
-		NFTContract:  eventNonIndexedData.NFTContract,
-		TokenId:      eventNonIndexedData.TokenId,
-		Price:        eventNonIndexedData.Price,
-		PaymentToken: eventNonIndexedData.PaymentToken,
+		OfferId:      offerId,
+		Seller:       strings.ToLower(common.HexToAddress(topic2).Hex()),
+		Buyer:        strings.ToLower(common.HexToAddress(topic3).Hex()),
+		NFTContract:  strings.ToLower(eventNonIndexedData.NFTContract.Hex()),
+		TokenId:      eventNonIndexedData.TokenId.String(),
+		Price:        eventNonIndexedData.Price.String(),
+		PaymentToken: strings.ToLower(eventNonIndexedData.PaymentToken.Hex()),
 	}
 
 	return []interface{}{evt}
@@ -252,9 +260,12 @@ func filterOfferCancelled(txHash string, eventLog *eth_types.Log, contractAddr s
 		return nil
 	}
 
+	offerId := new(big.Int).SetBytes(common.HexToHash(topic1).Bytes()).String()
+	buyer := strings.ToLower(common.HexToAddress(topic2).Hex())
+
 	evt := &protocol.NftMarketplaceOfferCancelled{
-		OfferId: topicToBigInt(topic1),
-		Buyer:   common.HexToAddress(topic2),
+		OfferId: offerId,
+		Buyer:   buyer,
 	}
 
 	return []interface{}{evt}
@@ -266,6 +277,10 @@ func filterBatchOfferMade(txHash string, eventLog *eth_types.Log, contractAddr s
 	if !(topic0 == nftMarketplaceABI.Events[eventName].ID.Hex() && topicCount == 4) {
 		return nil
 	}
+
+	batchOfferId := new(big.Int).SetBytes(common.HexToHash(topic1).Bytes()).String()
+	buyer := strings.ToLower(common.HexToAddress(topic2).Hex())
+	nftContract := strings.ToLower(common.HexToAddress(topic3).Hex())
 
 	var eventNonIndexedData struct {
 		Quantity     *big.Int
@@ -280,13 +295,13 @@ func filterBatchOfferMade(txHash string, eventLog *eth_types.Log, contractAddr s
 	}
 
 	evt := &protocol.NftMarketplaceBatchOffer{
-		BatchOfferId: topicToBigInt(topic1),
-		Buyer:        common.HexToAddress(topic2),
-		NFTContract:  common.HexToAddress(topic3),
-		Quantity:     eventNonIndexedData.Quantity,
-		PricePerItem: eventNonIndexedData.PricePerItem,
-		PaymentToken: eventNonIndexedData.PaymentToken,
-		TotalValue:   eventNonIndexedData.TotalValue,
+		BatchOfferId: batchOfferId,
+		Buyer:        buyer,
+		NFTContract:  nftContract,
+		Quantity:     eventNonIndexedData.Quantity.String(),
+		PricePerItem: eventNonIndexedData.PricePerItem.String(),
+		PaymentToken: strings.ToLower(eventNonIndexedData.PaymentToken.Hex()),
+		TotalValue:   eventNonIndexedData.TotalValue.String(),
 	}
 
 	return []interface{}{evt}
@@ -298,6 +313,10 @@ func filterBatchOfferAccepted(txHash string, eventLog *eth_types.Log, contractAd
 	if !(topic0 == nftMarketplaceABI.Events[eventName].ID.Hex() && topicCount == 4) {
 		return nil
 	}
+
+	batchOfferId := new(big.Int).SetBytes(common.HexToHash(topic1).Bytes()).String()
+	seller := strings.ToLower(common.HexToAddress(topic2).Hex())
+	buyer := strings.ToLower(common.HexToAddress(topic3).Hex())
 
 	var eventNonIndexedData struct {
 		NFTContract  common.Address
@@ -311,14 +330,19 @@ func filterBatchOfferAccepted(txHash string, eventLog *eth_types.Log, contractAd
 		os.Exit(0)
 	}
 
+	strTokenIds := make([]string, len(eventNonIndexedData.TokenIds))
+	for i, tokenId := range eventNonIndexedData.TokenIds {
+		strTokenIds[i] = tokenId.String()
+	}
+
 	evt := &protocol.NftMarketplaceBatchOfferAccepted{
-		BatchOfferId: topicToBigInt(topic1),
-		Seller:       common.HexToAddress(topic2),
-		Buyer:        common.HexToAddress(topic3),
-		NFTContract:  eventNonIndexedData.NFTContract,
-		TokenIds:     eventNonIndexedData.TokenIds,
-		TotalValue:   eventNonIndexedData.TotalValue,
-		PaymentToken: eventNonIndexedData.PaymentToken,
+		BatchOfferId: batchOfferId,
+		Seller:       seller,
+		Buyer:        buyer,
+		NFTContract:  strings.ToLower(eventNonIndexedData.NFTContract.Hex()),
+		TokenIds:     strTokenIds,
+		TotalValue:   eventNonIndexedData.TotalValue.String(),
+		PaymentToken: strings.ToLower(eventNonIndexedData.PaymentToken.Hex()),
 	}
 
 	return []interface{}{evt}
@@ -331,9 +355,12 @@ func filterBatchOfferCancelled(txHash string, eventLog *eth_types.Log, contractA
 		return nil
 	}
 
+	batchOfferId := new(big.Int).SetBytes(common.HexToHash(topic1).Bytes()).String()
+	buyer := strings.ToLower(common.HexToAddress(topic2).Hex())
+
 	evt := &protocol.NftMarketplaceBatchOfferCancelled{
-		BatchOfferId: topicToBigInt(topic1),
-		Buyer:        common.HexToAddress(topic2),
+		BatchOfferId: batchOfferId,
+		Buyer:        buyer,
 	}
 
 	return []interface{}{evt}
@@ -346,6 +373,9 @@ func filterBatchPurchase(txHash string, eventLog *eth_types.Log, contractAddr st
 		return nil
 	}
 
+	buyer := strings.ToLower(common.HexToAddress(topic1).Hex())
+	nftContract := strings.ToLower(common.HexToAddress(topic2).Hex())
+
 	var eventNonIndexedData struct {
 		TokenIds     []*big.Int
 		TotalPrice   *big.Int
@@ -357,12 +387,17 @@ func filterBatchPurchase(txHash string, eventLog *eth_types.Log, contractAddr st
 		os.Exit(0)
 	}
 
+	strTokenIds := make([]string, len(eventNonIndexedData.TokenIds))
+	for i, tokenId := range eventNonIndexedData.TokenIds {
+		strTokenIds[i] = tokenId.String()
+	}
+
 	evt := &protocol.NftMarketplaceBatchPurchase{
-		Buyer:        common.HexToAddress(topic1),
-		NFTContract:  common.HexToAddress(topic2),
-		TokenIds:     eventNonIndexedData.TokenIds,
-		TotalPrice:   eventNonIndexedData.TotalPrice,
-		PaymentToken: eventNonIndexedData.PaymentToken,
+		Buyer:        buyer,
+		NFTContract:  nftContract,
+		TokenIds:     strTokenIds,
+		TotalPrice:   eventNonIndexedData.TotalPrice.String(),
+		PaymentToken: strings.ToLower(eventNonIndexedData.PaymentToken.Hex()),
 	}
 
 	return []interface{}{evt}
