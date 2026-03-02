@@ -405,7 +405,7 @@ func convertStorageFullBlock(fullblock *protocol.FullBlock) *StorageFullBlock {
 				modelTransfer := model.EventErc20Transfer{
 					Height:       blockHeight,
 					TxHash:       txHash,
-					IndexInBlock: transfer.IndexInBlock,
+					IndexInTx:    uint(indexInTx),
 					ContractAddr: transfer.ContractAddr,
 					From:         transfer.From,
 					To:           transfer.To,
@@ -419,7 +419,7 @@ func convertStorageFullBlock(fullblock *protocol.FullBlock) *StorageFullBlock {
 				modelTransfer := model.EventErc721Transfer{
 					Height:       blockHeight,
 					TxHash:       txHash,
-					IndexInBlock: transfer.IndexInBlock,
+					IndexInTx:    uint(indexInTx),
 					ContractAddr: transfer.ContractAddr,
 					From:         transfer.From,
 					To:           transfer.To,
@@ -429,12 +429,12 @@ func convertStorageFullBlock(fullblock *protocol.FullBlock) *StorageFullBlock {
 			}
 
 			if optionalEventErc1155Transfer {
-				for _, transfer := range fullEventLog.EventErc1155Transfers {
+				for indexInBatch, transfer := range fullEventLog.EventErc1155Transfers {
 					modelTransfer := model.EventErc1155Transfer{
 						Height:       blockHeight,
 						TxHash:       txHash,
-						IndexInBlock: transfer.IndexInBlock,
-						IndexInBatch: transfer.IndexInBatch,
+						IndexInTx:    uint(indexInTx),
+						IndexInBatch: indexInBatch,
 						ContractAddr: transfer.ContractAddr,
 						Operator:     transfer.Operator,
 						From:         transfer.From,

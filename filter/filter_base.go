@@ -88,7 +88,6 @@ func FilterErc20TransferEvent(txHash string, eventLog *eth_types.Log, contractAd
 	*/
 	// tx erc20
 	eventErc20Transfer := &protocol.EventErc20Transfer{
-		IndexInBlock: uint(eventLog.Index),
 		ContractAddr: contractAddr,
 		From:         sender,
 		To:           receiver,
@@ -124,7 +123,6 @@ func FilterErc721TransferEvent(txHash string, eventLog *eth_types.Log, contractA
 		From:         sender,
 		To:           receiver,
 		TokenId:      tokenId,
-		IndexInBlock: uint(eventLog.Index),
 	}
 	/*
 		eventErc721TransferList = append(eventErc721TransferList, eventErc721Transfer)
@@ -184,14 +182,12 @@ func FilterErc1155SingleTransferEvent(txHash string, eventLog *eth_types.Log, co
 	amount := tokens.String()
 
 	eventErc1155Transfer := &protocol.EventErc1155Transfer{
-		IndexInBlock: uint(eventLog.Index),
 		ContractAddr: contractAddr,
 		Operator:     operator,
 		From:         sender,
 		To:           receiver,
 		TokenId:      tokenId,
 		Amount:       amount,
-		IndexInBatch: -1,
 	}
 
 	return eventErc1155Transfer
@@ -242,8 +238,6 @@ func FilterErc1155BatchTransferEvent(txHash string, eventLog *eth_types.Log, con
 		amount := values[index].String()
 
 		eventErc1155Transfer := &protocol.EventErc1155Transfer{
-			IndexInBlock: uint(eventLog.Index),
-			IndexInBatch: index,
 			ContractAddr: contractAddr,
 			Operator:     operator,
 			From:         sender,
