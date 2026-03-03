@@ -3,23 +3,21 @@ package fetch
 import (
 	"context"
 	"scanner_eth/types"
-	"scanner_eth/util"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	ethTypes "github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/sirupsen/logrus"
 )
 
 type HeaderNotifier struct {
 	id                       int
-	client                   *rpc.Client
+	client                   *ethclient.Client
 	remote                   *RemoteChain
 	remoteChainUpdateChannel chan<- *types.RemoteChainUpdate
 }
 
-func NewHeaderNotifier(id int, client *rpc.Client, remoteChainUpdateChannel chan<- *types.RemoteChainUpdate) *HeaderNotifier {
+func NewHeaderNotifier(id int, client *ethclient.Client, remoteChainUpdateChannel chan<- *types.RemoteChainUpdate) *HeaderNotifier {
 	return &HeaderNotifier{
 		id:                       id,
 		client:                   client,
@@ -32,7 +30,7 @@ func (ds *HeaderNotifier) Run() {
 
 	go func() {
 
-		if ds.client.SupportsSubscriptions() {
+		if ds.client.Client().SupportsSubscriptions() {
 			logrus.Infof("header notifier use websocket. id:%d", ds.id)
 			ds.useWebsocket()
 		} else {
@@ -49,7 +47,7 @@ func (ds *HeaderNotifier) useWebsocket() {
 
 RECONNECT:
 	{
-		sub, err := ds.client.Subscribe(context.Background(), "eth", newHeadChannel, "newHeads")
+		sub, err := ds.client.SubscribeNewHead(context.Background(), newHeadChannel)
 		if err != nil {
 			logrus.Warnf("header notifier failed to subscribe newHeads. wait reconnect. id:%d error:%v", ds.id, err)
 			time.Sleep(3000 * time.Millisecond)
@@ -92,25 +90,23 @@ RECONNECT:
 
 func (ds *HeaderNotifier) useHttp() {
 	for {
-		blkJson := &BlockHeaderJson{}
-		err := ds.client.Call(blkJson, "eth_getBlockByNumber", util.ToBlockNumArg(nil), false)
+		header, err := ds.client.HeaderByNumber(context.Background(), nil)
 		if err != nil {
 			logrus.Warnf("header notifier failed to get latest block. id:%d error:%v", ds.id, err)
 			time.Sleep(5000 * time.Millisecond)
 			continue
 		}
-
-		if blkJson.Number == "" {
-			logrus.Warnf("header notifier get empty block. id:%d", ds.id)
+		if header == nil {
+			logrus.Warnf("header notifier get empty latest block. id:%d", ds.id)
 			time.Sleep(5000 * time.Millisecond)
 			continue
 		}
 
-		height := hexutil.MustDecodeUint64(blkJson.Number)
-		blockHash := blkJson.Hash
+		height := header.Number.Uint64()
+		blockHash := header.Hash().Hex()
 		weight := uint64(0)
-		// if blkJson.TotalDifficulty != "" {
-		// 	weight = hexutil.MustDecodeUint64(blkJson.TotalDifficulty)
+		// if header.TotalDifficulty != "" {
+		// 	weight = hexutil.MustDecodeUint64(header.TotalDifficulty)
 		// }
 
 		ds.remote.Update(height, blockHash)

@@ -1,10 +1,10 @@
 package fetch
 
 import (
-	"scanner_eth/protocol"
+	"scanner_eth/data"
 	"scanner_eth/types"
 
-	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/sirupsen/logrus"
 )
 
@@ -20,7 +20,7 @@ type FetchManager struct {
 	storeOperationChannel    chan<- *types.StoreOperation
 }
 
-func NewFetchManager(clients []*rpc.Client, localChain *LocalChain, endHeight uint64, maxUnorganizedBlockCount int, remoteChainUpdateChannel <-chan *types.RemoteChainUpdate,
+func NewFetchManager(clients []*ethclient.Client, localChain *LocalChain, endHeight uint64, maxUnorganizedBlockCount int, remoteChainUpdateChannel <-chan *types.RemoteChainUpdate,
 	storeOperationChannel chan<- *types.StoreOperation) *FetchManager {
 
 	fetchResultNotifyChannel := make(chan *FetchResult, 100)
@@ -38,7 +38,7 @@ func NewFetchManager(clients []*rpc.Client, localChain *LocalChain, endHeight ui
 	}
 }
 
-func (fm *FetchManager) addBlock(data *protocol.FullBlock, forkVersion uint64) {
+func (fm *FetchManager) addBlock(data *data.FullBlock, forkVersion uint64) {
 
 	if forkVersion != fm.forkVersion {
 		logrus.Infof("addblock find old fork version. height:%v version:%v currentVersion:%v", data.Block.Height, forkVersion, fm.forkVersion)

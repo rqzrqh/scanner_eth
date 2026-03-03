@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"math"
 	"math/big"
 	"os"
@@ -11,11 +12,9 @@ import (
 	"scanner_eth/publish"
 	"scanner_eth/store"
 	"scanner_eth/types"
-	"scanner_eth/util"
 	"sort"
 
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/segmentio/kafka-go"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -28,7 +27,7 @@ type Syncer struct {
 	pm  *publish.PublishManager
 }
 
-func newSyncer(conf *config.Config, clients []*rpc.Client, db *gorm.DB, w *kafka.Writer, chainId int64, genesisBlockHash string, messageId uint64, publishedMessageId uint64, optionalTables map[string]struct{}) *Syncer {
+func newSyncer(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, w *kafka.Writer, chainId int64, genesisBlockHash string, messageId uint64, publishedMessageId uint64, optionalTables map[string]struct{}) *Syncer {
 
 	reversibleBlocks := conf.Chain.ReversibleBlocks
 	startHeight, endHeight, enableInternalTx := conf.Fetch.StartHeight, conf.Fetch.EndHeight, conf.Fetch.EnableInternalTx
@@ -101,37 +100,35 @@ func (s *Syncer) Run() {
 	}
 }
 
-func checkNodeChainInfo(clients []*rpc.Client, dbChainId int64, dbGenesisBlockHash string) {
+func checkNodeChainInfo(clients []*ethclient.Client, dbChainId int64, dbGenesisBlockHash string) {
 
 	// compare node chain info with db
 	for i, client := range clients {
-		strChainId := ""
-		if err := client.Call(&strChainId, "eth_chainId"); err != nil {
+		chainId, err := client.ChainID(context.Background())
+		if err != nil {
 			logrus.Errorf("get chain id failed. id:%v err:%v", i, err)
 			os.Exit(0)
 		}
 
-		chainId := hexutil.MustDecodeUint64(strChainId)
-
-		if chainId != uint64(dbChainId) {
-			logrus.Errorf("chain id not equal with db. id:%v db:%v node:%v", i, dbChainId, chainId)
+		if chainId.Uint64() != uint64(dbChainId) {
+			logrus.Errorf("chain id not equal with db. id:%v db:%v node:%v", i, dbChainId, chainId.Uint64())
 			os.Exit(0)
 		}
 
-		blkJson := &fetch.BlockHeaderJson{}
-		if err := client.Call(blkJson, "eth_getBlockByNumber", "0x0", false); err != nil {
-			logrus.Errorf("get genesis block failed. id:%v err:%v", i, err)
+		header, err := client.HeaderByNumber(context.Background(), new(big.Int).SetUint64(0))
+		if err != nil {
+			logrus.Errorf("get genesis block header failed. id:%v err:%v", i, err)
 			os.Exit(0)
 		}
 
-		if blkJson.Hash != dbGenesisBlockHash {
-			logrus.Errorf("genesis block not equal with db. id:%v db:%v node:%v", i, dbGenesisBlockHash, blkJson.Hash)
+		if header.Hash().Hex() != dbGenesisBlockHash {
+			logrus.Errorf("genesis block not equal with db. id:%v db:%v node:%v", i, dbGenesisBlockHash, header.Hash().Hex())
 			os.Exit(0)
 		}
 	}
 }
 
-func loadLatestBlock(clients []*rpc.Client, db *gorm.DB, startHeight uint64, reversibleBlocks int) []*fetch.BlockDigest {
+func loadLatestBlock(clients []*ethclient.Client, db *gorm.DB, startHeight uint64, reversibleBlocks int) []*fetch.BlockDigest {
 	blkDigestList := make([]*fetch.BlockDigest, 0)
 
 	var latestBlockList []*model.Block
@@ -149,49 +146,21 @@ func loadLatestBlock(clients []*rpc.Client, db *gorm.DB, startHeight uint64, rev
 		} else {
 			fetchHeight = startHeight - 1
 		}
-		/*
-			fullblock := fetch.FetchFullBlock(0, -1, clients[0], fetchHeight)
-			if fullblock == nil {
-				logrus.Errorf("startup fetch fullblock failed. height:%v", fetchHeight)
-				os.Exit(0)
-			}
 
-			if startHeight == 0 || startHeight == math.MaxUint64 {
-				block := &model.Block{
-					Height:     0,
-					BlockHash:  fullblock.Block.BlockHash,
-					ParentHash: fullblock.Block.ParentHash,
-				}
-
-				if err := db.Create(block).Error; err != nil {
-					logrus.Errorf("insert genesis block to db failed. err:%v", err)
-					os.Exit(0)
-				}
-			}
-
-			lookbackBlockList = append(lookbackBlockList, &model.Block{
-				Height:     fullblock.Block.Height,
-				BlockHash:  fullblock.Block.BlockHash,
-				ParentHash: fullblock.Block.ParentHash,
-			})
-		*/
-
-		blockNum := new(big.Int).SetUint64(fetchHeight)
-		var blkJson fetch.BlockHeaderJson
-
-		if err := clients[0].Call(&blkJson, "eth_getBlockByNumber", util.ToBlockNumArg(blockNum), false); err != nil {
-			logrus.Warnf("startup failed to get specific block. height:%v err:%v", blockNum.String(), err)
+		header, err := clients[0].HeaderByNumber(context.Background(), new(big.Int).SetUint64(fetchHeight))
+		if err != nil {
+			logrus.Warnf("startup failed to get block header. height:%v err:%v", fetchHeight, err)
 			os.Exit(0)
 		}
 
-		if blkJson.Number == "" {
-			logrus.Warnf("startup get empty block. height:%v", blockNum.Uint64())
+		if header == nil {
+			logrus.Warnf("startup get empty block. height:%v", fetchHeight)
 			os.Exit(0)
 		}
 
-		startBlockHeight := hexutil.MustDecodeUint64(blkJson.Number)
-		startBlockHash := blkJson.Hash
-		startBlockParentHash := blkJson.ParentHash
+		startBlockHeight := header.Number.Uint64()
+		startBlockHash := header.Hash().Hex()
+		startBlockParentHash := header.ParentHash.Hex()
 
 		block := &model.Block{
 			Height:     startBlockHeight,

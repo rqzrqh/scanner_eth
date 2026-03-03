@@ -1,9 +1,11 @@
 package protocol
 
 type Erc20PaymentTransferEvent struct {
-	Token  string
-	From   string
-	To     string
-	Amount string
-	Memo   string
+	TxHash     string `json:"tx_hash"`
+	EventIndex uint   `json:"event_index"`
+	Token      string `json:"token"`
+	From       string `json:"from"`
+	To         string `json:"to"`
+	Amount     string `json:"amount"`
+	Memo       string `json:"memo"`
 }

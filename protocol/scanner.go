@@ -12,13 +12,17 @@ type ChainBinlog struct {
 	MessageId  uint64          `json:"message_id"`
 	ActionType ChainActionType `json:"action_type"`
 	Height     uint64          `json:"height"`
-	FullBlock  *FullBlock      `json:"full_block"`
+	Data       []byte          `json:"full_block"`
 }
 
 type FullBlock struct {
-	Block      *Block    `json:"block"`
-	FullTxList []*FullTx `json:"full_tx_list"`
-	StateSet   *StateSet `json:"state_set"`
+	Block               *Block    `json:"block"`
+	StateSet            *StateSet `json:"state_set"`
+	MemeEvent           []interface{} `json:"meme_event"`
+	Erc20PaymentEvent   []interface{} `json:"erc20_payment_event"`
+	HybridNftEvent      []interface{} `json:"hybrid_nft_event"`
+	NftMarketplaceEvent []interface{} `json:"nft_marketplace_event"`
+	UniswapV2Event      []interface{} `json:"uniswap_v2_event"`
 }
 
 type Block struct {
@@ -41,77 +45,6 @@ type Block struct {
 	TransactionRoot string `json:"transaction_root"`
 	ReceiptRoot     string `json:"receipt_root"`
 	ExtraData       string `json:"extra_data"`
-}
-
-type FullTx struct {
-	Tx               *Tx             `json:"tx"`
-	FullEventLogList []*FullEventLog `json:"full_event_log_list"`
-	TxInternalList   []*TxInternal   `json:"tx_internal_list"`
-	ContractList     []*Contract     `json:"contract_list"`
-}
-
-type Tx struct {
-	TxHash               string `json:"tx_hash"`
-	TxType               int    `json:"tx_type"`
-	From                 string `json:"from"`
-	To                   string `json:"to"`
-	Nonce                uint64 `json:"nonce"`
-	GasLimit             uint64 `json:"gas_limit"`
-	GasPrice             string `json:"gas_price"`
-	GasUsed              uint64 `json:"gas_used"`
-	BaseFee              string `json:"base_fee"`
-	BurntFees            string `json:"burnt_fees"`
-	MaxFeePerGas         string `json:"max_fee_per_gas"`
-	MaxPriorityFeePerGas string `json:"max_priority_fee_per_gas"`
-	Value                string `json:"value"`
-	Input                string `json:"input"`
-	ExecStatus           uint64 `json:"exec_status"`
-	IsCallContract       bool   `json:"is_call_contract"`
-	IsCreateContract     bool   `json:"is_create_contract"`
-}
-
-type TxInternal struct {
-	From         string `json:"from"`
-	To           string `json:"to"`
-	OpCode       string `json:"op_code"`
-	Value        string `json:"value"`
-	Success      bool   `json:"success"`
-	Depth        int    `json:"call_depth"`
-	Gas          uint64 `json:"gas"`
-	GasUsed      uint64 `json:"gas_used"`
-	Input        string `json:"input"`
-	Output       string `json:"output"`
-	TraceAddress string `json:"trace_address"`
-}
-
-type FullEventLog struct {
-	EventLog              *EventLog               `json:"event_log"`
-	EventErc20Transfer    *EventErc20Transfer     `json:"event_erc20_transfer"`
-	EventErc721Transfer   *EventErc721Transfer    `json:"event_erc721_transfer"`
-	EventErc1155Transfers []*EventErc1155Transfer `json:"event_erc1155_transfer"`
-
-	MemeEvent           interface{}
-	Erc20PaymentEvent   interface{}
-	HybridNftEvent      interface{}
-	NftMarketplaceEvent interface{}
-	UniswapV2Event      interface{}
-}
-
-type EventLog struct {
-	IndexInBlock uint   `json:"index_in_block"`
-	ContractAddr string `json:"contract_addr"`
-	TopicCount   uint   `json:"topic_count"`
-	Topic0       string `json:"topic0"`
-	Topic1       string `json:"topic1"`
-	Topic2       string `json:"topic2"`
-	Topic3       string `json:"topic3"`
-	Data         []byte `json:"data"`
-}
-
-type Contract struct {
-	ContractAddr string `json:"contract_addr"`
-	CreatorAddr  string `json:"creator_addr"`
-	ExecStatus   uint64 `json:"exec_status"`
 }
 
 type StateSet struct {

@@ -1,6 +1,8 @@
 package protocol
 
 type NftMarketplaceItemListed struct {
+	TxHash       string `json:"tx_hash"`
+	EventIndex   uint   `json:"event_index"`
 	ListingId    string `json:"listing_id" gorm:"type:varchar(66);uniqueIndex;not null"`
 	Seller       string `json:"seller" gorm:"type:varchar(42);not null;index"`
 	NFTContract  string `json:"nft_contract" gorm:"type:varchar(42);not null;index"`
@@ -10,6 +12,8 @@ type NftMarketplaceItemListed struct {
 }
 
 type ItemSold struct {
+	TxHash       string `json:"tx_hash"`
+	EventIndex   uint   `json:"event_index"`
 	ListingId    string `json:"listing_id"`
 	Buyer        string `json:"buyer"`
 	Seller       string `json:"seller"`
@@ -20,6 +24,8 @@ type ItemSold struct {
 }
 
 type NftMarketplaceOffer struct {
+	TxHash       string `json:"tx_hash"`
+	EventIndex   uint   `json:"event_index"`
 	OfferId      string `json:"offer_id" gorm:"uniqueIndex;not null"`
 	Buyer        string `json:"buyer" gorm:"type:varchar(42);not null;index"`
 	NFTContract  string `json:"nft_contract" gorm:"type:varchar(42);not null;index"`
@@ -29,6 +35,8 @@ type NftMarketplaceOffer struct {
 }
 
 type NftMarketplaceBatchOffer struct {
+	TxHash       string `json:"tx_hash"`
+	EventIndex   uint   `json:"event_index"`
 	BatchOfferId string `json:"batch_offer_id" gorm:"uniqueIndex;not null"`
 	Buyer        string `json:"buyer" gorm:"type:varchar(42);not null;index"`
 	NFTContract  string `json:"nft_contract" gorm:"type:varchar(42);not null;index"`
@@ -39,16 +47,22 @@ type NftMarketplaceBatchOffer struct {
 }
 
 type NftMarketplaceListingCancelled struct {
-	ListingId string `json:"listing_id" gorm:"type:varchar(66);uniqueIndex;not null"`
-	Seller    string `json:"seller" gorm:"type:varchar(42);not null;index"`
+	TxHash     string `json:"tx_hash"`
+	EventIndex uint   `json:"event_index"`
+	ListingId  string `json:"listing_id" gorm:"type:varchar(66);uniqueIndex;not null"`
+	Seller     string `json:"seller" gorm:"type:varchar(42);not null;index"`
 }
 
 type NftMarketplacePriceUpdated struct {
-	ListingId string `json:"listing_id" gorm:"type:varchar(66);not null;index"`
-	NewPrice  string `json:"new_price" gorm:"type:varchar(100);not null"`
+	TxHash     string `json:"tx_hash"`
+	EventIndex uint   `json:"event_index"`
+	ListingId  string `json:"listing_id" gorm:"type:varchar(66);not null;index"`
+	NewPrice   string `json:"new_price" gorm:"type:varchar(100);not null"`
 }
 
 type NftMarketplaceOfferAccepted struct {
+	TxHash       string `json:"tx_hash"`
+	EventIndex   uint   `json:"event_index"`
 	OfferId      string `json:"offer_id" gorm:"not null;index"`
 	Seller       string `json:"seller" gorm:"type:varchar(42);not null;index"`
 	Buyer        string `json:"buyer" gorm:"type:varchar(42);not null;index"`
@@ -59,11 +73,15 @@ type NftMarketplaceOfferAccepted struct {
 }
 
 type NftMarketplaceOfferCancelled struct {
-	OfferId string `json:"offer_id" gorm:"not null;index"`
-	Buyer   string `json:"buyer" gorm:"type:varchar(42);not null;index"`
+	TxHash     string `json:"tx_hash"`
+	EventIndex uint   `json:"event_index"`
+	OfferId    string `json:"offer_id" gorm:"not null;index"`
+	Buyer      string `json:"buyer" gorm:"type:varchar(42);not null;index"`
 }
 
 type NftMarketplaceBatchOfferAccepted struct {
+	TxHash       string   `json:"tx_hash"`
+	EventIndex   uint     `json:"event_index"`
 	BatchOfferId string   `json:"batch_offer_id" gorm:"not null;index"`
 	Seller       string   `json:"seller" gorm:"type:varchar(42);not null;index"`
 	Buyer        string   `json:"buyer" gorm:"type:varchar(42);not null;index"`
@@ -74,11 +92,15 @@ type NftMarketplaceBatchOfferAccepted struct {
 }
 
 type NftMarketplaceBatchOfferCancelled struct {
+	TxHash       string `json:"tx_hash"`
+	EventIndex   uint   `json:"event_index"`
 	BatchOfferId string `json:"batch_offer_id" gorm:"not null;index"`
 	Buyer        string `json:"buyer" gorm:"type:varchar(42);not null;index"`
 }
 
 type NftMarketplaceBatchPurchase struct {
+	TxHash       string   `json:"tx_hash"`
+	EventIndex   uint     `json:"event_index"`
 	Buyer        string   `json:"buyer" gorm:"type:varchar(42);not null;index"`
 	NFTContract  string   `json:"nft_contract" gorm:"type:varchar(42);not null;index"`
 	TokenIds     []string `json:"token_ids" gorm:"type:json;serializer:json"`

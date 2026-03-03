@@ -3,7 +3,7 @@ package filter
 import (
 	"math/big"
 	"os"
-	"scanner_eth/protocol"
+	"scanner_eth/data"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -64,7 +64,7 @@ func isErc1155BatchTransferEvent(topic0, topic1, topic2, topic3 string) bool {
 	return topic0 == erc1155BatchTransfer && topic1 != "" && topic2 != "" && topic3 != ""
 }
 
-func FilterErc20TransferEvent(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string) *protocol.EventErc20Transfer {
+func FilterErc20TransferEvent(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string) *data.EventErc20Transfer {
 
 	if !isErc20TransferEvent(topic0, topic1, topic2, topic3) {
 		return nil
@@ -87,7 +87,7 @@ func FilterErc20TransferEvent(txHash string, eventLog *eth_types.Log, contractAd
 		}
 	*/
 	// tx erc20
-	eventErc20Transfer := &protocol.EventErc20Transfer{
+	eventErc20Transfer := &data.EventErc20Transfer{
 		ContractAddr: contractAddr,
 		From:         sender,
 		To:           receiver,
@@ -108,7 +108,7 @@ func FilterErc20TransferEvent(txHash string, eventLog *eth_types.Log, contractAd
 	*/
 }
 
-func FilterErc721TransferEvent(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string) *protocol.EventErc721Transfer {
+func FilterErc721TransferEvent(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string) *data.EventErc721Transfer {
 	if !isErc721TransferEvent(topic0, topic1, topic2, topic3) {
 		return nil
 	}
@@ -118,7 +118,7 @@ func FilterErc721TransferEvent(txHash string, eventLog *eth_types.Log, contractA
 	tokenId := new(big.Int).SetBytes(common.HexToHash(topic3).Bytes()).String()
 
 	// tx erc721
-	eventErc721Transfer := &protocol.EventErc721Transfer{
+	eventErc721Transfer := &data.EventErc721Transfer{
 		ContractAddr: contractAddr,
 		From:         sender,
 		To:           receiver,
@@ -145,7 +145,7 @@ func FilterErc721TransferEvent(txHash string, eventLog *eth_types.Log, contractA
 	return eventErc721Transfer
 }
 
-func FilterErc1155SingleTransferEvent(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string) *protocol.EventErc1155Transfer {
+func FilterErc1155SingleTransferEvent(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string) *data.EventErc1155Transfer {
 	if !isErc1155SingleTransferEvent(topic0, topic1, topic2, topic3) {
 		return nil
 	}
@@ -181,7 +181,7 @@ func FilterErc1155SingleTransferEvent(txHash string, eventLog *eth_types.Log, co
 	tokens := eventNonIndexedData.Value
 	amount := tokens.String()
 
-	eventErc1155Transfer := &protocol.EventErc1155Transfer{
+	eventErc1155Transfer := &data.EventErc1155Transfer{
 		ContractAddr: contractAddr,
 		Operator:     operator,
 		From:         sender,
@@ -201,10 +201,10 @@ func FilterErc1155SingleTransferEvent(txHash string, eventLog *eth_types.Log, co
 	*/
 }
 
-func FilterErc1155BatchTransferEvent(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string) []*protocol.EventErc1155Transfer {
+func FilterErc1155BatchTransferEvent(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string) []*data.EventErc1155Transfer {
 
 	if !isErc1155BatchTransferEvent(topic0, topic1, topic2, topic3) {
-		return []*protocol.EventErc1155Transfer{}
+		return []*data.EventErc1155Transfer{}
 	}
 
 	var eventNonIndexedData struct {
@@ -214,21 +214,21 @@ func FilterErc1155BatchTransferEvent(txHash string, eventLog *eth_types.Log, con
 
 	if err := Erc1155ABI.UnpackIntoInterface(&eventNonIndexedData, "TransferBatch", eventLog.Data); err != nil {
 		logrus.Errorf("erc1155 batch UnpackIntoInterface err:%v height:%v", err, height)
-		return []*protocol.EventErc1155Transfer{}
+		return []*data.EventErc1155Transfer{}
 	}
 
 	ids := eventNonIndexedData.Ids
 	values := eventNonIndexedData.Values
 	if len(values) != len(ids) {
 		logrus.Warnf("erc1155 batch nonstandard tx_hash:%v index:%v height:%v", txHash, eventLog.Index, height)
-		return []*protocol.EventErc1155Transfer{}
+		return []*data.EventErc1155Transfer{}
 	}
 
 	operator := strings.ToLower(common.HexToAddress(topic1).Hex())
 	sender := strings.ToLower(common.HexToAddress(topic2).Hex())
 	receiver := strings.ToLower(common.HexToAddress(topic3).Hex())
 
-	eventErc1155Transfers := make([]*protocol.EventErc1155Transfer, 0, len(ids))
+	eventErc1155Transfers := make([]*data.EventErc1155Transfer, 0, len(ids))
 
 	for index, id := range ids {
 
@@ -237,7 +237,7 @@ func FilterErc1155BatchTransferEvent(txHash string, eventLog *eth_types.Log, con
 		// tx erc1155
 		amount := values[index].String()
 
-		eventErc1155Transfer := &protocol.EventErc1155Transfer{
+		eventErc1155Transfer := &data.EventErc1155Transfer{
 			ContractAddr: contractAddr,
 			Operator:     operator,
 			From:         sender,

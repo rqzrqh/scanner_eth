@@ -1,12 +1,12 @@
 package fetch
 
 import (
-	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"golang.org/x/xerrors"
 )
 
 type NodeState struct {
-	client  *rpc.Client
+	client  *ethclient.Client
 	remote  *RemoteChain
 	times   uint64
 	delay   int64
@@ -23,7 +23,7 @@ type NodeManager struct {
 	nodes []*NodeState
 }
 
-func NewNodeManager(clients []*rpc.Client) *NodeManager {
+func NewNodeManager(clients []*ethclient.Client) *NodeManager {
 	nodes := make([]*NodeState, len(clients))
 	for i, client := range clients {
 		nodes[i] = &NodeState{
@@ -89,7 +89,7 @@ func (nm *NodeManager) SetNodeIdle(id int) {
 	node.isBusy = false
 }
 
-func (nm *NodeManager) GetBestNode(height uint64) (int, *rpc.Client, error) {
+func (nm *NodeManager) GetBestNode(height uint64) (int, *ethclient.Client, error) {
 
 	nodeId := -1
 	for i, node := range nm.nodes {

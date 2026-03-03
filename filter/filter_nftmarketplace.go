@@ -3,7 +3,7 @@ package filter
 import (
 	"math/big"
 	"os"
-	"scanner_eth/protocol"
+	"scanner_eth/data"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -96,7 +96,7 @@ func filterItemListed(txHash string, eventLog *eth_types.Log, contractAddr strin
 		os.Exit(0)
 	}
 
-	event := &protocol.NftMarketplaceItemListed{
+	event := &data.NftMarketplaceItemListed{
 		ListingId:    listingId,
 		Seller:       seller,
 		NFTContract:  nftContract,
@@ -131,7 +131,7 @@ func filterItemSold(txHash string, eventLog *eth_types.Log, contractAddr string,
 		os.Exit(0)
 	}
 
-	evt := &protocol.ItemSold{
+	evt := &data.ItemSold{
 		ListingId:    listingId,
 		Buyer:        buyer,
 		Seller:       seller,
@@ -153,7 +153,7 @@ func filterListingCancelled(txHash string, eventLog *eth_types.Log, contractAddr
 
 	listingId := strings.ToLower(common.HexToHash(topic1).Hex())
 
-	evt := &protocol.NftMarketplaceListingCancelled{
+	evt := &data.NftMarketplaceListingCancelled{
 		ListingId: listingId,
 		Seller:    strings.ToLower(common.HexToAddress(topic2).Hex()),
 	}
@@ -179,7 +179,7 @@ func filterPriceUpdated(txHash string, eventLog *eth_types.Log, contractAddr str
 		os.Exit(0)
 	}
 
-	evt := &protocol.NftMarketplacePriceUpdated{
+	evt := &data.NftMarketplacePriceUpdated{
 		ListingId: listingId,
 		NewPrice:  eventNonIndexedData.NewPrice.String(),
 	}
@@ -207,7 +207,7 @@ func filterOfferMade(txHash string, eventLog *eth_types.Log, contractAddr string
 		os.Exit(0)
 	}
 
-	evt := &protocol.NftMarketplaceOffer{
+	evt := &data.NftMarketplaceOffer{
 		OfferId:      offerId,
 		Buyer:        strings.ToLower(common.HexToAddress(topic2).Hex()),
 		NFTContract:  strings.ToLower(common.HexToAddress(topic3).Hex()),
@@ -240,7 +240,7 @@ func filterOfferAccepted(txHash string, eventLog *eth_types.Log, contractAddr st
 		os.Exit(0)
 	}
 
-	evt := &protocol.NftMarketplaceOfferAccepted{
+	evt := &data.NftMarketplaceOfferAccepted{
 		OfferId:      offerId,
 		Seller:       strings.ToLower(common.HexToAddress(topic2).Hex()),
 		Buyer:        strings.ToLower(common.HexToAddress(topic3).Hex()),
@@ -263,7 +263,7 @@ func filterOfferCancelled(txHash string, eventLog *eth_types.Log, contractAddr s
 	offerId := new(big.Int).SetBytes(common.HexToHash(topic1).Bytes()).String()
 	buyer := strings.ToLower(common.HexToAddress(topic2).Hex())
 
-	evt := &protocol.NftMarketplaceOfferCancelled{
+	evt := &data.NftMarketplaceOfferCancelled{
 		OfferId: offerId,
 		Buyer:   buyer,
 	}
@@ -294,7 +294,7 @@ func filterBatchOfferMade(txHash string, eventLog *eth_types.Log, contractAddr s
 		os.Exit(0)
 	}
 
-	evt := &protocol.NftMarketplaceBatchOffer{
+	evt := &data.NftMarketplaceBatchOffer{
 		BatchOfferId: batchOfferId,
 		Buyer:        buyer,
 		NFTContract:  nftContract,
@@ -335,7 +335,7 @@ func filterBatchOfferAccepted(txHash string, eventLog *eth_types.Log, contractAd
 		strTokenIds[i] = tokenId.String()
 	}
 
-	evt := &protocol.NftMarketplaceBatchOfferAccepted{
+	evt := &data.NftMarketplaceBatchOfferAccepted{
 		BatchOfferId: batchOfferId,
 		Seller:       seller,
 		Buyer:        buyer,
@@ -358,7 +358,7 @@ func filterBatchOfferCancelled(txHash string, eventLog *eth_types.Log, contractA
 	batchOfferId := new(big.Int).SetBytes(common.HexToHash(topic1).Bytes()).String()
 	buyer := strings.ToLower(common.HexToAddress(topic2).Hex())
 
-	evt := &protocol.NftMarketplaceBatchOfferCancelled{
+	evt := &data.NftMarketplaceBatchOfferCancelled{
 		BatchOfferId: batchOfferId,
 		Buyer:        buyer,
 	}
@@ -392,7 +392,7 @@ func filterBatchPurchase(txHash string, eventLog *eth_types.Log, contractAddr st
 		strTokenIds[i] = tokenId.String()
 	}
 
-	evt := &protocol.NftMarketplaceBatchPurchase{
+	evt := &data.NftMarketplaceBatchPurchase{
 		Buyer:        buyer,
 		NFTContract:  nftContract,
 		TokenIds:     strTokenIds,

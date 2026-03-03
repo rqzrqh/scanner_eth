@@ -1,6 +1,8 @@
 package protocol
 
 type EventErc20Transfer struct {
+	TxHash       string `json:"tx_hash"`
+	EventIndex   uint   `json:"event_index"`
 	ContractAddr string `json:"contract_addr"`
 	From         string `json:"from"`
 	To           string `json:"to"`
@@ -8,6 +10,8 @@ type EventErc20Transfer struct {
 }
 
 type EventErc721Transfer struct {
+	TxHash       string `json:"tx_hash"`
+	EventIndex   uint   `json:"event_index"`
 	ContractAddr string `json:"contract_addr"`
 	From         string `json:"from"`
 	To           string `json:"to"`
@@ -15,6 +19,8 @@ type EventErc721Transfer struct {
 }
 
 type EventErc1155Transfer struct {
+	TxHash       string `json:"tx_hash"`
+	EventIndex   uint   `json:"event_index"`
 	ContractAddr string `json:"contract_addr"`
 	Operator     string `json:"operator"`
 	From         string `json:"from"`

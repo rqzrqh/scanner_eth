@@ -3,7 +3,7 @@ package filter
 import (
 	"encoding/hex"
 	"os"
-	"scanner_eth/protocol"
+	"scanner_eth/data"
 	"strings"
 
 	"math/big"
@@ -63,7 +63,7 @@ func filterErc20PaymentTransfer(txHash string, eventLog *eth_types.Log, contract
 		os.Exit(0)
 	}
 
-	event := &protocol.Erc20PaymentTransferEvent{
+	event := &data.Erc20PaymentTransferEvent{
 		Token:  token,
 		From:   from,
 		To:     to,

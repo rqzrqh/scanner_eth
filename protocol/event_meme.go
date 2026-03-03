@@ -1,32 +1,38 @@
 package protocol
 
 type MemeTokenLaunched struct {
-	Token         string
-	Name          string
-	Symbol        string
-	Creator       string
-	VReserveEth   string
-	VReserveToken string
-	TotalSupply   string
-	AutoBuyAmount string
-	Pair          string
+	TxHash        string `json:"tx_hash"`
+	EventIndex    uint   `json:"event_index"`
+	Token         string `json:"token"`
+	Name          string `json:"name"`
+	Symbol        string `json:"symbol"`
+	Creator       string `json:"creator"`
+	VReserveEth   string `json:"v_reserve_eth"`
+	VReserveToken string `json:"v_reserve_token"`
+	TotalSupply   string `json:"total_supply"`
+	AutoBuyAmount string `json:"auto_buy_amount"`
+	Pair          string `json:"pair"`
 }
 
 type MemeTrade struct {
-	Token         string
-	EthAmount     string
-	EthFeeAmount  string
-	TokenAmount   string
-	IsBuy         bool
-	User          string
-	VReserveEth   string
-	VReserveToken string
+	TxHash        string `json:"tx_hash"`
+	EventIndex    uint   `json:"event_index"`
+	Token         string `json:"token"`
+	EthAmount     string `json:"eth_amount"`
+	EthFeeAmount  string `json:"eth_fee_amount"`
+	TokenAmount   string `json:"token_amount"`
+	IsBuy         bool   `json:"is_buy"`
+	User          string `json:"user"`
+	VReserveEth   string `json:"v_reserve_eth"`
+	VReserveToken string `json:"v_reserve_token"`
 }
 
 type MemeLiquiditySwapped struct {
-	Token         string
-	EthAmount     string
-	TokenAmount   string
-	VReserveEth   string
-	VReserveToken string
+	TxHash        string `json:"tx_hash"`
+	EventIndex    uint   `json:"event_index"`
+	Token         string `json:"token"`
+	EthAmount     string `json:"eth_amount"`
+	TokenAmount   string `json:"token_amount"`
+	VReserveEth   string `json:"v_reserve_eth"`
+	VReserveToken string `json:"v_reserve_token"`
 }

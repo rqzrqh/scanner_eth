@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/segmentio/kafka-go"
 	"github.com/sirupsen/logrus"
@@ -147,7 +148,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	clients := make([]*rpc.Client, rpcNodeCount)
+	clients := make([]*ethclient.Client, rpcNodeCount)
 	for i, url := range conf.Fetch.RpcNodes {
 
 		customClient := &http.Client{
@@ -157,15 +158,15 @@ func main() {
 			Timeout: conf.Fetch.Timeout,
 		}
 
-		client, err := rpc.DialOptions(context.Background(), url, rpc.WithHTTPClient(customClient))
+		rpcClient, err := rpc.DialOptions(context.Background(), url, rpc.WithHTTPClient(customClient))
 		if err != nil {
 			logrus.Errorf("rpc dial failed idx:%d %v", i, err)
 			os.Exit(0)
 		}
-		clients[i] = client
+		clients[i] = ethclient.NewClient(rpcClient)
 	}
 
-	logrus.Infof("create rpc client success")
+	logrus.Infof("create eth client success")
 
 	chainId, genesisBlockHash, messageId, publishedMessageId := getScannerInfo(db)
 
