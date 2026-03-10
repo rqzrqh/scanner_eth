@@ -346,7 +346,6 @@ func convertStorageFullBlock(fullblock *data.FullBlock) *StorageFullBlock {
 	eventErc20TransferList := make([]model.EventErc20Transfer, 0)
 	eventErc721TransferList := make([]model.EventErc721Transfer, 0)
 	eventErc1155TransferList := make([]model.EventErc1155Transfer, 0)
-	contractList := make([]model.Contract, 0)
 
 	for txIndex, fullTx := range fullblock.FullTxList {
 		txHash := fullTx.Tx.TxHash
@@ -388,22 +387,9 @@ func convertStorageFullBlock(fullblock *data.FullBlock) *StorageFullBlock {
 			// }
 		}
 
-		if optionalContract {
-			for _, contract := range fullTx.ContractList {
-				modelContract := model.Contract{
-					Height:       blockHeight,
-					TxHash:       txHash,
-					ContractAddr: contract.ContractAddr,
-					CreatorAddr:  contract.CreatorAddr,
-					ExecStatus:   contract.ExecStatus,
-				}
-				contractList = append(contractList, modelContract)
-			}
-		}
-
 		for indexInTx, fullEventLog := range fullTx.FullEventLogList {
 
-			if optionalEventLog {
+			if optionalEventLog && fullEventLog.EventLog != nil {
 				log := fullEventLog.EventLog
 				modelLog := model.EventLog{
 					Height:       blockHeight,
@@ -421,7 +407,7 @@ func convertStorageFullBlock(fullblock *data.FullBlock) *StorageFullBlock {
 				eventLogList = append(eventLogList, modelLog)
 			}
 
-			if optionalEventErc20Transfer {
+			if optionalEventErc20Transfer && fullEventLog.EventErc20Transfer != nil {
 				transfer := fullEventLog.EventErc20Transfer
 				modelTransfer := model.EventErc20Transfer{
 					Height:       blockHeight,
@@ -435,7 +421,7 @@ func convertStorageFullBlock(fullblock *data.FullBlock) *StorageFullBlock {
 				eventErc20TransferList = append(eventErc20TransferList, modelTransfer)
 			}
 
-			if optionalEventErc721Transfer {
+			if optionalEventErc721Transfer && fullEventLog.EventErc721Transfer != nil {
 				transfer := fullEventLog.EventErc721Transfer
 				modelTransfer := model.EventErc721Transfer{
 					Height:       blockHeight,
@@ -449,7 +435,7 @@ func convertStorageFullBlock(fullblock *data.FullBlock) *StorageFullBlock {
 				eventErc721TransferList = append(eventErc721TransferList, modelTransfer)
 			}
 
-			if optionalEventErc1155Transfer {
+			if optionalEventErc1155Transfer && fullEventLog.EventErc1155Transfers != nil {
 				for indexInBatch, transfer := range fullEventLog.EventErc1155Transfers {
 					modelTransfer := model.EventErc1155Transfer{
 						Height:       blockHeight,
@@ -470,6 +456,21 @@ func convertStorageFullBlock(fullblock *data.FullBlock) *StorageFullBlock {
 	}
 
 	stateSet := fullblock.StateSet
+
+	contractList := make([]model.Contract, 0, len(stateSet.ContractList))
+	if optionalContract {
+		for _, contract := range stateSet.ContractList {
+			modelContract := model.Contract{
+				Height:       blockHeight,
+				TxHash:       contract.TxHash,
+				ContractAddr: contract.ContractAddr,
+				CreatorAddr:  contract.CreatorAddr,
+				ExecStatus:   contract.ExecStatus,
+			}
+			contractList = append(contractList, modelContract)
+		}
+	}
+
 	contractErc20List := make([]model.ContractErc20, 0, len(stateSet.ContractErc20List))
 	if optionalContractErc20 {
 		for _, contract := range stateSet.ContractErc20List {

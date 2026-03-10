@@ -247,11 +247,21 @@ func FetchFullBlock(nodeId int, taskId int, client *ethclient.Client, height uin
 	balanceNativeAddress := make(map[string]struct{}, 0)
 	balanceErc20Address := make(map[string]map[string]struct{}, 0)
 
+	// 按合约地址去重合并 contract
+	contractSeen := make(map[string]struct{})
 	contractList := make([]*data.Contract, 0, len(txParseResult.ContractList)+len(internalTxParseResult.InternalContractList))
-	contractList = append(contractList, txParseResult.ContractList...)
-	contractList = append(contractList, internalTxParseResult.InternalContractList...)
-
-	// merge contract
+	for _, c := range txParseResult.ContractList {
+		if _, ok := contractSeen[c.ContractAddr]; !ok {
+			contractSeen[c.ContractAddr] = struct{}{}
+			contractList = append(contractList, c)
+		}
+	}
+	for _, c := range internalTxParseResult.InternalContractList {
+		if _, ok := contractSeen[c.ContractAddr]; !ok {
+			contractSeen[c.ContractAddr] = struct{}{}
+			contractList = append(contractList, c)
+		}
+	}
 
 	// get all accounts's native token balance whose native balance has been changed
 	for k := range txParseResult.BalanceNativeAddress {
@@ -416,6 +426,7 @@ func FetchFullBlock(nodeId int, taskId int, client *ethclient.Client, height uin
 		FullTxList: txParseResult.FullTxList,
 
 		StateSet: &data.StateSet{
+			ContractList:       contractList,
 			ContractErc20List:  contractErc20List,
 			ContractErc721List: contractErc721List,
 
@@ -459,6 +470,7 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 			if receipt.Status == 1 {
 				isCreateContract = true
 				contract := &data.Contract{
+					TxHash:       txHash,
 					ContractAddr: strings.ToLower(receipt.ContractAddress.Hex()),
 					CreatorAddr:  fromAddr,
 					ExecStatus:   receipt.Status,
@@ -570,6 +582,8 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 			fullEventLog := &data.FullEventLog{
 				EventLog: eventLog,
 			}
+
+			fullEventList = append(fullEventList, fullEventLog)
 
 			// erc20 transfer
 			eventErc20Transfer := filter.FilterErc20TransferEvent(txHash, txLog, contractAddr, height, topic0, topic1, topic2, topic3)
@@ -725,7 +739,6 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 			Tx:               tx,
 			FullEventLogList: fullEventList,
 			TxInternalList:   nil,
-			ContractList:     nil,
 		}
 
 		fullTxList = append(fullTxList, &fullTx)

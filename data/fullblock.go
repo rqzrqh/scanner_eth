@@ -32,7 +32,6 @@ type FullTx struct {
 	Tx               *Tx
 	FullEventLogList []*FullEventLog
 	TxInternalList   []*TxInternal
-	ContractList     []*Contract
 }
 
 type Tx struct {
@@ -94,12 +93,14 @@ type EventLog struct {
 }
 
 type Contract struct {
+	TxHash       string
 	ContractAddr string
 	CreatorAddr  string
 	ExecStatus   uint64
 }
 
 type StateSet struct {
+	ContractList       []*Contract
 	ContractErc20List  []*ContractErc20
 	ContractErc721List []*ContractErc721
 	BalanceNativeList  []*BalanceNative
