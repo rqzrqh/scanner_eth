@@ -74,7 +74,7 @@ func newSyncer(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, w 
 	}
 
 	localChain := fetch.NewLocalChain(reversibleBlocks, blkDigestList)
-	fm := fetch.NewFetchManager(clients, localChain, endHeight, maxUnorganizedBlockCount, remoteChainUpdateChannel, storeOperationChannel)
+	fm := fetch.NewFetchManager(clients, localChain, endHeight, maxUnorganizedBlockCount, remoteChainUpdateChannel, storeOperationChannel, db)
 
 	hns := make([]*fetch.HeaderNotifier, len(clients))
 	for i, client := range clients {

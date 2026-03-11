@@ -16,6 +16,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 )
 
 var (
@@ -44,16 +45,18 @@ type FetchWorker struct {
 	nodeId                   int
 	taskId                   int
 	client                   *ethclient.Client
+	db                       *gorm.DB
 	height                   uint64
 	forkVersion              uint64
 	fetchResultNotifyChannel chan<- *FetchResult
 }
 
-func NewFetchWorker(nodeId int, taskId int, client *ethclient.Client, height uint64, forkVersion uint64, fetchResultNotifyChannel chan<- *FetchResult) *FetchWorker {
+func NewFetchWorker(nodeId int, taskId int, client *ethclient.Client, db *gorm.DB, height uint64, forkVersion uint64, fetchResultNotifyChannel chan<- *FetchResult) *FetchWorker {
 	return &FetchWorker{
 		nodeId:                   nodeId,
 		taskId:                   taskId,
 		client:                   client,
+		db:                       db,
 		height:                   height,
 		forkVersion:              forkVersion,
 		fetchResultNotifyChannel: fetchResultNotifyChannel,
@@ -100,7 +103,7 @@ func (fw *FetchWorker) Run() {
 }
 
 func (fw *FetchWorker) fetch(height uint64) *data.FullBlock {
-	return FetchFullBlock(fw.nodeId, fw.taskId, fw.client, height)
+	return FetchFullBlock(fw.nodeId, fw.taskId, fw.client, fw.db, height)
 }
 
 func transTraceAddressToString(opcode string, traceAddress []uint64) string {
@@ -133,7 +136,7 @@ type InternalTxParseResult struct {
 // fetch receipts and internal tx
 // fetch latest state, like erc20/erc721/erc1155 token info
 // the reason why not fetch the state of one specific height is fast node always lack historical state, only archive node has it.
-func FetchFullBlock(nodeId int, taskId int, client *ethclient.Client, height uint64) *data.FullBlock {
+func FetchFullBlock(nodeId int, taskId int, client *ethclient.Client, db *gorm.DB, height uint64) *data.FullBlock {
 	blkJson := &BlockJson{}
 	// fetch block with txs
 	{
@@ -359,48 +362,50 @@ func FetchFullBlock(nodeId int, taskId int, client *ethclient.Client, height uin
 		}
 	}
 
-	// get new erc20 contract info
+	// get new erc20 contract info（先查缓存，不存在则向节点获取）
 	contractErc20List := make([]*data.ContractErc20, 0, len(erc20AddrsMerged))
 	{
-		// TODO check if in database
 		for k := range erc20AddrsMerged {
-			addr := common.HexToAddress(k)
-			contractErc20, err := fetchContractErc20(client, &addr, height)
-			if err != nil {
-				return nil
+			contractErc20, ok := tokenCacheInst.Get(k, db)
+			if !ok {
+				addr := common.HexToAddress(k)
+				var err error
+				contractErc20, err = fetchContractErc20(client, &addr, height)
+				if err != nil {
+					return nil
+				}
 			}
-
 			contractErc20List = append(contractErc20List, contractErc20)
 		}
 	}
 
-	// get new erc721 contract info
+	// get new erc721 contract info（先查缓存，不存在则向节点获取）
 	contractErc721List := make([]*data.ContractErc721, 0, len(txParseResult.Erc721ContractAddrs))
 	{
-		// TODO check if in database
 		for k := range txParseResult.Erc721ContractAddrs {
-			addr := common.HexToAddress(k)
-			contractErc721, err := fetchContractErc721(client, &addr)
-			if err != nil {
-				return nil
+			contractErc721, ok := erc721ContractCacheInst.Get(k, db)
+			if !ok {
+				addr := common.HexToAddress(k)
+				var err error
+				contractErc721, err = fetchContractErc721(client, &addr)
+				if err != nil {
+					return nil
+				}
 			}
-
 			contractErc721List = append(contractErc721List, contractErc721)
 		}
 	}
 
-	// get new erc721 token info
+	// get new erc721 token info（不缓存，直接链上拉取）
 	tokenErc721List := make([]*data.TokenErc721, 0, len(txParseResult.TokenErc721Set))
 	{
 		for k := range txParseResult.TokenErc721Set {
 			contractAddr := common.HexToAddress(k.ContractAddr)
-			var ok bool
-			var tokenId *big.Int
-			if tokenId, ok = new(big.Int).SetString(k.TokenId, 10); !ok {
+			tokenId, ok := new(big.Int).SetString(k.TokenId, 10)
+			if !ok {
 				logrus.Warnf("set string failed for contract:%v tokenId: %v", k.ContractAddr, k.TokenId)
 				continue
 			}
-
 			tokenErc721, err := fetchTokenErc721(client, &contractAddr, tokenId)
 			if err != nil {
 				return nil

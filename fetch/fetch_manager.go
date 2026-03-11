@@ -6,6 +6,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 )
 
 type FetchManager struct {
@@ -13,6 +14,7 @@ type FetchManager struct {
 	localChain               *LocalChain
 	pendingBlocks            *PendingBlocks
 	taskManager              *TaskManager
+	db                       *gorm.DB
 	forkVersion              uint64
 	eventID                  uint64
 	remoteChainUpdateChannel <-chan *types.RemoteChainUpdate
@@ -21,7 +23,10 @@ type FetchManager struct {
 }
 
 func NewFetchManager(clients []*ethclient.Client, localChain *LocalChain, endHeight uint64, maxUnorganizedBlockCount int, remoteChainUpdateChannel <-chan *types.RemoteChainUpdate,
-	storeOperationChannel chan<- *types.StoreOperation) *FetchManager {
+	storeOperationChannel chan<- *types.StoreOperation, db *gorm.DB) *FetchManager {
+
+	InitErc20Cache()
+	InitErc721Cache()
 
 	fetchResultNotifyChannel := make(chan *FetchResult, 100)
 
@@ -30,6 +35,7 @@ func NewFetchManager(clients []*ethclient.Client, localChain *LocalChain, endHei
 		localChain:               localChain,
 		pendingBlocks:            NewPendingBlocks(),
 		taskManager:              NewTaskManager(endHeight, maxUnorganizedBlockCount),
+		db:                       db,
 		forkVersion:              0,
 		eventID:                  0,
 		remoteChainUpdateChannel: remoteChainUpdateChannel,
@@ -154,6 +160,6 @@ func (fm *FetchManager) dispatchTask() {
 	}
 	fm.nodeManager.SetNodeBusy(nodeId)
 
-	worker := NewFetchWorker(nodeId, taskId, client, height, fm.forkVersion, fm.fetchResultNotifyChannel)
+	worker := NewFetchWorker(nodeId, taskId, client, fm.db, height, fm.forkVersion, fm.fetchResultNotifyChannel)
 	worker.Run()
 }
