@@ -107,13 +107,11 @@ func (fm *FetchManager) Run() {
 				fm.dispatchTask()
 
 			case fetchResult := <-fm.fetchResultNotifyChannel:
-				fm.nodeManager.SetNodeIdle(fetchResult.NodeId)
 				if fetchResult.FullBlock != nil {
 					fm.addBlock(fetchResult.FullBlock, fetchResult.ForkVersion)
 					fm.nodeManager.UpdateNodeMetric(fetchResult.NodeId, fetchResult.CostTime.Microseconds())
 				} else {
-					fm.nodeManager.UpdateNodeMetric(fetchResult.NodeId, fetchResult.CostTime.Microseconds())
-					fm.nodeManager.SetNodeInvalid(fetchResult.NodeId)
+					fm.nodeManager.SetNodeNotReady(fetchResult.NodeId)
 					fm.taskManager.fetchFailed(fetchResult.Height)
 				}
 
@@ -128,9 +126,12 @@ func (fm *FetchManager) updateTask() {
 
 	localHeight, _ := fm.localChain.GetChainInfo()
 
-	for i := 0; i < len(fm.nodeManager.nodes); i++ {
-		remoteHeight := fm.nodeManager.GetNodeState(i).GetChainInfo()
-
+	for i := 0; i < fm.nodeManager.NodeCount(); i++ {
+		state := fm.nodeManager.GetNodeState(i)
+		if state == nil {
+			continue
+		}
+		remoteHeight := state.GetChainInfo()
 		if remoteHeight == 0 {
 			continue
 		}
@@ -153,12 +154,13 @@ func (fm *FetchManager) dispatchTask() {
 	if err != nil {
 		return
 	}
+	fm.nodeManager.SetNodeNotReady(nodeId)
 
 	taskId, height, err := fm.taskManager.popTask()
 	if err != nil {
+		fm.nodeManager.SetNodeReady(nodeId)
 		return
 	}
-	fm.nodeManager.SetNodeBusy(nodeId)
 
 	worker := NewFetchWorker(nodeId, taskId, client, fm.db, height, fm.forkVersion, fm.fetchResultNotifyChannel)
 	worker.Run()
