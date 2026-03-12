@@ -231,13 +231,25 @@ func FetchFullBlock(nodeId int, taskId int, client *ethclient.Client, db *gorm.D
 	}
 
 	// fetch internal tx
-	txInternalJsonList := make([]*TxInternalJson, 0)
+	txInternalJsonList := make([]*TxInternalTraceResultJson, 0)
 	if enableInternalTx {
-		arg := map[string]interface{}{}
-		method := "debug_traceBlockByNumber"
-		if err := client.Client().CallContext(context.Background(), &txInternalJsonList, method, util.ToBlockNumArg(new(big.Int).SetUint64(height)), arg); err != nil {
+		arg := map[string]interface{}{
+			"tracer": "callTracer",
+		}
+		method := "debug_traceBlockByHash"
+		if err := client.Client().CallContext(context.Background(), &txInternalJsonList, method, blkJson.Hash, arg); err != nil {
 			logrus.Warnf("fetch internal tx failed. nodeId:%v taskId:%v err:%v height:%v", nodeId, taskId, err, height)
 			return nil
+		}
+		for _, traceResult := range txInternalJsonList {
+			if traceResult == nil {
+				logrus.Warnf("fetch internal tx result invalid. nodeId:%v taskId:%v height:%v", nodeId, taskId, height)
+				return nil
+			}
+			if traceResult.Result == nil || traceResult.Error != "" {
+				logrus.Warnf("fetch internal tx result invalid. nodeId:%v taskId:%v height:%v tx_hash:%v err:%v", nodeId, taskId, height, traceResult.TxHash, traceResult.Error)
+				return nil
+			}
 		}
 	}
 
@@ -413,19 +425,18 @@ func FetchFullBlock(nodeId int, taskId int, client *ethclient.Client, db *gorm.D
 			tokenErc721List = append(tokenErc721List, tokenErc721)
 		}
 	}
-	/*
-		// TODO optimize
-		for _, tx := range txParseResult.TxList {
-			txInternalList := make([]*data.TxInternal, 0)
-			for _, txInternal := range internalTxParseResult.InternalTxList {
-				if tx.TxHash == txInternal.TxHash {
-					txInternalList = append(txInternalList, txInternal)
-				}
-			}
-
-			tx.TxInternalList = txInternalList
+	txInternalMap := make(map[string][]*data.TxInternal, len(txParseResult.FullTxList))
+	for _, txInternal := range internalTxParseResult.InternalTxList {
+		txInternalMap[txInternal.TxHash] = append(txInternalMap[txInternal.TxHash], txInternal)
+	}
+	for _, fullTx := range txParseResult.FullTxList {
+		if internalList, ok := txInternalMap[fullTx.Tx.TxHash]; ok {
+			fullTx.TxInternalList = internalList
+		} else {
+			fullTx.TxInternalList = make([]*data.TxInternal, 0)
 		}
-	*/
+	}
+
 	fullblock := &data.FullBlock{
 		Block:      blk,
 		FullTxList: txParseResult.FullTxList,
@@ -764,60 +775,94 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*eth_types.Receipt, heigh
 	return &txParseResult
 }
 
-func parseTxInternal(jsonTxInternalList []*TxInternalJson, height uint64) *InternalTxParseResult {
+func normalizeTraceAddress(addr string) string {
+	if addr == "" || addr == "0x" {
+		return ""
+	}
+	return strings.ToLower(common.HexToAddress(addr).Hex())
+}
+
+func parseTraceBigInt(value *hexutil.Big) *big.Int {
+	if value == nil {
+		return big.NewInt(0)
+	}
+	return (*big.Int)(value)
+}
+
+func walkTxInternalTrace(txHash string, trace *TxInternalJson, traceAddress []uint64, depth int, nextIndex *int, txInternalList *[]*data.TxInternal, contractList *[]*data.Contract, balanceNativeAddress map[string]struct{}) {
+	if trace == nil {
+		return
+	}
+
+	opCode := strings.ToUpper(trace.Type)
+	fromAddr := normalizeTraceAddress(trace.From)
+	toAddr := normalizeTraceAddress(trace.To)
+	value := parseTraceBigInt(trace.Value)
+	success := trace.Error == ""
+
+	*txInternalList = append(*txInternalList, &data.TxInternal{
+		TxHash:       txHash,
+		Index:        *nextIndex,
+		From:         fromAddr,
+		To:           toAddr,
+		OpCode:       opCode,
+		Value:        value.String(),
+		Success:      success,
+		Depth:        depth,
+		Gas:          uint64(trace.Gas),
+		GasUsed:      uint64(trace.GasUsed),
+		Input:        trace.Input,
+		Output:       trace.Output,
+		TraceAddress: transTraceAddressToString(opCode, traceAddress),
+	})
+	(*nextIndex)++
+
+	if success && (opCode == "CREATE" || opCode == "CREATE2") && toAddr != "" && toAddr != util.ZeroAddress {
+		*contractList = append(*contractList, &data.Contract{
+			TxHash:       txHash,
+			ContractAddr: toAddr,
+			CreatorAddr:  fromAddr,
+			ExecStatus:   1,
+		})
+	}
+
+	if success && value.Sign() > 0 {
+		if fromAddr != "" {
+			balanceNativeAddress[fromAddr] = struct{}{}
+		}
+		if toAddr != "" {
+			balanceNativeAddress[toAddr] = struct{}{}
+		}
+	}
+
+	for idx, call := range trace.Calls {
+		childTraceAddress := append(append([]uint64(nil), traceAddress...), uint64(idx))
+		walkTxInternalTrace(txHash, call, childTraceAddress, depth+1, nextIndex, txInternalList, contractList, balanceNativeAddress)
+	}
+}
+
+func parseTxInternal(jsonTxInternalList []*TxInternalTraceResultJson, height uint64) *InternalTxParseResult {
 	txInternalList := make([]*data.TxInternal, 0)
 	contractList := make([]*data.Contract, 0)
 
 	balanceNativeAddress := make(map[string]struct{}, 0)
-	/*
-		for _, v := range jsonTxInternalList {
-			txHash := v.TxHash
-			for tiIdx, tiLog := range v.Logs {
-				fromAddr := strings.ToLower(common.HexToAddress(tiLog.From).Hex())
-				toAddr := strings.ToLower(common.HexToAddress(tiLog.To).Hex())
+	_ = height
 
-				if tiLog.OpCode == "CREATE" || tiLog.OpCode == "CREATE2" {
-					if tiLog.Success {
-						var status uint64 = 1
-						if tiLog.To == util.ZeroAddress {
-							logrus.Fatal("internal tx empty txhash:%v from:%v to:%v", txHash, fromAddr, toAddr)
-						}
-						contract := &data.Contract{
-							TxHash:       txHash,
-							ContractAddr: toAddr,
-							CreatorAddr:  fromAddr,
-							ExecStatus:   status,
-						}
-						contractList = append(contractList, contract)
-					}
-				}
-
-				modelTxInternal := &data.TxInternal{
-					TxHash:       txHash,
-					Index:        tiIdx,
-					From:         fromAddr,
-					To:           toAddr,
-					OpCode:       tiLog.OpCode,
-					Value:        tiLog.Value.String(),
-					Success:      tiLog.Success,
-					Depth:        tiLog.Depth,
-					Gas:          tiLog.Gas,
-					GasUsed:      tiLog.GasUsed,
-					Input:        tiLog.Input,
-					Output:       tiLog.Output,
-					TraceAddress: transTraceAddressToString(tiLog.OpCode, tiLog.TraceAddress),
-				}
-				txInternalList = append(txInternalList, modelTxInternal)
-
-				if tiLog.Success && tiLog.Value.Cmp(big.NewInt(0)) > 0 {
-					balanceNativeAddress[fromAddr] = struct{}{}
-					if toAddr != "" {
-						balanceNativeAddress[toAddr] = struct{}{}
-					}
-				}
-			}
+	for _, traceResult := range jsonTxInternalList {
+		if traceResult == nil {
+			continue
 		}
-	*/
+		if traceResult.Error != "" {
+			logrus.Warnf("trace tx failed. tx_hash:%v err:%v", traceResult.TxHash, traceResult.Error)
+			continue
+		}
+		if traceResult.Result == nil {
+			continue
+		}
+
+		nextIndex := 0
+		walkTxInternalTrace(traceResult.TxHash, traceResult.Result, nil, 0, &nextIndex, &txInternalList, &contractList, balanceNativeAddress)
+	}
 
 	internalTxParseResult := &InternalTxParseResult{
 		InternalTxList:               txInternalList,

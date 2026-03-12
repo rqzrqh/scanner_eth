@@ -55,6 +55,8 @@ type Tx struct {
 }
 
 type TxInternal struct {
+	TxHash       string
+	Index        int
 	From         string
 	To           string
 	OpCode       string

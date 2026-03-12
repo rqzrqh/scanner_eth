@@ -377,14 +377,25 @@ func convertStorageFullBlock(fullblock *data.FullBlock) *StorageFullBlock {
 
 		// TxInternalList conversion (if exists in types.FullBlock)
 		if optionalTxInternal {
-			// for _, txInternal := range fullTx.TxInternalList {
-			// 	modelTxInternal := model.TxInternal{
-			// 		Height:    blockHeight,
-			// 		BlockHash: blockHash,
-			// 		// ... map other fields
-			// 	}
-			// 	txInternalList = append(txInternalList, modelTxInternal)
-			// }
+			for _, txInternal := range fullTx.TxInternalList {
+				modelTxInternal := model.TxInternal{
+					Height:       blockHeight,
+					TxHash:       txInternal.TxHash,
+					Index:        txInternal.Index,
+					From:         txInternal.From,
+					To:           txInternal.To,
+					OpCode:       txInternal.OpCode,
+					Value:        txInternal.Value,
+					Success:      txInternal.Success,
+					Depth:        txInternal.Depth,
+					Gas:          txInternal.Gas,
+					GasUsed:      txInternal.GasUsed,
+					Input:        txInternal.Input,
+					Output:       txInternal.Output,
+					TraceAddress: txInternal.TraceAddress,
+				}
+				txInternalList = append(txInternalList, modelTxInternal)
+			}
 		}
 
 		for indexInTx, fullEventLog := range fullTx.FullEventLogList {

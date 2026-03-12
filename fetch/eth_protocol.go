@@ -1,6 +1,6 @@
 package fetch
 
-import "math/big"
+import "github.com/ethereum/go-ethereum/common/hexutil"
 
 type BlockHeaderJson struct {
 	BaseFeePerGas   string        `json:"baseFeePerGas"`
@@ -46,15 +46,22 @@ type TxJson struct {
 	Value                string `json:"value"`
 }
 
+type TxInternalTraceResultJson struct {
+	TxHash string          `json:"txHash"`
+	Result *TxInternalJson `json:"result"`
+	Error  string          `json:"error,omitempty"`
+}
+
 type TxInternalJson struct {
-	TxHash  string            `json:"transactionHash"`
-	Type    string            `json:"type"`
-	From    string            `json:"from"`
-	To      string            `json:"to,omitempty"`
-	Value   *big.Int          `json:"value,omitempty"`
-	Gas     uint64            `json:"gas"`
-	GasUsed uint64            `json:"gas_used"`
-	Input   string            `json:"input"`
-	Output  string            `json:"output,omitempty"`
-	Calls   []*TxInternalJson `json:"calls,omitempty"`
+	Type         string            `json:"type"`
+	From         string            `json:"from"`
+	To           string            `json:"to,omitempty"`
+	Value        *hexutil.Big      `json:"value,omitempty"`
+	Gas          hexutil.Uint64    `json:"gas"`
+	GasUsed      hexutil.Uint64    `json:"gasUsed"`
+	Input        string            `json:"input"`
+	Output       string            `json:"output,omitempty"`
+	Error        string            `json:"error,omitempty"`
+	RevertReason string            `json:"revertReason,omitempty"`
+	Calls        []*TxInternalJson `json:"calls,omitempty"`
 }
