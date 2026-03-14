@@ -1,16 +1,9 @@
-package store
+package fetch
 
 import (
-	"encoding/json"
-	"os"
 	"scanner_eth/data"
 	"scanner_eth/model"
 	"scanner_eth/protocol"
-	"scanner_eth/types"
-	"time"
-
-	"github.com/sirupsen/logrus"
-	"gorm.io/gorm"
 )
 
 var (
@@ -64,259 +57,10 @@ type StorageFullBlock struct {
 	TokenErc721List    []model.TokenErc721
 }
 
-type StoreManager struct {
-	db                              *gorm.DB
-	chainId                         int64
-	messageId                       uint64
-	publishedMessageId              uint64
-	batchSize                       int
-	storeOperationChannel           chan *types.StoreOperation
-	publishFeedbackOperationChannel <-chan *types.PublishFeedbackOperation
-	storeTaskChannel                chan *StoreTask
-	storeCompleteChannel            chan *StoreComplete
-	publishOperationChannel         chan<- *types.PublishOperation
-	storeWorkers                    []*StoreWorker
-}
-
-func NewStoreManager(db *gorm.DB, chainId int64, messageId uint64, publishedMessageId uint64, batchSize int, storeWorkerCount int, storeOperationChannel chan *types.StoreOperation, publishFeedbackOperationChannel <-chan *types.PublishFeedbackOperation,
-	publishOperationChannel chan<- *types.PublishOperation) *StoreManager {
-
-	storeTaskChannel := make(chan *StoreTask, 10)
-	storeCompleteChannel := make(chan *StoreComplete, 10)
-
-	storeWorkers := make([]*StoreWorker, storeWorkerCount)
-	for i := 0; i < storeWorkerCount; i++ {
-		worker := NewStoreWorker(i, db, storeTaskChannel, storeCompleteChannel)
-		storeWorkers[i] = worker
+func ConvertStorageFullBlock(fullblock *data.FullBlock) *StorageFullBlock {
+	if fullblock == nil {
+		return nil
 	}
-
-	return &StoreManager{
-		chainId:                         chainId,
-		messageId:                       messageId,
-		publishedMessageId:              publishedMessageId,
-		db:                              db,
-		batchSize:                       batchSize,
-		storeOperationChannel:           storeOperationChannel,
-		publishFeedbackOperationChannel: publishFeedbackOperationChannel,
-		storeTaskChannel:                storeTaskChannel,
-		storeCompleteChannel:            storeCompleteChannel,
-		publishOperationChannel:         publishOperationChannel,
-		storeWorkers:                    storeWorkers,
-	}
-}
-
-func (sm *StoreManager) Run() {
-	for _, sw := range sm.storeWorkers {
-		sw.Run()
-	}
-
-	go func() {
-
-		for {
-			select {
-			case op := <-sm.storeOperationChannel:
-				switch op.Type {
-				case types.StoreApply:
-					fullblock := op.FullBlock
-					height := op.Height
-
-					sm.messageId++
-
-					storageFullBlock := convertStorageFullBlock(fullblock)
-					protocolFullBlock := convertProtocolFullBlock(fullblock)
-
-					chainBinlog := &protocol.ChainBinlog{
-						ChainId:    sm.chainId,
-						MessageId:  sm.messageId,
-						ActionType: protocol.ChainActionApply,
-						Height:     height,
-					}
-
-					var binlogData []byte
-					var err error
-					protocolFullBlockData, err := json.Marshal(protocolFullBlock)
-					if err != nil {
-						logrus.Errorf("marshal protocol fullblock failed. height:%v err:%v", height, err)
-						os.Exit(0)
-					}
-
-					protocolBinlog := &protocol.ChainBinlog{
-						ChainId:    sm.chainId,
-						MessageId:  sm.messageId,
-						ActionType: protocol.ChainActionType(chainBinlog.ActionType),
-						Height:     height,
-						Data:       protocolFullBlockData,
-					}
-
-					if binlogData, err = json.Marshal(protocolBinlog); err != nil {
-						logrus.Errorf("marshal protocol fullblock failed. height:%v err:%v", height, err)
-						os.Exit(0)
-					}
-
-					tryCount := 0
-					for {
-						tryCount++
-						startTime := time.Now()
-
-						var binlogRecordId uint64
-						if binlogRecordId, err = StoreFullBlock(sm.db, storageFullBlock, chainBinlog, binlogData, sm.batchSize, sm.storeTaskChannel, sm.storeCompleteChannel); err != nil {
-							logrus.Errorf("store fullblock failed. wait retry. height:%v err:%v tryCount:%v", height, err, tryCount)
-							time.Sleep(3 * time.Second)
-							continue
-						}
-
-						prevHash := fullblock.Block.ParentHash
-						blockHash := fullblock.Block.Hash
-
-						logrus.Infof("store fullblock success. height:%v hash:%v prev_hash:%v cost:%v",
-							height, blockHash, prevHash, time.Since(startTime).String())
-
-						publishOperation := &types.PublishOperation{
-							BinlogRecordId: binlogRecordId,
-							MessageId:      chainBinlog.MessageId,
-							Height:         height,
-							BinlogData:     binlogData,
-						}
-						sm.publishOperationChannel <- publishOperation
-						break
-					}
-
-				case types.StoreRollback:
-					height := op.Height
-
-					sm.messageId++
-
-					var err error
-					tryCount := 0
-					for {
-						tryCount++
-						startTime := time.Now()
-
-						chainBinlog := &protocol.ChainBinlog{
-							ChainId:    sm.chainId,
-							MessageId:  sm.messageId,
-							ActionType: protocol.ChainActionRollback,
-							Height:     height,
-						}
-
-						var binlogData []byte
-						protocolBinlog := &protocol.ChainBinlog{
-							ChainId:    sm.chainId,
-							MessageId:  sm.messageId,
-							ActionType: protocol.ChainActionType(chainBinlog.ActionType),
-							Height:     height,
-						}
-
-						if binlogData, err = json.Marshal(protocolBinlog); err != nil {
-							logrus.Errorf("marshal protocol fullblock failed. height:%v err:%v", height, err)
-							os.Exit(0)
-						}
-
-						var binlogRecordId uint64
-						if binlogRecordId, err = Revert(sm.db, height, chainBinlog, binlogData); err != nil {
-							logrus.Errorf("store revert failed. wait retry. height:%v err:%v tryCount:%v", height, err, tryCount)
-							time.Sleep(3 * time.Second)
-							continue
-						}
-
-						logrus.Infof("store revert success. height:%v cost:%v",
-							height, time.Since(startTime).String())
-
-						publishOperation := &types.PublishOperation{
-							BinlogRecordId: binlogRecordId,
-							MessageId:      sm.messageId,
-							Height:         height,
-						}
-						sm.publishOperationChannel <- publishOperation
-						break
-					}
-				}
-			case op := <-sm.publishFeedbackOperationChannel:
-				binlogRecordId := op.BinlogRecordId
-				messageId := op.MessageId
-				height := op.Height
-
-				if (sm.publishedMessageId + 1) != messageId {
-					logrus.Errorf("published message id not continuous. published_message_id:%v message_id:%v height:%v", sm.publishedMessageId, messageId, height)
-					os.Exit(0)
-				}
-
-				expectMessageId := sm.publishedMessageId
-
-				tryCount := 0
-				for {
-					tryCount++
-					startTime := time.Now()
-
-					if err := sm.db.Transaction(func(tx *gorm.DB) error {
-						if err := tx.Delete(&model.ChainBinlog{}, binlogRecordId).Error; err != nil {
-							logrus.Errorf("delete chain binlog failed. binlog_record_id:%v message_id:%v height:%v err:%v tryCount:%v", binlogRecordId, messageId, height, err, tryCount)
-							return err
-						}
-
-						var result *gorm.DB
-						if result = tx.Model(&model.ScannerInfo{}).Where("chain_id = ? AND published_message_id = ?", sm.chainId, expectMessageId).Update("published_message_id", messageId); result.Error != nil {
-							logrus.Fatalf("update scanner info failed %v", result.Error)
-							return result.Error
-						}
-
-						if result.RowsAffected == 0 {
-							logrus.Fatalf("update scanner info failed, expect published message id not match, may be there are multiple processes. expect:%v", expectMessageId)
-							os.Exit(0)
-						}
-
-						return nil
-					}); err != nil {
-						logrus.Errorf("binlog feedback failed %v", err)
-						time.Sleep(3 * time.Second)
-						continue
-					}
-
-					logrus.Infof("binlog feedback success. binlog_record_id:%v message_id:%v height:%v cost:%v",
-						binlogRecordId, messageId, height, time.Since(startTime).String())
-					break
-				}
-
-				sm.publishedMessageId = messageId
-			}
-		}
-	}()
-
-	// read all binlogs from db and publish
-	messageId := sm.publishedMessageId
-	for {
-		var binlogs []*model.ChainBinlog
-		if err := sm.db.Where("message_id > ?", messageId).Order("message_id asc").Limit(100).Find(&binlogs).Error; err != nil {
-			logrus.Errorf("failed to get binlogs from db %v", err)
-			os.Exit(0)
-		}
-		if len(binlogs) == 0 {
-			break
-		}
-
-		for _, binlog := range binlogs {
-
-			logrus.Infof("restore binlog from db. binlog_record_id:%v message_id:%v height:%v", binlog.Id, binlog.MessageId, binlog.Height)
-
-			publishOperation := &types.PublishOperation{
-				BinlogRecordId: binlog.Id,
-				MessageId:      binlog.MessageId,
-				Height:         binlog.Height,
-				BinlogData:     binlog.BinlogData,
-			}
-			sm.publishOperationChannel <- publishOperation
-		}
-
-		messageId = binlogs[len(binlogs)-1].MessageId
-	}
-
-	if messageId != sm.messageId {
-		logrus.Errorf("message id not equal with scannerInfo. db:%v current:%v", messageId, sm.messageId)
-		os.Exit(0)
-	}
-}
-
-func convertStorageFullBlock(fullblock *data.FullBlock) *StorageFullBlock {
 	blockHeight := fullblock.Block.Height
 	modelBlock := model.Block{
 		Height:          fullblock.Block.Height,
@@ -580,7 +324,7 @@ func convertStorageFullBlock(fullblock *data.FullBlock) *StorageFullBlock {
 	}
 }
 
-func convertProtocolFullBlock(fullblock *data.FullBlock) *protocol.FullBlock {
+func ConvertProtocolFullBlock(fullblock *data.FullBlock) *protocol.FullBlock {
 	if fullblock == nil {
 		return nil
 	}

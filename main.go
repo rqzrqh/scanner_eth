@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"scanner_eth/config"
 	"scanner_eth/log"
+	"scanner_eth/middleware"
 	"scanner_eth/model"
 	"syscall"
 	"time"
@@ -17,11 +18,8 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/segmentio/kafka-go"
 	"github.com/sirupsen/logrus"
-	gormv2logrus "github.com/thomas-tacquet/gormv2-logrus"
-	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
-	gormlogger "gorm.io/gorm/logger"
 )
 
 var (
@@ -49,21 +47,11 @@ func main() {
 
 	logrus.Infof("init log success")
 
-	logrusLogger := logrus.New()
-
-	opts := gormv2logrus.GormOptions{
-		SlowThreshold: 200 * time.Millisecond,
-		LogLevel:      gormlogger.Info,
-		TruncateLen:   1000,
-		LogLatency:    true,
+	db, err := middleware.InitDB(conf.Database)
+	if err != nil {
+		logrus.Errorf("failed to connect database: %v", err)
+		os.Exit(0)
 	}
-
-	gormLogger := gormv2logrus.NewGormlog(gormv2logrus.WithGormOptions(opts), gormv2logrus.WithLogrus(logrusLogger))
-	gormLogger.LogMode(gormlogger.Warn)
-
-	db, err := gorm.Open(mysql.Open(conf.Store.Host), &gorm.Config{
-		Logger: gormLogger,
-	})
 
 	if err != nil {
 		logrus.Errorf("failed to connect database %v", err)
@@ -111,6 +99,15 @@ func main() {
 
 		logrus.Infof("database auto migrate success")
 	}
+
+	rds := middleware.NewRedisClient(conf.Redis)
+	defer rds.Close()
+	pong, err := rds.Ping(context.Background()).Result()
+	if err != nil {
+		logrus.Errorf("failed to ping redis %v", err)
+		os.Exit(0)
+	}
+	logrus.Infof("redis response %s", pong)
 
 	allOptionalTables := make(map[string]struct{}, 0)
 	allOptionalTables[model.Tx.TableName(model.Tx{})] = struct{}{}
@@ -185,7 +182,7 @@ func main() {
 	}
 	//err = w.Close()
 
-	s := newSyncer(conf, clients, db, w, chainId, genesisBlockHash, messageId, publishedMessageId, optionalTables)
+	s := newSyncer(conf, clients, db, rds, w, chainId, genesisBlockHash, messageId, publishedMessageId, optionalTables)
 	s.Run()
 
 	logrus.Infof("start success")

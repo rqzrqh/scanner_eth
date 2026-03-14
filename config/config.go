@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"scanner_eth/middleware"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 )
 
 type Chain struct {
+	ChainName        string `mapstructure:"chain_name"`
 	ChainId          int64  `mapstructure:"chain_id"`
 	GenesisBlockHash string `mapstructure:"genesis_block_hash"`
 	ReversibleBlocks int    `mapstructure:"reversible_blocks"`
@@ -50,6 +52,8 @@ type Fetch struct {
 	StartHeight      uint64        `mapstructure:"start_height"`
 	EndHeight        uint64        `mapstructure:"end_height"`
 	EnableInternalTx bool          `mapstructure:"enable_internal_tx"`
+	Interval         time.Duration `mapstructure:"interval"`
+	ExecuteAgain     bool          `mapstructure:"execute_again"`
 }
 
 type Store struct {
@@ -62,10 +66,12 @@ type Store struct {
 }
 
 type Publish struct {
-	Enable       bool     `mapstructure:"enable"`
-	KafkaBrokers []string `mapstructure:"kafka_servers"`
-	Topic        string   `mapstructure:"topic"`
-	ChannelSize  int      `mapstructure:"channel_size"`
+	Enable       bool          `mapstructure:"enable"`
+	KafkaBrokers []string      `mapstructure:"kafka_servers"`
+	Topic        string        `mapstructure:"topic"`
+	ChannelSize  int           `mapstructure:"channel_size"`
+	Interval     time.Duration `mapstructure:"interval"`
+	ExecuteAgain bool          `mapstructure:"execute_again"`
 }
 
 type console struct {
@@ -88,13 +94,15 @@ type Log struct {
 }
 
 type Config struct {
-	AppName string  `mapstructure:"app_name"`
-	Chain   Chain   `mapstructure:"chain"`
-	Filter  Filter  `mapstructure:"filter"`
-	Fetch   Fetch   `mapstructure:"fetch"`
-	Store   Store   `mapstructure:"store"`
-	Publish Publish `mapstructure:"publish"`
-	Log     Log     `mapstructure:"log"`
+	AppName  string                 `mapstructure:"app_name"`
+	Chain    Chain                  `mapstructure:"chain"`
+	Filter   Filter                 `mapstructure:"filter"`
+	Fetch    Fetch                  `mapstructure:"fetch"`
+	Store    Store                  `mapstructure:"store"`
+	Publish  Publish                `mapstructure:"publish"`
+	Database middleware.Database    `mapstructure:"database"`
+	Redis    middleware.RedisConfig `mapstructure:"redis"`
+	Log      Log                    `mapstructure:"log"`
 }
 
 func readConfig(filename string, v *viper.Viper) error {

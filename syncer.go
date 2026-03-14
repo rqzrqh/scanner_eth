@@ -11,23 +11,21 @@ import (
 	"scanner_eth/model"
 	"scanner_eth/publish"
 	"scanner_eth/store"
-	"scanner_eth/types"
 	"sort"
 
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/redis/go-redis/v9"
 	"github.com/segmentio/kafka-go"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
 type Syncer struct {
-	hns []*fetch.HeaderNotifier
-	fm  *fetch.FetchManager
-	sm  *store.StoreManager
-	pm  *publish.PublishManager
+	fm *fetch.FetchManager
+	pm *publish.PublishManager
 }
 
-func newSyncer(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, w *kafka.Writer, chainId int64, genesisBlockHash string, messageId uint64, publishedMessageId uint64, optionalTables map[string]struct{}) *Syncer {
+func newSyncer(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, redisClient *redis.Client, w *kafka.Writer, chainId int64, genesisBlockHash string, messageId uint64, publishedMessageId uint64, optionalTables map[string]struct{}) *Syncer {
 
 	reversibleBlocks := conf.Chain.ReversibleBlocks
 	startHeight, endHeight, enableInternalTx := conf.Fetch.StartHeight, conf.Fetch.EndHeight, conf.Fetch.EnableInternalTx
@@ -56,15 +54,8 @@ func newSyncer(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, w 
 
 	logrus.Infof("node chain info check passed")
 
-	storeOperationChannel := make(chan *types.StoreOperation, storeChannelSize)
-	publishFeedbackOperationChannel := make(chan *types.PublishFeedbackOperation, 100)
+	pm := publish.NewPublishManager(conf.Chain.ChainName, db, redisClient, w, conf.Fetch.Interval, conf.Fetch.ExecuteAgain)
 
-	publishOperationChannel := make(chan *types.PublishOperation, 100)
-	pm := publish.NewPublishManager(w, publishOperationChannel, publishFeedbackOperationChannel)
-
-	sm := store.NewStoreManager(db, chainId, messageId, publishedMessageId, storeBatchSize, storeWorkerCount, storeOperationChannel, publishFeedbackOperationChannel, publishOperationChannel)
-
-	remoteChainUpdateChannel := make(chan *types.RemoteChainUpdate, 100)
 	maxUnorganizedBlockCount := 50 * len(clients)
 	blkDigestList := loadLatestBlock(clients, db, startHeight, reversibleBlocks)
 
@@ -74,30 +65,18 @@ func newSyncer(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, w 
 	}
 
 	localChain := fetch.NewLocalChain(reversibleBlocks, blkDigestList)
-	fm := fetch.NewFetchManager(clients, localChain, endHeight, maxUnorganizedBlockCount, remoteChainUpdateChannel, storeOperationChannel, db)
-
-	hns := make([]*fetch.HeaderNotifier, len(clients))
-	for i, client := range clients {
-		hns[i] = fetch.NewHeaderNotifier(i, client, remoteChainUpdateChannel)
-	}
+	fm := fetch.NewFetchManager(conf.Chain.ChainName, clients, redisClient, conf.Fetch.Interval, conf.Fetch.ExecuteAgain, localChain, endHeight, maxUnorganizedBlockCount, remoteChainUpdateChannel, storeOperationChannel, db)
 
 	return &Syncer{
-		hns: hns,
-		fm:  fm,
-		sm:  sm,
-		pm:  pm,
+		fm: fm,
+		pm: pm,
 	}
 }
 
 func (s *Syncer) Run() {
 
 	s.pm.Run()
-	s.sm.Run()
 	s.fm.Run()
-
-	for _, hn := range s.hns {
-		hn.Run()
-	}
 }
 
 func checkNodeChainInfo(clients []*ethclient.Client, dbChainId int64, dbGenesisBlockHash string) {
