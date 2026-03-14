@@ -22,12 +22,12 @@ func initErc20Cache() {
 	})
 }
 
-// InitErc20Cache 初始化 ERC20 缓存，由 NewFetchManager 调用一次
+// InitErc20Cache initializes the ERC20 cache (call once from NewFetchManager).
 func InitErc20Cache() {
 	initErc20Cache()
 }
 
-// tokenCache ContractErc20 缓存，key 为合约地址。未命中时在缓存内查 DB。
+// tokenCache holds ContractErc20 by contract address; on miss it reads DB under the cache lock.
 type tokenCache struct {
 	mu    sync.RWMutex
 	items map[string]*tokenCacheItem
@@ -42,7 +42,7 @@ func newTokenCache() *tokenCache {
 	return &tokenCache{items: make(map[string]*tokenCacheItem)}
 }
 
-// Get 先查内存缓存，未命中则在缓存内查 DB；命中则回填缓存并返回。返回 (value, true) 表示命中， (nil, false) 表示需链上拉取。
+// Get checks memory first, then DB inside the cache lock on miss; (v, true) if found locally, (nil, false) if RPC fetch is needed.
 func (c *tokenCache) Get(contractAddr string, db *gorm.DB) (*data.ContractErc20, bool) {
 	c.mu.RLock()
 	item, ok := c.items[contractAddr]
@@ -56,7 +56,7 @@ func (c *tokenCache) Get(contractAddr string, db *gorm.DB) (*data.ContractErc20,
 		c.mu.Unlock()
 	}
 
-	// 缓存未命中：在缓存内执行 DB 读取
+	// Cache miss: load from DB under cache coordination.
 	if db != nil {
 		var m model.ContractErc20
 		if db.Where("contract_addr = ?", contractAddr).First(&m).Error == nil {

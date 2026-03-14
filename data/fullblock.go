@@ -7,25 +7,29 @@ type FullBlock struct {
 }
 
 type Block struct {
-	Height          uint64
-	Hash            string
-	ParentHash      string
-	Timestamp       int64
-	TxCount         int
-	Miner           string
-	Size            int
-	Nonce           string
-	BaseFee         string
-	BurntFees       string
-	GasLimit        uint64
-	GasUsed         uint64
-	UnclesCount     int
-	Difficulty      string
-	TotalDifficulty string
-	StateRoot       string
-	TransactionRoot string
-	ReceiptRoot     string
-	ExtraData       string
+	Height     uint64
+	Hash       string
+	ParentHash string
+	// IrreversibleHeight / IrreversibleHash identify the irreversible ancestor of this block
+	// (same semantics as model.Block / data.ExportBlock), filled when syncing with blocktree context.
+	IrreversibleHeight uint64
+	IrreversibleHash   string
+	Timestamp          int64
+	TxCount            int
+	Miner              string
+	Size               int
+	Nonce              string
+	BaseFee            string
+	BurntFees          string
+	GasLimit           uint64
+	GasUsed            uint64
+	UnclesCount        int
+	Difficulty         string
+	TotalDifficulty    string
+	StateRoot          string
+	TransactionRoot    string
+	ReceiptRoot        string
+	ExtraData          string
 }
 
 type FullTx struct {
@@ -75,12 +79,6 @@ type FullEventLog struct {
 	EventErc20Transfer    *EventErc20Transfer
 	EventErc721Transfer   *EventErc721Transfer
 	EventErc1155Transfers []*EventErc1155Transfer
-
-	MemeEvent           interface{}
-	Erc20PaymentEvent   interface{}
-	HybridNftEvent      interface{}
-	NftMarketplaceEvent interface{}
-	UniswapV2Event      interface{}
 }
 
 type EventLog struct {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"scanner_eth/middleware"
 	"strings"
 	"time"
 
@@ -11,37 +12,25 @@ import (
 )
 
 type Chain struct {
+	ChainName        string `mapstructure:"chain_name"`
 	ChainId          int64  `mapstructure:"chain_id"`
 	GenesisBlockHash string `mapstructure:"genesis_block_hash"`
 	ReversibleBlocks int    `mapstructure:"reversible_blocks"`
 }
 
-type Meme struct {
-	ContractAddress string `mapstructure:"contract_address"`
+type Store struct {
+	AutoCreateTables bool     `mapstructure:"auto_create_tables"`
+	Optional         []string `mapstructure:"optional"`
+	BatchSize        int      `mapstructure:"batch_size"`
+	WorkerCount      int      `mapstructure:"worker_count"`
 }
 
-type NftMarketplace struct {
-	ContractAddress string `mapstructure:"contract_address"`
-}
-
-type HybridNft struct {
-	ContractAddress string `mapstructure:"contract_address"`
-}
-
-type Erc20Payment struct {
-	ContractAddress string `mapstructure:"contract_address"`
-}
-
-type UniswapV2 struct {
-	RouterAddress string `mapstructure:"router_address"`
-}
-
-type Filter struct {
-	Meme           Meme           `mapstructure:"meme"`
-	NftMarketplace NftMarketplace `mapstructure:"nft_marketplace"`
-	HybridNft      HybridNft      `mapstructure:"hybrid_nft"`
-	Erc20Payment   Erc20Payment   `mapstructure:"erc20_payment"`
-	UniswapV2      UniswapV2      `mapstructure:"uniswapv2"`
+type TaskPool struct {
+	WorkerCount      int           `mapstructure:"worker_count"`
+	HighQueueSize    int           `mapstructure:"high_queue_size"`
+	NormalQueueSize  int           `mapstructure:"normal_queue_size"`
+	MaxRetry         int           `mapstructure:"max_retry"`
+	StatsLogInterval time.Duration `mapstructure:"stats_log_interval"`
 }
 
 type Fetch struct {
@@ -50,22 +39,8 @@ type Fetch struct {
 	StartHeight      uint64        `mapstructure:"start_height"`
 	EndHeight        uint64        `mapstructure:"end_height"`
 	EnableInternalTx bool          `mapstructure:"enable_internal_tx"`
-}
-
-type Store struct {
-	Host             string   `mapstructure:"host"`
-	ChannelSize      int      `mapstructure:"channel_size"`
-	BatchSize        int      `mapstructure:"batch_size"`
-	WorkerCount      int      `mapstructure:"worker_count"`
-	AutoCreateTables bool     `mapstructure:"auto_create_tables"`
-	Optional         []string `mapstructure:"optional"`
-}
-
-type Publish struct {
-	Enable       bool     `mapstructure:"enable"`
-	KafkaBrokers []string `mapstructure:"kafka_servers"`
-	Topic        string   `mapstructure:"topic"`
-	ChannelSize  int      `mapstructure:"channel_size"`
+	Store            Store         `mapstructure:"store"`
+	TaskPool         TaskPool      `mapstructure:"task_pool"`
 }
 
 type console struct {
@@ -87,14 +62,20 @@ type Log struct {
 	File    file    `mapstructure:"file"`
 }
 
+type Metrics struct {
+	Enable bool   `mapstructure:"enable"`
+	Addr   string `mapstructure:"addr"`
+	Path   string `mapstructure:"path"`
+}
+
 type Config struct {
-	AppName string  `mapstructure:"app_name"`
-	Chain   Chain   `mapstructure:"chain"`
-	Filter  Filter  `mapstructure:"filter"`
-	Fetch   Fetch   `mapstructure:"fetch"`
-	Store   Store   `mapstructure:"store"`
-	Publish Publish `mapstructure:"publish"`
-	Log     Log     `mapstructure:"log"`
+	AppName  string                 `mapstructure:"app_name"`
+	Chain    Chain                  `mapstructure:"chain"`
+	Fetch    Fetch                  `mapstructure:"fetch"`
+	Database middleware.Database    `mapstructure:"database"`
+	Redis    middleware.RedisConfig `mapstructure:"redis"`
+	Log      Log                    `mapstructure:"log"`
+	Metrics  Metrics                `mapstructure:"metrics"`
 }
 
 func readConfig(filename string, v *viper.Viper) error {
@@ -124,16 +105,26 @@ func LoadConf(fpath string, env string) (*Config, error) {
 
 	conf := &Config{
 		Fetch: Fetch{
-			Timeout:          5 * time.Second,
+			Timeout:          10 * time.Second,
 			StartHeight:      math.MaxUint64,
 			EndHeight:        math.MaxUint64,
 			EnableInternalTx: true,
+			Store: Store{
+				AutoCreateTables: true,
+				Optional:         []string{},
+				BatchSize:        128,
+				WorkerCount:      8,
+			},
+			TaskPool: TaskPool{
+				HighQueueSize:    1024,
+				NormalQueueSize:  2048,
+				MaxRetry:         2,
+				StatsLogInterval: 30 * time.Second,
+			},
 		},
-		Store: Store{
-			ChannelSize:      100,
-			BatchSize:        100,
-			WorkerCount:      8,
-			AutoCreateTables: true,
+		Metrics: Metrics{
+			Addr: "127.0.0.1:6060",
+			Path: "/debug/vars",
 		},
 	}
 	vip := viper.New()

@@ -1,4 +1,5 @@
 scanner_eth
+doc/coverage*.out
 .DS_Store
 .idea
 .vscode

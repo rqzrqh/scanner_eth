@@ -22,12 +22,12 @@ func initErc721Cache() {
 	})
 }
 
-// InitErc721Cache 初始化 ERC721 合约缓存，由 NewFetchManager 调用一次
+// InitErc721Cache initializes the ERC721 contract cache (call once from NewFetchManager).
 func InitErc721Cache() {
 	initErc721Cache()
 }
 
-// erc721ContractCache ContractErc721 缓存，key 为合约地址。未命中时在缓存内查 DB。
+// erc721ContractCache holds ContractErc721 by contract address; on miss it reads DB under the cache lock.
 type erc721ContractCache struct {
 	mu    sync.RWMutex
 	items map[string]*erc721ContractCacheItem
@@ -42,7 +42,7 @@ func newErc721ContractCache() *erc721ContractCache {
 	return &erc721ContractCache{items: make(map[string]*erc721ContractCacheItem)}
 }
 
-// Get 先查内存缓存，未命中则在缓存内查 DB；命中则回填缓存并返回。返回 (value, true) 表示命中， (nil, false) 表示需链上拉取。
+// Get checks memory first, then DB inside the cache lock on miss; (v, true) if found locally, (nil, false) if RPC fetch is needed.
 func (c *erc721ContractCache) Get(contractAddr string, db *gorm.DB) (*data.ContractErc721, bool) {
 	c.mu.RLock()
 	item, ok := c.items[contractAddr]
@@ -56,7 +56,7 @@ func (c *erc721ContractCache) Get(contractAddr string, db *gorm.DB) (*data.Contr
 		c.mu.Unlock()
 	}
 
-	// 缓存未命中：在缓存内执行 DB 读取
+	// Cache miss: load from DB under cache coordination.
 	if db != nil {
 		var m model.ContractErc721
 		if db.Where("contract_addr = ?", contractAddr).First(&m).Error == nil {

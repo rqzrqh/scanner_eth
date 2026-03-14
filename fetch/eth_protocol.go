@@ -20,12 +20,8 @@ type BlockHeaderJson struct {
 	TimeStamp       string        `json:"timestamp"`
 	TotalDifficulty string        `json:"totalDifficulty"`
 	TransactionRoot string        `json:"transactionsRoot"`
+	Transactions    []string      `json:"transactions"`
 	Uncles          []interface{} `json:"uncles"`
-}
-
-type BlockJson struct {
-	BlockHeaderJson
-	Txs []*TxJson `json:"transactions"`
 }
 
 type TxJson struct {

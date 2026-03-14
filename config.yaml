@@ -1,57 +1,83 @@
 app_name: scanner_bsc_testnet
 
 chain:
+  chain_name: "bsc_testnet"
   chain_id: 97
   genesis_block_hash: "0x6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe34"
   reversible_blocks: 5
 
+database:
+  host: "127.0.0.1"
+  port: 3306
+  user: root
+  password: "123456"  # set your database password
+  dbname: scanner_bsc_testnet
+  charset: utf8mb4
+  parseTime: true
+  loc: Local
+
+redis:
+  addr: "127.0.0.1:6379"  # Redis address
+  username: ""  # Redis username (if required)
+  password: ""  # Redis password (if required)
+  db: 15  # Redis logical DB index
+  pool_size: 10  # connection pool size
+  min_idle_conns: 5  # minimum idle connections
+  dial_timeout: 5  # dial timeout (seconds)
+  read_timeout: 3  # read timeout (seconds)
+  write_timeout: 3  # write timeout (seconds)
+
 fetch:
   rpc_nodes:
-    - "http://127.0.0.1:8545"
+    #- "http://127.0.0.1:8545"
+    - "https://bnb-testnet.g.alchemy.com/v2/fTJySYmIh0pJR0J_-_Q9z60YqerqYf6i"
+    - "wss://bsc-testnet-rpc.publicnode.com"
 
-  timeout: 5s
-  start_height: -1 #if db has blocks, this config would be ignored
+  timeout: 10s
+  start_height: 103340299 #if db has blocks, this config would be ignored
   end_height:  -1
   #With internal txs, all account balance changed action and all contract created action could be captured.
   #But this api need archive node, and always it is not free.
   #If set false, balanceChanged and contractCreated is incomplete.
   #For test, set false is ok.
-  enable_internal_tx: true
+  enable_internal_tx: false
+  store:
+    auto_create_tables: true # prd environment set false
+    batch_size: 128
+    worker_count: 8
+    # all parsed data has been published to mq
+    # block, scanner_message, scanner_info are necessary to store, the rest is optional.
+    optional:
+      - "tx"
+      - "tx_internal"
+      - "event_log"
+      - "balance_native"
+      - "balance_erc20"
+      - "balance_erc1155"
+      - "event_erc20_transfer"
+      - "event_erc721_transfer"
+      - "event_erc1155_transfer"
+      - "contract"
+      - "contract_erc20"
+      - "contract_erc721"
+      - "token_erc721"
+  task_pool:
+    worker_count: 0 # 0 means use rpc_nodes count
+    high_queue_size: 1024
+    normal_queue_size: 2048
+    max_retry: 2
+    stats_log_interval: 30s
 
-store:
-  host: "root:123456@tcp(127.0.0.1:3306)/scanner_bsc_testnet?charset=utf8mb4"
-  channel_size: 100
-  batch_size: 100
-  worker_count: 8
-  auto_create_tables: true # prd environment set false
-  # all parsed data has been published to mq
-  # block,chain_binlog,scanner_info are necessary to store, the rest is optional.
-  optional:
-    - "tx"
-    - "tx_internal"
-    - "event_log"
-    - "balance_native"
-    - "balance_erc20"
-    - "balance_erc1155"
-    - "event_erc20_transfer"
-    - "event_erc721_transfer"
-    - "event_erc1155_transfer"
-    - "contract"
-    - "contract_erc20"
-    - "contract_erc721"
-    - "token_erc721"
-
-publish:
-  kafka_servers:
-    - "127.0.0.1:9092"
-  topic: "scanner_bsc_testnet"
-  channel_size: 100
+metrics:
+  enable: true
+  addr: "127.0.0.1:6060"
+  path: "./vars"
 
 #panic=0, fatal=1, error=2, warn=3, info=4, debug=5, trace=6, 
 log:
   console:
     enable: true
-    level: debug
+    level: info
   file:
     enable: true
     name: "./logs/app.log"

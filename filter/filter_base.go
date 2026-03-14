@@ -64,7 +64,7 @@ func isErc1155BatchTransferEvent(topic0, topic1, topic2, topic3 string) bool {
 	return topic0 == erc1155BatchTransfer && topic1 != "" && topic2 != "" && topic3 != ""
 }
 
-func FilterErc20TransferEvent(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string) *data.EventErc20Transfer {
+func FilterErc20TransferEvent(_ string, eventLog *eth_types.Log, contractAddr string, _ uint64, topic0, topic1, topic2, topic3 string) *data.EventErc20Transfer {
 
 	if !isErc20TransferEvent(topic0, topic1, topic2, topic3) {
 		return nil
@@ -72,21 +72,7 @@ func FilterErc20TransferEvent(txHash string, eventLog *eth_types.Log, contractAd
 	sender := strings.ToLower(common.HexToAddress(topic1).Hex())
 	receiver := strings.ToLower(common.HexToAddress(topic2).Hex())
 	tokenAmount := new(big.Int).SetBytes(eventLog.Data)
-	/*
-		// erc20 balance
-		if tokenAmount.Uint64() != 0 {
-			if _, ok := balanceErc20Address[sender]; !ok {
-				balanceErc20Address[sender] = make(map[string]struct{}, 0)
-			}
-			if _, ok := balanceErc20Address[receiver]; !ok {
-				balanceErc20Address[receiver] = make(map[string]struct{}, 0)
-			}
 
-			balanceErc20Address[sender][contractAddr] = struct{}{}
-			balanceErc20Address[receiver][contractAddr] = struct{}{}
-		}
-	*/
-	// tx erc20
 	eventErc20Transfer := &data.EventErc20Transfer{
 		ContractAddr: contractAddr,
 		From:         sender,
@@ -95,20 +81,9 @@ func FilterErc20TransferEvent(txHash string, eventLog *eth_types.Log, contractAd
 	}
 
 	return eventErc20Transfer
-	/*
-		eventErc20TransferList = append(eventErc20TransferList, eventErc20Transfer)
-
-		if contractAddr != util.ZeroAddress {
-			erc20ContractAddrs[contractAddr] = struct{}{}
-		}
-
-		balanceNativeAddress[sender] = struct{}{}
-		balanceNativeAddress[receiver] = struct{}{}
-		balanceNativeAddress[contractAddr] = struct{}{}
-	*/
 }
 
-func FilterErc721TransferEvent(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string) *data.EventErc721Transfer {
+func FilterErc721TransferEvent(_ string, eventLog *eth_types.Log, contractAddr string, _ uint64, topic0, topic1, topic2, topic3 string) *data.EventErc721Transfer {
 	if !isErc721TransferEvent(topic0, topic1, topic2, topic3) {
 		return nil
 	}
@@ -117,35 +92,17 @@ func FilterErc721TransferEvent(txHash string, eventLog *eth_types.Log, contractA
 	receiver := strings.ToLower(common.HexToAddress(topic2).Hex())
 	tokenId := new(big.Int).SetBytes(common.HexToHash(topic3).Bytes()).String()
 
-	// tx erc721
 	eventErc721Transfer := &data.EventErc721Transfer{
 		ContractAddr: contractAddr,
 		From:         sender,
 		To:           receiver,
 		TokenId:      tokenId,
 	}
-	/*
-		eventErc721TransferList = append(eventErc721TransferList, eventErc721Transfer)
-
-		tokenErc721KeyValue := TokenErc721KeyValue{
-			ContractAddr: contractAddr,
-			TokenId:      tokenId,
-		}
-		tokenErc721Set[tokenErc721KeyValue] = tokenErc721KeyValue
-
-		if contractAddr != util.ZeroAddress {
-			erc721ContractAddrs[contractAddr] = struct{}{}
-		}
-
-		balanceNativeAddress[sender] = struct{}{}
-		balanceNativeAddress[receiver] = struct{}{}
-		balanceNativeAddress[contractAddr] = struct{}{}
-	*/
 
 	return eventErc721Transfer
 }
 
-func FilterErc1155SingleTransferEvent(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string) *data.EventErc1155Transfer {
+func FilterErc1155SingleTransferEvent(_ string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string) *data.EventErc1155Transfer {
 	if !isErc1155SingleTransferEvent(topic0, topic1, topic2, topic3) {
 		return nil
 	}
@@ -164,20 +121,7 @@ func FilterErc1155SingleTransferEvent(txHash string, eventLog *eth_types.Log, co
 	sender := strings.ToLower(common.HexToAddress(topic2).Hex())
 	receiver := strings.ToLower(common.HexToAddress(topic3).Hex())
 	tokenId := eventNonIndexedData.Id.String()
-	/*
-		// balance erc1155
-		if _, ok := balanceErc1155Address[contractAddr]; !ok {
-			balanceErc1155Address[contractAddr] = make(map[string]string, 0)
-		}
 
-		if sender != util.ZeroAddress {
-			balanceErc1155Address[contractAddr][tokenId] = sender
-		}
-		if receiver != util.ZeroAddress {
-			balanceErc1155Address[contractAddr][tokenId] = receiver
-		}
-	*/
-	// tx erc1155
 	tokens := eventNonIndexedData.Value
 	amount := tokens.String()
 
@@ -191,14 +135,6 @@ func FilterErc1155SingleTransferEvent(txHash string, eventLog *eth_types.Log, co
 	}
 
 	return eventErc1155Transfer
-	/*
-		eventErc1155TransferList = append(eventErc1155TransferList, eventErc1155Transfer)
-
-		balanceNativeAddress[operator] = struct{}{}
-		balanceNativeAddress[sender] = struct{}{}
-		balanceNativeAddress[receiver] = struct{}{}
-		balanceNativeAddress[contractAddr] = struct{}{}
-	*/
 }
 
 func FilterErc1155BatchTransferEvent(txHash string, eventLog *eth_types.Log, contractAddr string, height uint64, topic0, topic1, topic2, topic3 string) []*data.EventErc1155Transfer {
@@ -234,7 +170,6 @@ func FilterErc1155BatchTransferEvent(txHash string, eventLog *eth_types.Log, con
 
 		tokenId := id.String()
 
-		// tx erc1155
 		amount := values[index].String()
 
 		eventErc1155Transfer := &data.EventErc1155Transfer{

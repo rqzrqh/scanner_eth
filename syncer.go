@@ -2,40 +2,30 @@ package main
 
 import (
 	"context"
-	"math"
+	"fmt"
 	"math/big"
 	"os"
 	"scanner_eth/config"
 	"scanner_eth/fetch"
 	"scanner_eth/filter"
-	"scanner_eth/model"
-	"scanner_eth/publish"
-	"scanner_eth/store"
-	"scanner_eth/types"
-	"sort"
 
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/segmentio/kafka-go"
+	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
 type Syncer struct {
-	hns []*fetch.HeaderNotifier
-	fm  *fetch.FetchManager
-	sm  *store.StoreManager
-	pm  *publish.PublishManager
+	fm *fetch.FetchManager
 }
 
-func newSyncer(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, w *kafka.Writer, chainId int64, genesisBlockHash string, messageId uint64, publishedMessageId uint64, optionalTables map[string]struct{}) *Syncer {
+func newSyncer(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, redisClient *redis.Client, chainId int64, genesisBlockHash string, optionalTables map[string]struct{}) *Syncer {
 
 	reversibleBlocks := conf.Chain.ReversibleBlocks
 	startHeight, endHeight, enableInternalTx := conf.Fetch.StartHeight, conf.Fetch.EndHeight, conf.Fetch.EnableInternalTx
-	storeChannelSize, storeBatchSize, storeWorkerCount := conf.Store.ChannelSize, conf.Store.BatchSize, conf.Store.WorkerCount
 
 	logrus.Infof("reversibleBlocks:%v", reversibleBlocks)
 	logrus.Infof("startHeight:%v endHeight:%v enableInternalTx:%v", startHeight, endHeight, enableInternalTx)
-	logrus.Infof("storeChannelSize:%v storeBatchSize:%v storeWorkerCount:%v", storeChannelSize, storeBatchSize, storeWorkerCount)
 
 	if startHeight > endHeight {
 		logrus.Errorf("start height must be less than end height. startHeight:%v endHeight:%v", startHeight, endHeight)
@@ -43,60 +33,67 @@ func newSyncer(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, w 
 	}
 
 	filter.InitBaseFilter()
-	filter.InitMemeEventFilter(conf.Filter.Meme.ContractAddress)
-	filter.InitErc20PaymentEventFilter(conf.Filter.Erc20Payment.ContractAddress)
-	filter.InitHybridNftEventFilter(conf.Filter.HybridNft.ContractAddress)
-	filter.InitUniswapV2EventFilter(conf.Filter.UniswapV2.RouterAddress)
 
 	fetch.SetEnableInternalTx(enableInternalTx)
+	fetch.SetOptionalFeatures(optionalTables)
 
-	store.SetOptionalFeatures(optionalTables)
+	fetch.InitStore(db, conf.Fetch.Store.BatchSize, conf.Fetch.Store.WorkerCount)
 
 	checkNodeChainInfo(clients, chainId, genesisBlockHash)
 
 	logrus.Infof("node chain info check passed")
 
-	storeOperationChannel := make(chan *types.StoreOperation, storeChannelSize)
-	publishFeedbackOperationChannel := make(chan *types.PublishFeedbackOperation, 100)
-
-	publishOperationChannel := make(chan *types.PublishOperation, 100)
-	pm := publish.NewPublishManager(w, publishOperationChannel, publishFeedbackOperationChannel)
-
-	sm := store.NewStoreManager(db, chainId, messageId, publishedMessageId, storeBatchSize, storeWorkerCount, storeOperationChannel, publishFeedbackOperationChannel, publishOperationChannel)
-
-	remoteChainUpdateChannel := make(chan *types.RemoteChainUpdate, 100)
-	maxUnorganizedBlockCount := 50 * len(clients)
-	blkDigestList := loadLatestBlock(clients, db, startHeight, reversibleBlocks)
-
-	logrus.Infof("load latest block success. count:%v", len(blkDigestList))
-	for _, blk := range blkDigestList {
-		logrus.Infof("latest block height:%v hash:%v parentHash:%v", blk.Height, blk.Hash, blk.ParentHash)
+	taskPoolOptions := fetch.TaskPoolOptions{
+		WorkerCount:      conf.Fetch.TaskPool.WorkerCount,
+		HighQueueSize:    conf.Fetch.TaskPool.HighQueueSize,
+		NormalQueueSize:  conf.Fetch.TaskPool.NormalQueueSize,
+		MaxRetry:         conf.Fetch.TaskPool.MaxRetry,
+		StatsLogInterval: conf.Fetch.TaskPool.StatsLogInterval,
 	}
+	logrus.Infof("taskPoolConfig workerCount:%v highQueueSize:%v normalQueueSize:%v maxRetry:%v statsLogInterval:%v",
+		taskPoolOptions.WorkerCount,
+		taskPoolOptions.HighQueueSize,
+		taskPoolOptions.NormalQueueSize,
+		taskPoolOptions.MaxRetry,
+		taskPoolOptions.StatsLogInterval,
+	)
 
-	localChain := fetch.NewLocalChain(reversibleBlocks, blkDigestList)
-	fm := fetch.NewFetchManager(clients, localChain, endHeight, maxUnorganizedBlockCount, remoteChainUpdateChannel, storeOperationChannel, db)
+	dbOperator := fetch.NewDbOperator(db, conf.Chain.ChainId, reversibleBlocks)
+	blockFetcher := fetch.NewBlockFetcher(db)
 
-	hns := make([]*fetch.HeaderNotifier, len(clients))
-	for i, client := range clients {
-		hns[i] = fetch.NewHeaderNotifier(i, client, remoteChainUpdateChannel)
+	fm := fetch.NewFetchManager(
+		conf.Chain.ChainName,
+		clients,
+		redisClient,
+		startHeight,
+		endHeight,
+		reversibleBlocks,
+		conf.Fetch.Timeout,
+		taskPoolOptions,
+		db,
+		conf.Chain.ChainId,
+		dbOperator,
+		blockFetcher,
+	)
+	if conf.Metrics.Enable {
+		fm.EnableTaskPoolMetrics(fmt.Sprintf("fetch_task_pool_%s", conf.Chain.ChainName))
 	}
 
 	return &Syncer{
-		hns: hns,
-		fm:  fm,
-		sm:  sm,
-		pm:  pm,
+		fm: fm,
 	}
 }
 
 func (s *Syncer) Run() {
-
-	s.pm.Run()
-	s.sm.Run()
 	s.fm.Run()
+}
 
-	for _, hn := range s.hns {
-		hn.Run()
+func (s *Syncer) Stop() {
+	if s == nil {
+		return
+	}
+	if s.fm != nil {
+		s.fm.Stop()
 	}
 }
 
@@ -126,74 +123,4 @@ func checkNodeChainInfo(clients []*ethclient.Client, dbChainId int64, dbGenesisB
 			os.Exit(0)
 		}
 	}
-}
-
-func loadLatestBlock(clients []*ethclient.Client, db *gorm.DB, startHeight uint64, reversibleBlocks int) []*fetch.BlockDigest {
-	blkDigestList := make([]*fetch.BlockDigest, 0)
-
-	var latestBlockList []*model.Block
-	if err := db.Order("height desc").Limit(reversibleBlocks).Find(&latestBlockList).Error; err != nil {
-		logrus.Errorf("failed to load latest blocks from db %v", err)
-		os.Exit(0)
-	}
-
-	if len(latestBlockList) == 0 {
-
-		var fetchHeight uint64
-		// meaning from beginning
-		if startHeight == 0 || startHeight == math.MaxUint64 {
-			fetchHeight = 0
-		} else {
-			fetchHeight = startHeight - 1
-		}
-
-		header, err := clients[0].HeaderByNumber(context.Background(), new(big.Int).SetUint64(fetchHeight))
-		if err != nil {
-			logrus.Warnf("startup failed to get block header. height:%v err:%v", fetchHeight, err)
-			os.Exit(0)
-		}
-
-		if header == nil {
-			logrus.Warnf("startup get empty block. height:%v", fetchHeight)
-			os.Exit(0)
-		}
-
-		startBlockHeight := header.Number.Uint64()
-		startBlockHash := header.Hash().Hex()
-		startBlockParentHash := header.ParentHash.Hex()
-
-		block := &model.Block{
-			Height:     startBlockHeight,
-			Hash:       startBlockHash,
-			ParentHash: startBlockParentHash,
-		}
-
-		if err := db.Create(block).Error; err != nil {
-			logrus.Errorf("startup insert block to db failed. height:%v err:%v", startBlockHeight, err)
-			os.Exit(0)
-		}
-
-		blk := &fetch.BlockDigest{
-			Height:     startBlockHeight,
-			Hash:       startBlockHash,
-			ParentHash: startBlockParentHash,
-		}
-		blkDigestList = append(blkDigestList, blk)
-
-	} else {
-		sort.Slice(latestBlockList, func(i, j int) bool {
-			return latestBlockList[i].Height < latestBlockList[j].Height
-		})
-	}
-
-	for _, v := range latestBlockList {
-		blk := &fetch.BlockDigest{
-			Height:     v.Height,
-			Hash:       v.Hash,
-			ParentHash: v.ParentHash,
-		}
-		blkDigestList = append(blkDigestList, blk)
-	}
-
-	return blkDigestList
 }
