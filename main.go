@@ -73,7 +73,7 @@ func main() {
 
 	logrus.Infof("database ping success")
 
-	if conf.Store.AutoCreateTables {
+	if conf.Fetch.Store.AutoCreateTables {
 		if err := db.AutoMigrate(
 			&model.ScannerInfo{},
 			&model.ChainBinlog{},
@@ -125,9 +125,9 @@ func main() {
 	allOptionalTables[model.TokenErc721.TableName(model.TokenErc721{})] = struct{}{}
 
 	// check
-	logrus.Infof("optional:%v", conf.Store.Optional)
+	logrus.Infof("optional:%v", conf.Fetch.Store.Optional)
 	optionalTables := make(map[string]struct{}, 0)
-	for _, table := range conf.Store.Optional {
+	for _, table := range conf.Fetch.Store.Optional {
 		if _, exist := allOptionalTables[table]; !exist {
 			logrus.Errorf("optional table:%v not exist", table)
 			os.Exit(0)
@@ -170,8 +170,8 @@ func main() {
 	logrus.Infof("get chain info success. chainId:%v genesisBlockHash:%v messageId:%v publishedMessageId:%v", chainId, genesisBlockHash, messageId, publishedMessageId)
 
 	w := &kafka.Writer{
-		Addr:         kafka.TCP(conf.Publish.KafkaBrokers...),
-		Topic:        conf.Publish.Topic,
+		Addr:         kafka.TCP(conf.Kafka.Brokers...),
+		Topic:        conf.Kafka.Topic,
 		Balancer:     &kafka.LeastBytes{},
 		BatchSize:    100,
 		BatchBytes:   1024 * 1024,

@@ -29,11 +29,9 @@ func newSyncer(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, re
 
 	reversibleBlocks := conf.Chain.ReversibleBlocks
 	startHeight, endHeight, enableInternalTx := conf.Fetch.StartHeight, conf.Fetch.EndHeight, conf.Fetch.EnableInternalTx
-	storeChannelSize, storeBatchSize, storeWorkerCount := conf.Store.ChannelSize, conf.Store.BatchSize, conf.Store.WorkerCount
 
 	logrus.Infof("reversibleBlocks:%v", reversibleBlocks)
 	logrus.Infof("startHeight:%v endHeight:%v enableInternalTx:%v", startHeight, endHeight, enableInternalTx)
-	logrus.Infof("storeChannelSize:%v storeBatchSize:%v storeWorkerCount:%v", storeChannelSize, storeBatchSize, storeWorkerCount)
 
 	if startHeight > endHeight {
 		logrus.Errorf("start height must be less than end height. startHeight:%v endHeight:%v", startHeight, endHeight)
@@ -41,10 +39,10 @@ func newSyncer(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, re
 	}
 
 	filter.InitBaseFilter()
-	filter.InitMemeEventFilter(conf.Filter.Meme.ContractAddress)
-	filter.InitErc20PaymentEventFilter(conf.Filter.Erc20Payment.ContractAddress)
-	filter.InitHybridNftEventFilter(conf.Filter.HybridNft.ContractAddress)
-	filter.InitUniswapV2EventFilter(conf.Filter.UniswapV2.RouterAddress)
+	filter.InitMemeEventFilter(conf.Fetch.Filter.Meme.ContractAddress)
+	filter.InitErc20PaymentEventFilter(conf.Fetch.Filter.Erc20Payment.ContractAddress)
+	filter.InitHybridNftEventFilter(conf.Fetch.Filter.HybridNft.ContractAddress)
+	filter.InitUniswapV2EventFilter(conf.Fetch.Filter.UniswapV2.RouterAddress)
 
 	fetch.SetEnableInternalTx(enableInternalTx)
 
@@ -65,7 +63,7 @@ func newSyncer(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, re
 	}
 
 	localChain := fetch.NewLocalChain(reversibleBlocks, blkDigestList)
-	fm := fetch.NewFetchManager(conf.Chain.ChainName, clients, redisClient, conf.Fetch.Interval, conf.Fetch.ExecuteAgain, localChain, endHeight, maxUnorganizedBlockCount, remoteChainUpdateChannel, storeOperationChannel, db)
+	fm := fetch.NewFetchManager(conf.Chain.ChainName, clients, redisClient, conf.Fetch.Interval, conf.Fetch.ExecuteAgain, localChain, endHeight, maxUnorganizedBlockCount, db)
 
 	return &Syncer{
 		fm: fm,

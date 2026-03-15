@@ -46,6 +46,11 @@ type Filter struct {
 	UniswapV2      UniswapV2      `mapstructure:"uniswapv2"`
 }
 
+type Store struct {
+	AutoCreateTables bool     `mapstructure:"auto_create_tables"`
+	Optional         []string `mapstructure:"optional"`
+}
+
 type Fetch struct {
 	RpcNodes         []string      `mapstructure:"rpc_nodes"`
 	Timeout          time.Duration `mapstructure:"timeout"`
@@ -54,22 +59,16 @@ type Fetch struct {
 	EnableInternalTx bool          `mapstructure:"enable_internal_tx"`
 	Interval         time.Duration `mapstructure:"interval"`
 	ExecuteAgain     bool          `mapstructure:"execute_again"`
+	Filter           Filter        `mapstructure:"filter"`
+	Store            Store         `mapstructure:"store"`
 }
 
-type Store struct {
-	Host             string   `mapstructure:"host"`
-	ChannelSize      int      `mapstructure:"channel_size"`
-	BatchSize        int      `mapstructure:"batch_size"`
-	WorkerCount      int      `mapstructure:"worker_count"`
-	AutoCreateTables bool     `mapstructure:"auto_create_tables"`
-	Optional         []string `mapstructure:"optional"`
+type Kafka struct {
+	Brokers []string `mapstructure:"brokers"`
+	Topic   string   `mapstructure:"topic"`
 }
 
 type Publish struct {
-	Enable       bool          `mapstructure:"enable"`
-	KafkaBrokers []string      `mapstructure:"kafka_servers"`
-	Topic        string        `mapstructure:"topic"`
-	ChannelSize  int           `mapstructure:"channel_size"`
 	Interval     time.Duration `mapstructure:"interval"`
 	ExecuteAgain bool          `mapstructure:"execute_again"`
 }
@@ -96,12 +95,11 @@ type Log struct {
 type Config struct {
 	AppName  string                 `mapstructure:"app_name"`
 	Chain    Chain                  `mapstructure:"chain"`
-	Filter   Filter                 `mapstructure:"filter"`
 	Fetch    Fetch                  `mapstructure:"fetch"`
-	Store    Store                  `mapstructure:"store"`
 	Publish  Publish                `mapstructure:"publish"`
 	Database middleware.Database    `mapstructure:"database"`
 	Redis    middleware.RedisConfig `mapstructure:"redis"`
+	Kafka    Kafka                  `mapstructure:"kafka"`
 	Log      Log                    `mapstructure:"log"`
 }
 
@@ -136,12 +134,10 @@ func LoadConf(fpath string, env string) (*Config, error) {
 			StartHeight:      math.MaxUint64,
 			EndHeight:        math.MaxUint64,
 			EnableInternalTx: true,
-		},
-		Store: Store{
-			ChannelSize:      100,
-			BatchSize:        100,
-			WorkerCount:      8,
-			AutoCreateTables: true,
+			Store: Store{
+				AutoCreateTables: true,
+				Optional:         []string{},
+			},
 		},
 	}
 	vip := viper.New()
