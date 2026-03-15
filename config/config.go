@@ -49,6 +49,8 @@ type Filter struct {
 type Store struct {
 	AutoCreateTables bool     `mapstructure:"auto_create_tables"`
 	Optional         []string `mapstructure:"optional"`
+	BatchSize        int      `mapstructure:"batch_size"`
+	WorkerCount      int      `mapstructure:"worker_count"`
 }
 
 type Fetch struct {
@@ -137,6 +139,8 @@ func LoadConf(fpath string, env string) (*Config, error) {
 			Store: Store{
 				AutoCreateTables: true,
 				Optional:         []string{},
+				BatchSize:        128,
+				WorkerCount:      8,
 			},
 		},
 	}

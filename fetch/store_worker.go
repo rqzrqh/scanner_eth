@@ -1,20 +1,41 @@
-package store
+package fetch
 
 import (
-	"context"
 	"os"
 	"scanner_eth/model"
 	"scanner_eth/protocol"
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"golang.org/x/sync/errgroup"
 	"golang.org/x/xerrors"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-var taskCounter = uint64(0)
+var (
+	taskCounter          = uint64(0)
+	batchSize            int
+	storeTaskChannel     chan *StoreTask
+	storeCompleteChannel chan *StoreComplete
+)
+
+func InitStore(db *gorm.DB, _batchSize int, _workerCount int) {
+	batchSize = _batchSize
+	if _batchSize <= 0 {
+		batchSize = 128
+	}
+
+	workerCount := _workerCount
+	if workerCount <= 0 {
+		workerCount = 8
+	}
+
+	storeTaskChannel := make(chan *StoreTask, workerCount*2)
+	storeCompleteChannel := make(chan *StoreComplete, workerCount*2)
+	for i := 0; i < workerCount; i++ {
+		NewStoreWorker(i, db, storeTaskChannel, storeCompleteChannel).Run()
+	}
+}
 
 func Revert(db *gorm.DB, height uint64, chainBinlog *protocol.ChainBinlog, binlogData []byte) (uint64, error) {
 
@@ -105,40 +126,94 @@ func Revert(db *gorm.DB, height uint64, chainBinlog *protocol.ChainBinlog, binlo
 	return modelChainBinlog.Id, nil
 }
 
-func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, chainBinlog *protocol.ChainBinlog, binlogData []byte, batchSize int, storeTaskChannel chan *StoreTask, storeCompleteChannel chan *StoreComplete) (uint64, error) {
+func assignStorageBlockID(fullblock *StorageFullBlock, blockID uint64) {
+	for i := range fullblock.TxList {
+		fullblock.TxList[i].BlockId = blockID
+	}
+	for i := range fullblock.TxInternalList {
+		fullblock.TxInternalList[i].BlockId = blockID
+	}
+	for i := range fullblock.EventLogList {
+		fullblock.EventLogList[i].BlockId = blockID
+	}
+	for i := range fullblock.EventErc20TransferList {
+		fullblock.EventErc20TransferList[i].BlockId = blockID
+	}
+	for i := range fullblock.EventErc721TransferList {
+		fullblock.EventErc721TransferList[i].BlockId = blockID
+	}
+	for i := range fullblock.EventErc1155TransferList {
+		fullblock.EventErc1155TransferList[i].BlockId = blockID
+	}
+	for i := range fullblock.ContractList {
+		fullblock.ContractList[i].BlockId = blockID
+	}
+}
+
+func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, chainBinlog *protocol.ChainBinlog, binlogData []byte) (uint64, error) {
 
 	height := fullblock.Block.Height
 
-	dispatchComplete := make(chan map[uint64]struct{}, 1)
+	var blockID uint64
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		fullblock.Block.Complete = false
+		if err := tx.Create(&fullblock.Block).Error; err != nil {
+			logrus.Errorf("store chain block failed %v", err)
+			return err
+		}
+		blockID = fullblock.Block.Id
 
-	grp, _ := errgroup.WithContext(context.Background())
-
-	grp.Go(func() error {
-		taskSet := make(map[uint64]struct{})
-		splitTx(fullblock.TxList, batchSize, height, storeTaskChannel, taskSet)
-		splitEventLog(fullblock.EventLogList, batchSize, height, storeTaskChannel, taskSet)
-		splitEventErc20Transfer(fullblock.EventErc20TransferList, batchSize, height, storeTaskChannel, taskSet)
-		splitEventErc721Transfer(fullblock.EventErc721TransferList, batchSize, height, storeTaskChannel, taskSet)
-		splitEventErc1155Transfer(fullblock.EventErc1155TransferList, batchSize, height, storeTaskChannel, taskSet)
-		splitBalanceNative(fullblock.BalanceNativeList, batchSize, height, storeTaskChannel, taskSet)
-		splitBalanceErc20(fullblock.BalanceErc20List, batchSize, height, storeTaskChannel, taskSet)
-		splitBalanceErc1155(fullblock.BalanceErc1155List, batchSize, height, storeTaskChannel, taskSet)
-		splitTokenErc721(fullblock.TokenErc721List, batchSize, height, storeTaskChannel, taskSet)
-		splitContract(fullblock.ContractList, batchSize, height, storeTaskChannel, taskSet)
-		splitContractErc20(fullblock.ContractErc20List, batchSize, height, storeTaskChannel, taskSet)
-		splitContractErc721(fullblock.ContractErc721List, batchSize, height, storeTaskChannel, taskSet)
-
-		dispatchComplete <- taskSet
-
+		var prevBlock model.Block
+		if err := tx.Where("height = ?", height-1).First(&prevBlock).Error; err != nil {
+			logrus.Errorf("get prev block failed %v", err)
+			return err
+		}
+		if prevBlock.Hash != fullblock.Block.ParentHash {
+			logrus.Fatalf("prev block hash not match. height:%v prev_hash:%v current_parent_hash:%v", height, prevBlock.Hash, fullblock.Block.ParentHash)
+			os.Exit(0)
+			return xerrors.New("prev block hash not match")
+		}
 		return nil
-	})
+	}); err != nil {
+		logrus.Errorf("store block row failed %v", err)
+		return 0, err
+	}
+
+	if blockID == 0 {
+		logrus.Errorf("block_id is 0, height:%v", height)
+		return 0, xerrors.New("block_id cannot be empty")
+	}
+	assignStorageBlockID(fullblock, blockID)
+
+	var allTasks []*StoreTask
+	allTasks = append(allTasks, splitTask(Tx, toInterfaceSlice(fullblock.TxList), batchSize, height)...)
+	allTasks = append(allTasks, splitTask(TxInternalRow, toInterfaceSlice(fullblock.TxInternalList), batchSize, height)...)
+	allTasks = append(allTasks, splitTask(EventLog, toInterfaceSlice(fullblock.EventLogList), batchSize, height)...)
+	allTasks = append(allTasks, splitTask(EventErc20Transfer, toInterfaceSlice(fullblock.EventErc20TransferList), batchSize, height)...)
+	allTasks = append(allTasks, splitTask(EventErc721Transfer, toInterfaceSlice(fullblock.EventErc721TransferList), batchSize, height)...)
+	allTasks = append(allTasks, splitTask(EventErc1155Transfer, toInterfaceSlice(fullblock.EventErc1155TransferList), batchSize, height)...)
+	allTasks = append(allTasks, splitTask(BalanceNative, toInterfaceSlice(fullblock.BalanceNativeList), batchSize, height)...)
+	allTasks = append(allTasks, splitTask(BalanceErc20, toInterfaceSlice(fullblock.BalanceErc20List), batchSize, height)...)
+	allTasks = append(allTasks, splitTask(BalanceErc1155, toInterfaceSlice(fullblock.BalanceErc1155List), batchSize, height)...)
+	allTasks = append(allTasks, splitTask(TokenErc721, toInterfaceSlice(fullblock.TokenErc721List), batchSize, height)...)
+	allTasks = append(allTasks, splitTask(Contract, toInterfaceSlice(fullblock.ContractList), batchSize, height)...)
+	allTasks = append(allTasks, splitTask(ContractErc20, toInterfaceSlice(fullblock.ContractErc20List), batchSize, height)...)
+	allTasks = append(allTasks, splitTask(ContractErc721, toInterfaceSlice(fullblock.ContractErc721List), batchSize, height)...)
+
+	taskSet := make(map[uint64]struct{})
+	for _, t := range allTasks {
+		taskSet[t.taskID] = struct{}{}
+	}
+
+	go func() {
+		for _, t := range allTasks {
+			storeTaskChannel <- t
+		}
+	}()
 
 	storeFailed := false
 
-	grp.Go(func() error {
-		var dispatchTaskSet map[uint64]struct{}
-		storeCompleteTaskSet := make(map[uint64]struct{})
-
+	go func() {
 	Loop:
 		for {
 			select {
@@ -147,36 +222,13 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, chainBinlog *proto
 					storeFailed = true
 				}
 
-				storeCompleteTaskSet[c.taskID] = struct{}{}
-
-				if dispatchTaskSet != nil {
-					for k := range storeCompleteTaskSet {
-						delete(dispatchTaskSet, k)
-					}
-
-					if len(dispatchTaskSet) == 0 {
-						break Loop
-					}
-				}
-			case e := <-dispatchComplete:
-				dispatchTaskSet = e
-				for k := range storeCompleteTaskSet {
-					delete(dispatchTaskSet, k)
-				}
-
-				if len(dispatchTaskSet) == 0 {
+				delete(taskSet, c.taskID)
+				if len(taskSet) == 0 {
 					break Loop
 				}
 			}
 		}
-
-		return nil
-	})
-
-	if err := grp.Wait(); err != nil {
-		logrus.Errorf("store fullblock failed %v %v", err, height)
-		return 0, err
-	}
+	}()
 
 	if storeFailed {
 		logrus.Errorf("store fullblock failed %v", height)
@@ -193,12 +245,6 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, chainBinlog *proto
 	}
 
 	if err := db.Transaction(func(tx *gorm.DB) error {
-
-		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&fullblock.Block).Error; err != nil {
-			logrus.Errorf("store chain block failed %v", err)
-			return err
-		}
-
 		if err := tx.Create(modelChainBinlog).Error; err != nil {
 			logrus.Errorf("store chain binlog failed %v", err)
 			return err
@@ -217,21 +263,14 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, chainBinlog *proto
 			os.Exit(0)
 		}
 
-		var prevBlock model.Block
-		if err := tx.Where("height = ?", height-1).First(&prevBlock).Error; err != nil {
-			logrus.Errorf("get prev block failed %v", err)
+		if err := tx.Model(&model.Block{}).Where("id = ?", blockID).Update("complete", true).Error; err != nil {
+			logrus.Errorf("mark block complete failed %v", err)
 			return err
-		}
-
-		if prevBlock.Hash != fullblock.Block.ParentHash {
-			logrus.Fatalf("prev block hash not match. height:%v prev_hash:%v current_parent_hash:%v", height, prevBlock.Hash, fullblock.Block.ParentHash)
-			os.Exit(0)
-			return xerrors.New("prev block hash not match")
 		}
 
 		return nil
 	}); err != nil {
-		logrus.Errorf("store chain block failed %v", err)
+		logrus.Errorf("finalize store fullblock failed %v", err)
 		return 0, err
 	}
 
@@ -240,196 +279,41 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, chainBinlog *proto
 	return modelChainBinlog.Id, nil
 }
 
-func splitTask(taskType StoreTaskType, modelList []interface{}, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
+func splitTask(taskType StoreTaskType, modelList []interface{}, batchSize int, height uint64) []*StoreTask {
+	var tasks []*StoreTask
 	count := len(modelList)
-
 	round := count / batchSize
 	left := count % batchSize
 
 	for i := 0; i < round; i++ {
 		taskCounter++
 		ay := modelList[batchSize*i : batchSize*(i+1)]
-		taskSet[taskCounter] = struct{}{}
-
-		storeTaskChannel <- &StoreTask{
+		tasks = append(tasks, &StoreTask{
 			height:   height,
 			taskID:   taskCounter,
 			taskType: taskType,
 			data:     ay,
-		}
+		})
 	}
-
 	if left > 0 {
 		taskCounter++
 		ay := modelList[batchSize*round:]
-		taskSet[taskCounter] = struct{}{}
-
-		storeTaskChannel <- &StoreTask{
+		tasks = append(tasks, &StoreTask{
 			height:   height,
 			taskID:   taskCounter,
 			taskType: taskType,
 			data:     ay,
-		}
+		})
 	}
+	return tasks
 }
 
-func splitTx(modelList []model.Tx, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
-	count := len(modelList)
-
-	list := make([]interface{}, 0)
-	for _, v := range modelList {
-		list = append(list, v)
+func toInterfaceSlice[T any](s []T) []interface{} {
+	r := make([]interface{}, len(s))
+	for i, v := range s {
+		r[i] = v
 	}
-
-	splitTask(Tx, list, batchSize, height, storeTaskChannel, taskSet)
-
-	logrus.Debugf("split tx. height:%v count:%v", height, count)
-}
-
-func splitEventLog(modelList []model.EventLog, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
-	count := len(modelList)
-
-	list := make([]interface{}, 0)
-	for _, v := range modelList {
-		list = append(list, v)
-	}
-
-	splitTask(EventLog, list, batchSize, height, storeTaskChannel, taskSet)
-
-	logrus.Debugf("split event log. height:%v count:%v", height, count)
-}
-
-func splitEventErc20Transfer(modelList []model.EventErc20Transfer, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
-	count := len(modelList)
-
-	list := make([]interface{}, 0)
-	for _, v := range modelList {
-		list = append(list, v)
-	}
-
-	splitTask(EventErc20Transfer, list, batchSize, height, storeTaskChannel, taskSet)
-
-	logrus.Debugf("split event erc20 transfer. height:%v count:%v", height, count)
-}
-
-func splitEventErc721Transfer(modelList []model.EventErc721Transfer, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
-	count := len(modelList)
-
-	list := make([]interface{}, 0)
-	for _, v := range modelList {
-		list = append(list, v)
-	}
-
-	splitTask(EventErc721Transfer, list, batchSize, height, storeTaskChannel, taskSet)
-
-	logrus.Debugf("split event erc721 transfer. height:%v count:%v", height, count)
-}
-
-func splitEventErc1155Transfer(modelList []model.EventErc1155Transfer, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
-	count := len(modelList)
-
-	list := make([]interface{}, 0)
-	for _, v := range modelList {
-		list = append(list, v)
-	}
-
-	splitTask(EventErc1155Transfer, list, batchSize, height, storeTaskChannel, taskSet)
-
-	logrus.Debugf("split event erc1155 transfer. height:%v count:%v", height, count)
-}
-
-func splitBalanceNative(modelList []model.BalanceNative, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
-	count := len(modelList)
-
-	list := make([]interface{}, 0)
-	for _, v := range modelList {
-		list = append(list, v)
-	}
-
-	// balance should not be split, overwise cause database error(primary error?)
-	splitTask(BalanceNative, list, batchSize, height, storeTaskChannel, taskSet)
-
-	logrus.Debugf("split balance native. height:%v count:%v", height, count)
-}
-
-func splitBalanceErc20(modelList []model.BalanceErc20, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
-	count := len(modelList)
-
-	list := make([]interface{}, 0)
-	for _, v := range modelList {
-		list = append(list, v)
-	}
-
-	// balance erc20 should not be split, overwise cause database error(primary error?)
-	splitTask(BalanceErc20, list, batchSize, height, storeTaskChannel, taskSet)
-
-	logrus.Debugf("split balance erc20. height:%v count:%v", height, count)
-}
-
-func splitBalanceErc1155(modelList []model.BalanceErc1155, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
-	count := len(modelList)
-
-	list := make([]interface{}, 0)
-	for _, v := range modelList {
-		list = append(list, v)
-	}
-
-	// balance erc1155 should not be split, overwise cause database error(primary error?)
-	splitTask(BalanceErc1155, list, batchSize, height, storeTaskChannel, taskSet)
-
-	logrus.Debugf("split balance erc1155. height:%v count:%v", height, count)
-}
-
-func splitContract(modelList []model.Contract, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
-	count := len(modelList)
-
-	list := make([]interface{}, 0)
-	for _, v := range modelList {
-		list = append(list, v)
-	}
-
-	splitTask(Contract, list, batchSize, height, storeTaskChannel, taskSet)
-
-	logrus.Debugf("split contract. height:%v count:%v", height, count)
-}
-
-func splitContractErc20(modelList []model.ContractErc20, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
-	count := len(modelList)
-
-	list := make([]interface{}, 0)
-	for _, v := range modelList {
-		list = append(list, v)
-	}
-
-	splitTask(ContractErc20, list, batchSize, height, storeTaskChannel, taskSet)
-
-	logrus.Debugf("split contract erc20. height:%v count:%v", height, count)
-}
-
-func splitContractErc721(modelList []model.ContractErc721, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
-	count := len(modelList)
-
-	list := make([]interface{}, 0)
-	for _, v := range modelList {
-		list = append(list, v)
-	}
-
-	splitTask(ContractErc721, list, batchSize, height, storeTaskChannel, taskSet)
-
-	logrus.Debugf("split contract erc721. height:%v count:%v", height, count)
-}
-
-func splitTokenErc721(modelList []model.TokenErc721, batchSize int, height uint64, storeTaskChannel chan *StoreTask, taskSet map[uint64]struct{}) {
-	count := len(modelList)
-
-	list := make([]interface{}, 0)
-	for _, v := range modelList {
-		list = append(list, v)
-	}
-
-	splitTask(TokenErc721, list, batchSize, height, storeTaskChannel, taskSet)
-
-	logrus.Debugf("split token erc721. height:%v count:%v", height, count)
+	return r
 }
 
 type StoreTaskType byte
@@ -447,6 +331,7 @@ const (
 	Contract
 	ContractErc20
 	ContractErc721
+	TxInternalRow
 )
 
 type StoreTask struct {
@@ -498,6 +383,12 @@ func (sw *StoreWorker) Run() {
 						data = append(data, v.(model.Tx))
 					}
 					err = sw.db.Clauses(clause.OnConflict{DoNothing: true}).Create(data).Error
+				case TxInternalRow:
+					data := make([]model.TxInternal, 0)
+					for _, v := range tsk.data {
+						data = append(data, v.(model.TxInternal))
+					}
+					err = sw.db.Create(data).Error
 				case EventLog:
 					data := make([]model.EventLog, 0)
 					for _, v := range tsk.data {

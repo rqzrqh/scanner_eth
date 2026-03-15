@@ -27,6 +27,9 @@ type Block struct {
 	ReceiptRoot     string `gorm:"index;type:varchar(255);comment:receipt_root"`
 
 	ExtraData string `gorm:"type:text;comment:extra_data"`
+
+	// Complete 为 true 表示该高度下交易、事件等子数据已写入完毕
+	Complete bool `gorm:"type:tinyint;default:0;index;comment:block_store_complete"`
 }
 
 func (Block) TableName() string {

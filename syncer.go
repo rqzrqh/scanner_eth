@@ -10,7 +10,6 @@ import (
 	"scanner_eth/filter"
 	"scanner_eth/model"
 	"scanner_eth/publish"
-	"scanner_eth/store"
 	"sort"
 
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -45,8 +44,9 @@ func newSyncer(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, re
 	filter.InitUniswapV2EventFilter(conf.Fetch.Filter.UniswapV2.RouterAddress)
 
 	fetch.SetEnableInternalTx(enableInternalTx)
+	fetch.SetOptionalFeatures(optionalTables)
 
-	store.SetOptionalFeatures(optionalTables)
+	fetch.InitStore(db, conf.Fetch.Store.BatchSize, conf.Fetch.Store.WorkerCount)
 
 	checkNodeChainInfo(clients, chainId, genesisBlockHash)
 
@@ -63,7 +63,7 @@ func newSyncer(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, re
 	}
 
 	localChain := fetch.NewLocalChain(reversibleBlocks, blkDigestList)
-	fm := fetch.NewFetchManager(conf.Chain.ChainName, clients, redisClient, conf.Fetch.Interval, conf.Fetch.ExecuteAgain, localChain, endHeight, maxUnorganizedBlockCount, db)
+	fm := fetch.NewFetchManager(conf.Chain.ChainName, clients, redisClient, conf.Fetch.Interval, conf.Fetch.ExecuteAgain, localChain, endHeight, maxUnorganizedBlockCount, db, conf.Chain.ChainId)
 
 	return &Syncer{
 		fm: fm,
@@ -143,6 +143,7 @@ func loadLatestBlock(clients []*ethclient.Client, db *gorm.DB, startHeight uint6
 			Height:     startBlockHeight,
 			Hash:       startBlockHash,
 			ParentHash: startBlockParentHash,
+			Complete:   true,
 		}
 
 		if err := db.Create(block).Error; err != nil {

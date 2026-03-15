@@ -3,11 +3,8 @@ package fetch
 import (
 	"context"
 	"encoding/json"
-	"scanner_eth/fetch"
 	"scanner_eth/leader"
 	"scanner_eth/model"
-	"scanner_eth/protocol"
-	"scanner_eth/store"
 	"scanner_eth/types"
 	"time"
 
@@ -25,12 +22,24 @@ type FetchManager struct {
 	localChain               *LocalChain
 	eventHeightManager       *EventHeightManager
 	db                       *gorm.DB
+	chainId                  int64
 	forkVersion              uint64
 	remoteChainUpdateChannel <-chan *types.RemoteChainUpdate
-	hns                      []*fetch.HeaderNotifier
+	hns                      []*HeaderNotifier
 }
 
-func NewFetchManager(chainName string, clients []*ethclient.Client, redisClient *redis.Client, interval time.Duration, executeAgain bool, localChain *LocalChain, endHeight uint64, maxUnorganizedBlockCount int, db *gorm.DB) *FetchManager {
+func NewFetchManager(
+	chainName string,
+	clients []*ethclient.Client,
+	redisClient *redis.Client,
+	interval time.Duration,
+	executeAgain bool,
+	localChain *LocalChain,
+	endHeight uint64,
+	maxUnorganizedBlockCount int,
+	db *gorm.DB,
+	chainId int64,
+) *FetchManager {
 
 	InitErc20Cache()
 	InitErc721Cache()
@@ -38,10 +47,13 @@ func NewFetchManager(chainName string, clients []*ethclient.Client, redisClient 
 	election := leader.NewElection(chainName, redisClient)
 
 	remoteChainUpdateChannel := make(chan *types.RemoteChainUpdate, 100)
-	hns := make([]*fetch.HeaderNotifier, len(clients))
+	hns := make([]*HeaderNotifier, len(clients))
 	for i, client := range clients {
-		hns[i] = fetch.NewHeaderNotifier(i, client, remoteChainUpdateChannel)
+		hns[i] = NewHeaderNotifier(i, client, remoteChainUpdateChannel)
 	}
+
+	_ = endHeight
+	_ = maxUnorganizedBlockCount
 
 	return &FetchManager{
 		election:                 election,
@@ -51,6 +63,7 @@ func NewFetchManager(chainName string, clients []*ethclient.Client, redisClient 
 		localChain:               localChain,
 		eventHeightManager:       NewEventHeightManager(),
 		db:                       db,
+		chainId:                  chainId,
 		forkVersion:              0,
 		remoteChainUpdateChannel: remoteChainUpdateChannel,
 		hns:                      hns,
@@ -91,21 +104,17 @@ func (fm *FetchManager) scanEvents(ctx context.Context) (bool, error) {
 	}
 
 	for h := startHeight; h <= latestHeight; h++ {
-		item, exists := fm.eventHeightManager.Get(h)
+		item := fm.eventHeightManager.GetOrCreate(h)
 
-		// （1）不存在：新建，获取节点失败则返回；成功则起协程同步，状态设为同步中，continue
-		if !exists {
-			newItem, created := fm.eventHeightManager.GetOrCreate(h)
-			if !created {
-				continue
-			}
+		if item.State == EventHeightStateNoData {
 			nodeId, client, err := fm.nodeManager.GetBestNode(h)
 			if err != nil {
 				return true, nil
 			}
+
 			fm.eventHeightManager.SetState(h, EventHeightStateSyncing)
 			height := h
-			syncTaskId := newItem.SyncTaskId
+			syncTaskId := item.SyncTaskId
 			go func() {
 				startTime := time.Now()
 				fullBlock := FetchFullBlock(nodeId, syncTaskId, client, fm.db, height)
@@ -113,55 +122,107 @@ func (fm *FetchManager) scanEvents(ctx context.Context) (bool, error) {
 				var blockData *EventBlockData
 				if fullBlock != nil {
 					blockData = &EventBlockData{
-						FullBlock:         fullBlock,
-						StorageFullBlock:  store.ConvertStorageFullBlock(fullBlock),
-						ProtocolFullBlock: store.ConvertProtocolFullBlock(fullBlock),
+						Height:            fullBlock.Block.Height,
+						Hash:              fullBlock.Block.Hash,
+						ParentHash:        fullBlock.Block.ParentHash,
+						StorageFullBlock:  ConvertStorageFullBlock(fullBlock),
+						ProtocolFullBlock: ConvertProtocolFullBlock(fullBlock),
 					}
 				}
 				fm.eventHeightManager.SetResult(height, blockData)
 				fm.nodeManager.UpdateNodeState(nodeId, costTime.Microseconds(), fullBlock != nil)
 			}()
 			continue
+		} else if item.State == EventHeightStateWriting {
+			return false, nil
+		} else if item.State == EventHeightStateHasData {
+
 		}
 
-		// （2）没有数据：获取节点失败则返回；成功则 continue
-		if item.State == EventHeightStateSyncing || item.State == EventHeightStateNoData {
-			_, _, err := fm.nodeManager.GetBestNode(h)
-			if err != nil {
-				return true, nil
-			}
+		if item.BlockData == nil {
 			continue
 		}
+		bd := item.BlockData
+		currentHeight, tipHash := fm.localChain.GetChainInfo()
 
-		// （3）有数据：是否可衔接由 Grow 决定；不能衔接则回滚，能衔接则写库，状态设为写入中
-		if item.BlockData == nil || item.BlockData.FullBlock == nil {
-			continue
-		}
-		blk := item.BlockData.FullBlock.Block
-		currentHeight, _ := fm.localChain.GetChainInfo()
-
-		if err := fm.localChain.Grow(blk.Height, blk.Hash, blk.ParentHash); err != nil {
+		if bd.ParentHash != tipHash {
 			fm.forkVersion++
-			// Grow 判定不能衔接，回滚当前链顶，构造 Rollback 的 ChainBinlog 并下发
-			logrus.Warnf("scanEvents grow failed. height:%v err:%v", h, err)
+			logrus.Warnf("scanEvents parent hash mismatch height:%v tip:%v parent:%v", h, tipHash, bd.ParentHash)
 			if currentHeight > 0 {
 				fm.localChain.Revert(currentHeight)
-				if fm.storeOperationChannel != nil {
-					chainBinlog := buildChainBinlogRevert(currentHeight)
-					fm.storeOperationChannel <- &types.StoreOperation{
-						Type:        types.StoreRollback,
-						Height:      currentHeight,
-						ChainBinlog: chainBinlog,
+				var si model.ScannerInfo
+				if err := fm.db.Where("chain_id = ?", fm.chainId).First(&si).Error; err != nil {
+					logrus.Errorf("scanEvents revert get scanner_info failed: %v", err)
+				} else {
+					rb := buildChainBinlogRevert(currentHeight)
+					rb.ChainId = fm.chainId
+					rb.MessageId = si.MessageId + 1
+					bd, _ := json.Marshal(rb)
+					if _, err := Revert(fm.db, currentHeight, rb, bd); err != nil {
+						logrus.Errorf("scanEvents db revert failed: %v", err)
 					}
 				}
 			}
 			continue
 		}
-		// Grow 成功，构造 Apply 的 ChainBinlog 并下发
-		chainBinlog := buildChainBinlogApply(blk.Height, item.BlockData.ProtocolFullBlock)
-		StoreFullBlock(sm.db, item.BlockData, chainBinlog, binlogData, sm.batchSize, sm.storeTaskChannel, sm.storeCompleteChannel)
-		err != nil{}
+
+		var si model.ScannerInfo
+		if err := fm.db.Where("chain_id = ?", fm.chainId).First(&si).Error; err != nil {
+			logrus.Errorf("scanEvents get scanner_info failed: %v", err)
+			return true, nil
+		}
+
+		chainBinlog := buildChainBinlogApply(bd.Height, bd.ProtocolFullBlock)
+		if chainBinlog == nil {
+			continue
+		}
+		chainBinlog.ChainId = fm.chainId
+		chainBinlog.MessageId = si.MessageId + 1
+		binlogData, err := json.Marshal(chainBinlog)
+		if err != nil {
+			logrus.Errorf("scanEvents marshal chain binlog failed: %v", err)
+			continue
+		}
+
+		if bd.StorageFullBlock == nil {
+			continue
+		}
+		var doneBlk model.Block
+		if err := fm.db.Where("height = ? AND complete = ?", bd.Height, true).First(&doneBlk).Error; err == nil {
+			if cur, _ := fm.localChain.GetChainInfo(); cur < bd.Height {
+				if err := fm.localChain.Grow(bd.Height, bd.Hash, bd.ParentHash); err != nil {
+					rb := buildChainBinlogRevert(cur)
+					rb.ChainId = fm.chainId
+					rb.MessageId = si.MessageId + 1
+					bd, _ := json.Marshal(rb)
+					if _, err := Revert(fm.db, cur, rb, bd); err != nil {
+						logrus.Errorf("scanEvents db revert failed: %v", err)
+					}
+					fm.localChain.Revert(cur)
+				}
+			}
+			fm.eventHeightManager.SetState(h, EventHeightStateWriting)
+			continue
+		}
+
+		if err := fm.localChain.Grow(bd.Height, bd.Hash, bd.ParentHash); err != nil {
+			rb := buildChainBinlogRevert(currentHeight)
+			rb.ChainId = fm.chainId
+			rb.MessageId = si.MessageId + 1
+			bd, _ := json.Marshal(rb)
+			if _, err := Revert(fm.db, currentHeight, rb, bd); err != nil {
+				logrus.Errorf("scanEvents db revert failed: %v", err)
+			}
+			fm.localChain.Revert(currentHeight)
+			continue
+		}
 		fm.eventHeightManager.SetState(h, EventHeightStateWriting)
+		_, err = StoreFullBlock(fm.db, bd.StorageFullBlock, chainBinlog, binlogData)
+		if err != nil {
+			logrus.Errorf("scanEvents StoreFullBlock failed height:%v err:%v", h, err)
+			fm.localChain.Revert(bd.Height)
+			continue
+		}
 	}
 	return true, nil
 }
@@ -173,37 +234,13 @@ func (fm *FetchManager) fetch(nodeId int, syncTaskId int, client *ethclient.Clie
 	var blockData *EventBlockData
 	if fullBlock != nil {
 		blockData = &EventBlockData{
-			FullBlock:         fullBlock,
-			StorageFullBlock:  store.ConvertStorageFullBlock(fullBlock),
-			ProtocolFullBlock: store.ConvertProtocolFullBlock(fullBlock),
+			Height:            fullBlock.Block.Height,
+			Hash:              fullBlock.Block.Hash,
+			ParentHash:        fullBlock.Block.ParentHash,
+			StorageFullBlock:  ConvertStorageFullBlock(fullBlock),
+			ProtocolFullBlock: ConvertProtocolFullBlock(fullBlock),
 		}
 	}
 	fm.eventHeightManager.SetResult(height, blockData)
 	fm.nodeManager.UpdateNodeState(nodeId, costTime.Microseconds(), fullBlock != nil)
-}
-
-// buildChainBinlogApply 根据 Grow 构造 Apply 的 ChainBinlog，Data 为协议块序列化
-func buildChainBinlogApply(height uint64, protocolFullBlock *protocol.FullBlock) *protocol.ChainBinlog {
-	if protocolFullBlock == nil {
-		return nil
-	}
-	data, err := json.Marshal(protocolFullBlock)
-	if err != nil {
-		logrus.Warnf("buildChainBinlogApply marshal protocol fullblock failed. height:%v err:%v", height, err)
-		return nil
-	}
-	return &protocol.ChainBinlog{
-		ActionType: protocol.ChainActionApply,
-		Height:     height,
-		Data:       data,
-	}
-}
-
-// buildChainBinlogRevert 根据 Revert 构造 Rollback 的 ChainBinlog
-func buildChainBinlogRevert(height uint64) *protocol.ChainBinlog {
-	return &protocol.ChainBinlog{
-		ActionType: protocol.ChainActionRollback,
-		Height:     height,
-		Data:       nil,
-	}
 }

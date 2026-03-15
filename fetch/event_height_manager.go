@@ -1,9 +1,7 @@
 package fetch
 
 import (
-	"scanner_eth/data"
 	"scanner_eth/protocol"
-	"scanner_eth/store"
 	"sync"
 )
 
@@ -15,17 +13,19 @@ const (
 	EventHeightStateWriting            // 写入中
 )
 
-// EventBlockData 合并三种区块表示：原始 FullBlock、存储块、协议块
+// EventBlockData 包含区块高度、hash、前一块 hash，以及存储块与协议块
 type EventBlockData struct {
-	FullBlock         *data.FullBlock
-	StorageFullBlock  *store.StorageFullBlock
+	Height            uint64
+	Hash              string
+	ParentHash        string
+	StorageFullBlock  *StorageFullBlock
 	ProtocolFullBlock *protocol.FullBlock
 }
 
 type EventHeightItem struct {
 	State      int
-	SyncTaskId int // 该高度同步任务的唯一 ID
-	BlockData  *EventBlockData // 有数据时包含 FullBlock / 存储块 / 协议块，无数据为 nil
+	SyncTaskId int             // 该高度同步任务的唯一 ID
+	BlockData  *EventBlockData // 有数据时包含高度/hash/存储块/协议块，无数据为 nil
 }
 
 // EventHeightManager 管理事件扫描区间内每个高度的状态与数据
@@ -41,32 +41,25 @@ func NewEventHeightManager() *EventHeightManager {
 	}
 }
 
-// Get 获取某高度的项，exists 表示是否已存在
-func (ehm *EventHeightManager) Get(height uint64) (item *EventHeightItem, exists bool) {
-	ehm.mu.RLock()
-	defer ehm.mu.RUnlock()
-	item, exists = ehm.items[height]
-	return item, exists
-}
-
 // GetOrCreate 不存在则新建并返回 created=true，状态为 Syncing，并分配同步任务 ID
-func (ehm *EventHeightManager) GetOrCreate(height uint64) (item *EventHeightItem, created bool) {
+func (ehm *EventHeightManager) GetOrCreate(height uint64) *EventHeightItem {
 	ehm.mu.Lock()
 	defer ehm.mu.Unlock()
 	if item, ok := ehm.items[height]; ok {
-		return item, false
+		return item
 	}
 	ehm.nextSyncTaskId++
-	item = &EventHeightItem{
-		State:      EventHeightStateSyncing,
+	item := &EventHeightItem{
+		State:      EventHeightStateNoData,
 		SyncTaskId: ehm.nextSyncTaskId,
 	}
 	ehm.items[height] = item
-	return item, true
+	return item
 }
 
 // SetResult 同步协程完成后调用：有数据设为 HasData 并写入合并的 BlockData，无数据设为 NoData
 func (ehm *EventHeightManager) SetResult(height uint64, blockData *EventBlockData) {
+	// check task id
 	ehm.mu.Lock()
 	defer ehm.mu.Unlock()
 	item, ok := ehm.items[height]
