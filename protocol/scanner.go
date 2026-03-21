@@ -1,23 +1,19 @@
 package protocol
 
-type ChainActionType byte
-
-const (
-	ChainActionApply ChainActionType = iota
-	ChainActionRollback
-)
-
 type ChainBinlog struct {
-	ChainId    int64           `json:"chain_id"`
-	MessageId  uint64          `json:"message_id"`
-	ActionType ChainActionType `json:"action_type"`
-	Height     uint64          `json:"height"`
-	Data       []byte          `json:"full_block"`
+	ChainId            int64  `json:"chain_id"`
+	MessageId          uint64 `json:"message_id"`
+	Height             uint64 `json:"height"`
+	Hash               string `json:"hash"`
+	ParentHash         string `json:"parent_hash"`
+	IrreversibleHeight string `json:"irreversible_height"`
+	IrreversibleHash   string `json:"irreversible_hash"`
+	Data               []byte `json:"full_block"`
 }
 
 type FullBlock struct {
-	Block               *Block    `json:"block"`
-	StateSet            *StateSet `json:"state_set"`
+	Block               *Block        `json:"block"`
+	StateSet            *StateSet     `json:"state_set"`
 	MemeEvent           []interface{} `json:"meme_event"`
 	Erc20PaymentEvent   []interface{} `json:"erc20_payment_event"`
 	HybridNftEvent      []interface{} `json:"hybrid_nft_event"`

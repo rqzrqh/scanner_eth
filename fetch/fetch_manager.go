@@ -34,15 +34,17 @@ func NewFetchManager(
 	redisClient *redis.Client,
 	interval time.Duration,
 	executeAgain bool,
-	localChain *LocalChain,
+	startHeight uint64,
 	endHeight uint64,
-	maxUnorganizedBlockCount int,
+	reversibleBlocks int,
 	db *gorm.DB,
 	chainId int64,
 ) *FetchManager {
 
 	InitErc20Cache()
 	InitErc721Cache()
+
+	localChain := NewLocalChain(reversibleBlocks, make([]*BlockDigest, 0))
 
 	election := leader.NewElection(chainName, redisClient)
 
@@ -53,7 +55,6 @@ func NewFetchManager(
 	}
 
 	_ = endHeight
-	_ = maxUnorganizedBlockCount
 
 	return &FetchManager{
 		election:                 election,
@@ -88,6 +89,20 @@ func (fm *FetchManager) Run() {
 }
 
 func (fm *FetchManager) scanEvents(ctx context.Context) (bool, error) {
+
+	blkDigestList := loadLatestBlock(clients, db, startHeight, reversibleBlocks)
+	logrus.Infof("load latest block success. count:%v", len(blkDigestList))
+	for _, blk := range blkDigestList {
+		logrus.Infof("latest block height:%v hash:%v parentHash:%v", blk.Height, blk.Hash, blk.ParentHash)
+	}
+
+	// 需要事务读取当前的信息
+	// 先获取本地节点最高的高度
+	// 从数据库里读取最新高度。
+	// 先从localchain里读取最新高度，如果为空，要用startHeight进行代替。
+
+	// 遍历localchain最高高度后面的窗口。
+
 	var latestHeight uint64
 	if err := fm.db.Model(&model.Block{}).Order("height desc").Limit(1).Pluck("height", &latestHeight).Error; err != nil {
 		logrus.Warnf("scanEvents get latest height from db failed: %v", err)

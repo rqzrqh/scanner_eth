@@ -54,16 +54,7 @@ func newSyncer(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, re
 
 	pm := publish.NewPublishManager(conf.Chain.ChainName, db, redisClient, w, conf.Fetch.Interval, conf.Fetch.ExecuteAgain)
 
-	maxUnorganizedBlockCount := 50 * len(clients)
-	blkDigestList := loadLatestBlock(clients, db, startHeight, reversibleBlocks)
-
-	logrus.Infof("load latest block success. count:%v", len(blkDigestList))
-	for _, blk := range blkDigestList {
-		logrus.Infof("latest block height:%v hash:%v parentHash:%v", blk.Height, blk.Hash, blk.ParentHash)
-	}
-
-	localChain := fetch.NewLocalChain(reversibleBlocks, blkDigestList)
-	fm := fetch.NewFetchManager(conf.Chain.ChainName, clients, redisClient, conf.Fetch.Interval, conf.Fetch.ExecuteAgain, localChain, endHeight, maxUnorganizedBlockCount, db, conf.Chain.ChainId)
+	fm := fetch.NewFetchManager(conf.Chain.ChainName, clients, redisClient, conf.Fetch.Interval, conf.Fetch.ExecuteAgain, startHeight, endHeight, reversibleBlocks, db, conf.Chain.ChainId)
 
 	return &Syncer{
 		fm: fm,
