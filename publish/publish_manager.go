@@ -13,29 +13,89 @@ import (
 	"gorm.io/gorm"
 )
 
-type PublishManager struct {
-	db           *gorm.DB
-	election     *leader.Election
-	interval     time.Duration
-	executeAgain bool
-	w            *kafka.Writer
+type messageWriter interface {
+	WriteMessages(ctx context.Context, msgs ...kafka.Message) error
 }
 
-func NewPublishManager(chainName string, db *gorm.DB, redisCilent *redis.Client, w *kafka.Writer, interval time.Duration, executeAgain bool) *PublishManager {
+type PublishManager struct {
+	db        *gorm.DB
+	election  *leader.Election
+	w         messageWriter
+	loopCancel context.CancelFunc
+}
+
+func NewPublishManager(chainName string, db *gorm.DB, redisCilent *redis.Client, w *kafka.Writer) *PublishManager {
 
 	election := leader.NewElection(chainName, redisCilent)
 
 	return &PublishManager{
-		db:           db,
-		election:     election,
-		w:            w,
-		interval:     interval,
-		executeAgain: executeAgain,
+		db:       db,
+		election: election,
+		w:        w,
 	}
 }
 
 func (pm *PublishManager) Run() {
-	go pm.election.DoWithLeaderElection(context.Background(), "publishEvent", pm.interval, pm.executeAgain, pm.publishEvent)
+	go pm.election.DoWithLeaderElection(context.Background(), "publishEvent", time.Second, pm.onBecameLeader, pm.onLostLeader)
+}
+
+func (pm *PublishManager) Stop() {
+	if pm == nil {
+		return
+	}
+	pm.stopPublishLoop()
+	if pm.election != nil {
+		pm.election.TriggerLostLeader()
+	}
+}
+
+func (pm *PublishManager) onBecameLeader(ctx context.Context) error {
+	_ = ctx
+	pm.startPublishLoop()
+	return nil
+}
+
+func (pm *PublishManager) onLostLeader(ctx context.Context) error {
+	_ = ctx
+	pm.stopPublishLoop()
+	return nil
+}
+
+func (pm *PublishManager) startPublishLoop() {
+	pm.stopPublishLoop()
+
+	loopCtx, cancel := context.WithCancel(context.Background())
+	pm.loopCancel = cancel
+	loopInterval := time.Second
+
+	go func() {
+		ticker := time.NewTicker(loopInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-loopCtx.Done():
+				return
+			case <-ticker.C:
+			forAgain:
+				again, err := pm.publishEvent(loopCtx)
+				if err != nil {
+					logrus.Errorf("publishEvent error: %v", err)
+					continue
+				}
+				if again {
+					goto forAgain
+				}
+			}
+		}
+	}()
+}
+
+func (pm *PublishManager) stopPublishLoop() {
+	if pm.loopCancel != nil {
+		pm.loopCancel()
+		pm.loopCancel = nil
+	}
 }
 
 func (pm *PublishManager) publishEvent(ctx context.Context) (bool, error) {
@@ -58,7 +118,10 @@ func (pm *PublishManager) publishEvent(ctx context.Context) (bool, error) {
 	}
 
 	// 3. 推送给远端
-	if err := pm.w.WriteMessages(ctx, kafka.Message{Value: binlog.BinlogData}); err != nil {
+	if pm.w == nil {
+		return false, errors.New("kafka writer is nil")
+	}
+	if err := pm.w.WriteMessages(ctx, kafka.Message{Value: binlog.Data}); err != nil {
 		logrus.Warnf("publishEvent write kafka failed. message_id:%v err:%v", binlog.MessageId, err)
 		return false, err
 	}

@@ -29,18 +29,27 @@ func ToBlockNumArg(height *big.Int) string {
 
 func HandleErrorWithRetry(handle func() error, retryTimes int, interval time.Duration) error {
 	inc := 0
+	funcName := "unknown"
+	if handle != nil {
+		if fn := runtime.FuncForPC(reflect.ValueOf(handle).Pointer()); fn != nil {
+			funcName = fn.Name()
+		}
+	}
 	for {
+		if handle == nil {
+			return nil
+		}
 		err := handle()
 		if err == nil {
 			return nil
 		}
-		time.Sleep(interval)
-		logrus.Warnf("%v handle error with retry: %v", runtime.FuncForPC(reflect.ValueOf(handle).Pointer()).Name(), err)
-
-		inc++
-		if inc > retryTimes {
+		if inc >= retryTimes {
 			return err
 		}
+		time.Sleep(interval)
+		logrus.Warnf("%v handle error with retry: %v", funcName, err)
+
+		inc++
 	}
 }
 

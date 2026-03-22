@@ -1,0 +1,126 @@
+package fetch
+
+import (
+	"testing"
+	"time"
+
+	"scanner_eth/model"
+)
+
+func TestFetchManagerRunStopNilSafe(t *testing.T) {
+	var nilFM *FetchManager
+	nilFM.Run()
+
+	fm := newTestFetchManager(t, 2)
+	t.Cleanup(func() { fm.taskPool.stop() })
+
+	// No election set: Run should still be safe and return.
+	fm.Run()
+	fm.Stop()
+}
+
+func TestStartHeaderNotifiersAndConsumerAppliesRemoteUpdate(t *testing.T) {
+	fm := newTestFetchManager(t, 2)
+	t.Cleanup(func() { fm.taskPool.stop() })
+
+	updates := make(chan *RemoteChainUpdate, 2)
+	fm.remoteChainUpdateChannel = updates
+	fm.hns = []*HeaderNotifier{{id: 1, client: nil, remoteChainUpdateChannel: updates}}
+	fm.scanEnabled.Store(true)
+
+	fm.startHeaderNotifiersAndConsumer()
+
+	updates <- &RemoteChainUpdate{
+		NodeId:    0,
+		Height:    15,
+		BlockHash: "0x0f",
+		Header: &RemoteHeader{
+			Hash:       "0x0f",
+			ParentHash: "0x0e",
+			Number:     "0xf",
+			Difficulty: "0x2",
+		},
+	}
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		n := fm.blockTree.Get("0x0f")
+		if n != nil {
+			if h := fm.nodeManager.nodes[0].GetChainInfo(); h != 15 {
+				t.Fatalf("node height not updated, got=%d", h)
+			}
+			if len(fm.scanTriggerCh) == 0 {
+				t.Fatal("expected scan trigger after remote update")
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("header from remote update was not inserted into blocktree")
+}
+
+func TestHeaderNotifierRunNilSafe(t *testing.T) {
+	var nilNotifier *HeaderNotifier
+	nilNotifier.Run()
+
+	(&HeaderNotifier{}).Run()
+	(&HeaderNotifier{client: nil}).Run()
+}
+
+func TestStoreWorkerHelpers(t *testing.T) {
+	full := &StorageFullBlock{
+		TxList:                 []model.Tx{{}, {}},
+		TxInternalList:         []model.TxInternal{{}},
+		EventLogList:           []model.EventLog{{}},
+		EventErc20TransferList: []model.EventErc20Transfer{{}},
+		EventErc721TransferList: []model.EventErc721Transfer{{}},
+		EventErc1155TransferList: []model.EventErc1155Transfer{{}},
+		ContractList:           []model.Contract{{}},
+	}
+	assignStorageBlockID(full, 42)
+	if full.TxList[0].BlockId != 42 || full.TxList[1].BlockId != 42 {
+		t.Fatal("assignStorageBlockID should set tx block ids")
+	}
+	if full.TxInternalList[0].BlockId != 42 || full.EventLogList[0].BlockId != 42 || full.ContractList[0].BlockId != 42 {
+		t.Fatal("assignStorageBlockID should set all nested block ids")
+	}
+
+	vals := []int{1, 2, 3, 4, 5}
+	iface := toInterfaceSlice(vals)
+	if len(iface) != 5 {
+		t.Fatalf("unexpected interface slice length: %d", len(iface))
+	}
+	if iface[0].(int) != 1 || iface[4].(int) != 5 {
+		t.Fatal("toInterfaceSlice values mismatch")
+	}
+
+	taskCounter = 0
+	tasks := splitTask(Tx, iface, 2, 100)
+	if len(tasks) != 3 {
+		t.Fatalf("expected 3 split tasks, got=%d", len(tasks))
+	}
+	if tasks[0].taskID != 1 || tasks[1].taskID != 2 || tasks[2].taskID != 3 {
+		t.Fatalf("unexpected task ids: %d,%d,%d", tasks[0].taskID, tasks[1].taskID, tasks[2].taskID)
+	}
+	if len(tasks[0].data) != 2 || len(tasks[1].data) != 2 || len(tasks[2].data) != 1 {
+		t.Fatal("split task batch sizes mismatch")
+	}
+}
+
+func TestInitStoreAndNewStoreWorker(t *testing.T) {
+	// Ensure InitStore handles non-positive inputs and does not panic.
+	InitStore(nil, 0, 0)
+	if batchSize != 128 {
+		t.Fatalf("expected default batchSize=128, got=%d", batchSize)
+	}
+
+	taskCh := make(chan *StoreTask, 1)
+	completeCh := make(chan *StoreComplete, 1)
+	sw := NewStoreWorker(7, nil, taskCh, completeCh)
+	if sw == nil {
+		t.Fatal("NewStoreWorker should return non-nil")
+	}
+	if sw.id != 7 || sw.storeTaskChannel != taskCh || sw.storeCompleteChannel != completeCh {
+		t.Fatal("NewStoreWorker fields not initialized as expected")
+	}
+}

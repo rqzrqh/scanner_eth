@@ -41,6 +41,40 @@ type FetchResult struct {
 	CostTime    time.Duration
 }
 
+type BlockFetcher interface {
+	FetchBlockHeaderByHeight(nodeId int, taskId int, client *ethclient.Client, height uint64) *BlockHeaderJson
+	FetchBlockHeaderByHash(nodeId int, taskId int, client *ethclient.Client, hash string) *BlockHeaderJson
+	FetchFullBlock(nodeId int, taskId int, client *ethclient.Client, header *BlockHeaderJson) *data.FullBlock
+}
+
+type fetchManagerBlockFetcher struct {
+	db *gorm.DB
+}
+
+func NewBlockFetcher(db *gorm.DB) BlockFetcher {
+	return newFetchManagerBlockFetcher(db)
+}
+
+func newFetchManagerBlockFetcher(
+	db *gorm.DB,
+) BlockFetcher {
+	return &fetchManagerBlockFetcher{
+		db: db,
+	}
+}
+
+func (bf *fetchManagerBlockFetcher) FetchBlockHeaderByHeight(nodeId int, taskId int, client *ethclient.Client, height uint64) *BlockHeaderJson {
+	return FetchBlockHeaderByHeight(nodeId, taskId, client, bf.db, height)
+}
+
+func (bf *fetchManagerBlockFetcher) FetchBlockHeaderByHash(nodeId int, taskId int, client *ethclient.Client, hash string) *BlockHeaderJson {
+	return FetchBlockHeaderByHash(nodeId, taskId, client, bf.db, hash)
+}
+
+func (bf *fetchManagerBlockFetcher) FetchFullBlock(nodeId int, taskId int, client *ethclient.Client, header *BlockHeaderJson) *data.FullBlock {
+	return FetchFullBlock(nodeId, taskId, client, bf.db, header)
+}
+
 func transTraceAddressToString(opcode string, traceAddress []uint64) string {
 	var res = strings.ToLower(opcode)
 	for _, addr := range traceAddress {
@@ -67,30 +101,53 @@ type InternalTxParseResult struct {
 	InternalBalanceNativeAddress map[string]struct{}
 }
 
+func FetchBlockHeaderByHeight(nodeId int, taskId int, client *ethclient.Client, db *gorm.DB, height uint64) *BlockHeaderJson {
+	blkHeaderJson := &BlockHeaderJson{}
+	// fetch block header
+	startTime := time.Now()
+	h := new(big.Int).SetUint64(height)
+	err := client.Client().Call(blkHeaderJson, "eth_getBlockByNumber", util.ToBlockNumArg(h), false)
+	if err != nil {
+		logrus.Warnf("fetch header failed. nodeId:%v taskId:%v error:%v height:%v", nodeId, taskId, err, height)
+		return nil
+	}
+
+	logrus.Debugf("fetch header success. nodeId:%v taskId:%v height:%v cost:%v", nodeId, taskId, height, time.Since(startTime).String())
+
+	return blkHeaderJson
+}
+
+func FetchBlockHeaderByHash(nodeId int, taskId int, client *ethclient.Client, db *gorm.DB, hash string) *BlockHeaderJson {
+	blkHeaderJson := &BlockHeaderJson{}
+	startTime := time.Now()
+	err := client.Client().Call(blkHeaderJson, "eth_getBlockByHash", hash, false)
+	if err != nil {
+		logrus.Warnf("fetch header by hash failed. nodeId:%v taskId:%v error:%v hash:%v", nodeId, taskId, err, hash)
+		return nil
+	}
+
+	if blkHeaderJson.Hash == "" {
+		logrus.Warnf("fetch header by hash empty. nodeId:%v taskId:%v hash:%v", nodeId, taskId, hash)
+		return nil
+	}
+
+	logrus.Debugf("fetch header by hash success. nodeId:%v taskId:%v hash:%v cost:%v", nodeId, taskId, hash, time.Since(startTime).String())
+	return blkHeaderJson
+}
+
 // parse tx and log
 // fetch receipts and internal tx
 // fetch latest state, like erc20/erc721/erc1155 token info
 // the reason why not fetch the state of one specific height is fast node always lack historical state, only archive node has it.
-func FetchFullBlock(nodeId int, taskId int, client *ethclient.Client, db *gorm.DB, height uint64) *data.FullBlock {
-	blkJson := &BlockJson{}
-	// fetch block with txs
-	{
-		startTime := time.Now()
-		h := new(big.Int).SetUint64(height)
-		err := client.Client().Call(blkJson, "eth_getBlockByNumber", util.ToBlockNumArg(h), true)
-		if err != nil {
-			logrus.Warnf("fetch header failed. nodeId:%v taskId:%v error:%v height:%v", nodeId, taskId, err, height)
-			return nil
-		}
+func FetchFullBlock(nodeId int, taskId int, client *ethclient.Client, db *gorm.DB, header *BlockHeaderJson) *data.FullBlock {
 
-		logrus.Debugf("fetch header success. nodeId:%v taskId:%v txs:%v height:%v cost:%v", nodeId, taskId, len(blkJson.Txs), height, time.Since(startTime).String())
-	}
+	height := hexutil.MustDecodeUint64(header.Number)
 
-	gasUsed := hexutil.MustDecodeUint64(blkJson.GasUsed)
+	gasUsed := hexutil.MustDecodeUint64(header.GasUsed)
 
 	var baseFee *big.Int
-	if blkJson.BaseFeePerGas != "" {
-		baseFee = hexutil.MustDecodeBig(blkJson.BaseFeePerGas)
+	if header.BaseFeePerGas != "" {
+		baseFee = hexutil.MustDecodeBig(header.BaseFeePerGas)
 	}
 
 	// eip1559 set burnt fees
@@ -109,43 +166,79 @@ func FetchFullBlock(nodeId int, taskId int, client *ethclient.Client, db *gorm.D
 	totalDifficulty := big.NewInt(0)
 
 	blk := &data.Block{
-		Height:     hexutil.MustDecodeUint64(blkJson.Number),
-		Hash:       blkJson.Hash,
-		ParentHash: blkJson.ParentHash,
-		Timestamp:  int64(hexutil.MustDecodeUint64(blkJson.TimeStamp)),
-		TxCount:    len(blkJson.Txs),
-		Miner:      blkJson.Miner,
-		Size:       int(hexutil.MustDecodeUint64(blkJson.Size)),
-		Nonce:      blkJson.Nonce,
+		Height:     hexutil.MustDecodeUint64(header.Number),
+		Hash:       header.Hash,
+		ParentHash: header.ParentHash,
+		Timestamp:  int64(hexutil.MustDecodeUint64(header.TimeStamp)),
+		TxCount:    len(header.Transactions),
+		Miner:      header.Miner,
+		Size:       int(hexutil.MustDecodeUint64(header.Size)),
+		Nonce:      header.Nonce,
 		BaseFee:    baseFee.String(),
 		BurntFees:  burntFees.String(),
-		GasLimit:   hexutil.MustDecodeUint64(blkJson.GasLimit),
+		GasLimit:   hexutil.MustDecodeUint64(header.GasLimit),
 		GasUsed:    gasUsed,
 
-		UnclesCount: len(blkJson.Uncles),
+		UnclesCount: len(header.Uncles),
 
 		Difficulty:      difficulty.String(),
 		TotalDifficulty: totalDifficulty.String(),
-		StateRoot:       blkJson.StateRoot,
-		TransactionRoot: blkJson.TransactionRoot,
-		ReceiptRoot:     blkJson.ReceiptsRoot,
-		ExtraData:       blkJson.ExtraData,
+		StateRoot:       header.StateRoot,
+		TransactionRoot: header.TransactionRoot,
+		ReceiptRoot:     header.ReceiptsRoot,
+		ExtraData:       header.ExtraData,
 	}
 
-	receipts := make(map[string]*eth_types.Receipt)
+	//header.Transactions = make([]string, 0)
+
+	// Fetch transactions strictly by header transaction hashes.
+	txList := make([]*TxJson, 0, len(header.Transactions))
+	if len(header.Transactions) > 0 {
+		startTime := time.Now()
+		elemsTx := make([]rpc.BatchElem, len(header.Transactions))
+		for i, txHash := range header.Transactions {
+			tx := &TxJson{}
+			elemsTx[i] = rpc.BatchElem{
+				Method: "eth_getTransactionByHash",
+				Args:   []interface{}{txHash},
+				Result: tx,
+			}
+		}
+
+		if err := client.Client().BatchCallContext(context.Background(), elemsTx); err != nil {
+			logrus.Warnf("fetch tx by header hash failed. nodeId:%v taskId:%v height:%v error:%v", nodeId, taskId, height, err)
+			return nil
+		}
+
+		for idx, elem := range elemsTx {
+			if elem.Error != nil {
+				logrus.Warnf("fetch tx by header hash elem failed. nodeId:%v taskId:%v height:%v elem(%v) error:%v", nodeId, taskId, height, idx, elem.Error)
+				return nil
+			}
+			tx, ok := elem.Result.(*TxJson)
+			if !ok || tx == nil || tx.Hash == "" {
+				logrus.Warnf("fetch tx by header hash elem invalid. nodeId:%v taskId:%v height:%v elem(%v)", nodeId, taskId, height, idx)
+				return nil
+			}
+			txList = append(txList, tx)
+		}
+
+		logrus.Debugf("fetch tx by header hash success. nodeId:%v taskId:%v height:%v txs:%v cost:%v", nodeId, taskId, height, len(txList), time.Since(startTime).String())
+	}
 
 	// fetch receipts
+	receipts := make(map[string]*eth_types.Receipt)
 	{
 		startTime := time.Now()
-		elemsReceipts := make([]rpc.BatchElem, len(blkJson.Txs))
-		for i, tx := range blkJson.Txs {
+		elemsReceipts := make([]rpc.BatchElem, len(header.Transactions))
+		for i, txHash := range header.Transactions {
 			receipt := &eth_types.Receipt{}
 			elemsReceipt := rpc.BatchElem{
 				Method: "eth_getTransactionReceipt",
-				Args:   []interface{}{tx.Hash},
+				Args:   []interface{}{txHash},
 				Result: receipt,
 			}
-			receipts[tx.Hash] = receipt
+			receipts[txHash] = receipt
 			elemsReceipts[i] = elemsReceipt
 		}
 
@@ -162,7 +255,7 @@ func FetchFullBlock(nodeId int, taskId int, client *ethclient.Client, db *gorm.D
 				}
 			}
 		}
-		logrus.Debugf("fetch receipts success. nodeId:%v taskId:%v txs:%v height:%v cost:%v", nodeId, taskId, len(blkJson.Txs), height, time.Since(startTime).String())
+		logrus.Debugf("fetch receipts success. nodeId:%v taskId:%v txs:%v height:%v cost:%v", nodeId, taskId, len(txList), height, time.Since(startTime).String())
 	}
 
 	// fetch internal tx
@@ -172,7 +265,7 @@ func FetchFullBlock(nodeId int, taskId int, client *ethclient.Client, db *gorm.D
 			"tracer": "callTracer",
 		}
 		method := "debug_traceBlockByHash"
-		if err := client.Client().CallContext(context.Background(), &txInternalJsonList, method, blkJson.Hash, arg); err != nil {
+		if err := client.Client().CallContext(context.Background(), &txInternalJsonList, method, header.Hash, arg); err != nil {
 			logrus.Warnf("fetch internal tx failed. nodeId:%v taskId:%v err:%v height:%v", nodeId, taskId, err, height)
 			return nil
 		}
@@ -189,7 +282,7 @@ func FetchFullBlock(nodeId int, taskId int, client *ethclient.Client, db *gorm.D
 	}
 
 	// parse txs
-	txParseResult := parseTx(blkJson.Txs, receipts, height, baseFee)
+	txParseResult := parseTx(txList, receipts, height, baseFee)
 
 	// parse internal txs
 	internalTxParseResult := parseTxInternal(txInternalJsonList, height)

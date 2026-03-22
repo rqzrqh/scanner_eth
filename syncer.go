@@ -2,15 +2,13 @@ package main
 
 import (
 	"context"
-	"math"
+	"fmt"
 	"math/big"
 	"os"
 	"scanner_eth/config"
 	"scanner_eth/fetch"
 	"scanner_eth/filter"
-	"scanner_eth/model"
 	"scanner_eth/publish"
-	"sort"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/redis/go-redis/v9"
@@ -52,9 +50,42 @@ func newSyncer(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, re
 
 	logrus.Infof("node chain info check passed")
 
-	pm := publish.NewPublishManager(conf.Chain.ChainName, db, redisClient, w, conf.Fetch.Interval, conf.Fetch.ExecuteAgain)
+	pm := publish.NewPublishManager(conf.Chain.ChainName, db, redisClient, w)
 
-	fm := fetch.NewFetchManager(conf.Chain.ChainName, clients, redisClient, conf.Fetch.Interval, conf.Fetch.ExecuteAgain, startHeight, endHeight, reversibleBlocks, db, conf.Chain.ChainId)
+	taskPoolOptions := fetch.TaskPoolOptions{
+		WorkerCount:      conf.Fetch.TaskPool.WorkerCount,
+		HighQueueSize:    conf.Fetch.TaskPool.HighQueueSize,
+		NormalQueueSize:  conf.Fetch.TaskPool.NormalQueueSize,
+		MaxRetry:         conf.Fetch.TaskPool.MaxRetry,
+		StatsLogInterval: conf.Fetch.TaskPool.StatsLogInterval,
+	}
+	logrus.Infof("taskPoolConfig workerCount:%v highQueueSize:%v normalQueueSize:%v maxRetry:%v statsLogInterval:%v",
+		taskPoolOptions.WorkerCount,
+		taskPoolOptions.HighQueueSize,
+		taskPoolOptions.NormalQueueSize,
+		taskPoolOptions.MaxRetry,
+		taskPoolOptions.StatsLogInterval,
+	)
+
+	dbOperator := fetch.NewDbOperator(db, reversibleBlocks)
+	blockFetcher := fetch.NewBlockFetcher(db)
+
+	fm := fetch.NewFetchManager(
+		conf.Chain.ChainName,
+		clients,
+		redisClient,
+		startHeight,
+		endHeight,
+		reversibleBlocks,
+		taskPoolOptions,
+		db,
+		conf.Chain.ChainId,
+		dbOperator,
+		blockFetcher,
+	)
+	if conf.Metrics.Enable {
+		fm.EnableTaskPoolMetrics(fmt.Sprintf("fetch_task_pool_%s", conf.Chain.ChainName))
+	}
 
 	return &Syncer{
 		fm: fm,
@@ -66,6 +97,18 @@ func (s *Syncer) Run() {
 
 	s.pm.Run()
 	s.fm.Run()
+}
+
+func (s *Syncer) Stop() {
+	if s == nil {
+		return
+	}
+	if s.pm != nil {
+		s.pm.Stop()
+	}
+	if s.fm != nil {
+		s.fm.Stop()
+	}
 }
 
 func checkNodeChainInfo(clients []*ethclient.Client, dbChainId int64, dbGenesisBlockHash string) {
@@ -94,75 +137,4 @@ func checkNodeChainInfo(clients []*ethclient.Client, dbChainId int64, dbGenesisB
 			os.Exit(0)
 		}
 	}
-}
-
-func loadLatestBlock(clients []*ethclient.Client, db *gorm.DB, startHeight uint64, reversibleBlocks int) []*fetch.BlockDigest {
-	blkDigestList := make([]*fetch.BlockDigest, 0)
-
-	var latestBlockList []*model.Block
-	if err := db.Order("height desc").Limit(reversibleBlocks).Find(&latestBlockList).Error; err != nil {
-		logrus.Errorf("failed to load latest blocks from db %v", err)
-		os.Exit(0)
-	}
-
-	if len(latestBlockList) == 0 {
-
-		var fetchHeight uint64
-		// meaning from beginning
-		if startHeight == 0 || startHeight == math.MaxUint64 {
-			fetchHeight = 0
-		} else {
-			fetchHeight = startHeight - 1
-		}
-
-		header, err := clients[0].HeaderByNumber(context.Background(), new(big.Int).SetUint64(fetchHeight))
-		if err != nil {
-			logrus.Warnf("startup failed to get block header. height:%v err:%v", fetchHeight, err)
-			os.Exit(0)
-		}
-
-		if header == nil {
-			logrus.Warnf("startup get empty block. height:%v", fetchHeight)
-			os.Exit(0)
-		}
-
-		startBlockHeight := header.Number.Uint64()
-		startBlockHash := header.Hash().Hex()
-		startBlockParentHash := header.ParentHash.Hex()
-
-		block := &model.Block{
-			Height:     startBlockHeight,
-			Hash:       startBlockHash,
-			ParentHash: startBlockParentHash,
-			Complete:   true,
-		}
-
-		if err := db.Create(block).Error; err != nil {
-			logrus.Errorf("startup insert block to db failed. height:%v err:%v", startBlockHeight, err)
-			os.Exit(0)
-		}
-
-		blk := &fetch.BlockDigest{
-			Height:     startBlockHeight,
-			Hash:       startBlockHash,
-			ParentHash: startBlockParentHash,
-		}
-		blkDigestList = append(blkDigestList, blk)
-
-	} else {
-		sort.Slice(latestBlockList, func(i, j int) bool {
-			return latestBlockList[i].Height < latestBlockList[j].Height
-		})
-	}
-
-	for _, v := range latestBlockList {
-		blk := &fetch.BlockDigest{
-			Height:     v.Height,
-			Hash:       v.Hash,
-			ParentHash: v.ParentHash,
-		}
-		blkDigestList = append(blkDigestList, blk)
-	}
-
-	return blkDigestList
 }

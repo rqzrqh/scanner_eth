@@ -19,7 +19,7 @@ func buildTreeNoPrune(t *testing.T, irreversibleCount int, inputs []insertInput)
 
 	first := inputs[0]
 	bt.root = &Node{Height: first.height, Key: first.key, ParentKey: first.parentKey, Weight: first.weight}
-	inserted := bt.internalInsert(first.height, first.key, first.parentKey, first.weight, nil)
+	inserted := bt.internalInsert(first.height, first.key, first.parentKey, first.weight, nil, nil)
 	if len(inserted) == 0 {
 		t.Fatalf("expected first insert to succeed")
 	}
@@ -28,7 +28,7 @@ func buildTreeNoPrune(t *testing.T, irreversibleCount int, inputs []insertInput)
 		if bt.Get(in.parentKey) == nil {
 			t.Fatalf("parent %s not found for child %s", in.parentKey, in.key)
 		}
-		bt.internalInsert(in.height, in.key, in.parentKey, in.weight, nil)
+		bt.internalInsert(in.height, in.key, in.parentKey, in.weight, nil, nil)
 	}
 
 	return bt
@@ -36,7 +36,7 @@ func buildTreeNoPrune(t *testing.T, irreversibleCount int, inputs []insertInput)
 
 func applyInsertList(bt *BlockTree, inputs []insertInput) {
 	for _, in := range inputs {
-		bt.Insert(in.height, in.key, in.parentKey, in.weight, nil)
+		bt.Insert(in.height, in.key, in.parentKey, in.weight, nil, nil)
 	}
 }
 
@@ -116,7 +116,7 @@ func TestNewBlockTreeInit(t *testing.T) {
 func TestInsertRootAndDuplicate(t *testing.T) {
 	bt := NewBlockTree(2)
 
-	inserted := bt.Insert(10, "A", "P", 7, nil)
+	inserted := bt.Insert(10, "A", "P", 7, nil, nil)
 	if len(inserted) != 1 {
 		t.Fatalf("expected 1 inserted record, got=%d", len(inserted))
 	}
@@ -125,8 +125,8 @@ func TestInsertRootAndDuplicate(t *testing.T) {
 	if nv.Key != "A" || nv.ParentKey != "P" || nv.Height != 10 || nv.Weight != 7 {
 		t.Fatalf("unexpected inserted node value: %+v", nv)
 	}
-	if nv.Irreversible != nil {
-		t.Fatalf("unexpected irreversible field should be nil: %+v", nv.Irreversible)
+	if nv.Irreversible.Key != "A" || nv.Irreversible.Height != 10 {
+		t.Fatalf("unexpected irreversible field: %+v", nv.Irreversible)
 	}
 
 	if bt.root == nil || bt.root.Key != "A" {
@@ -142,7 +142,7 @@ func TestInsertRootAndDuplicate(t *testing.T) {
 		t.Fatalf("tree len mismatch: got=%d", bt.Len())
 	}
 
-	dup := bt.Insert(10, "A", "P", 7, nil)
+	dup := bt.Insert(10, "A", "P", 7, nil, nil)
 	if dup != nil {
 		t.Fatal("duplicate insert should return nil")
 	}
@@ -151,7 +151,32 @@ func TestInsertRootAndDuplicate(t *testing.T) {
 	}
 }
 
-func TestInsertStoresHeaderAndOrphanPreservesHeader(t *testing.T) {
+func TestInsertRejectsHeightAtOrBelowRootWhenRootExists(t *testing.T) {
+	bt := NewBlockTree(2)
+
+	if got := bt.Insert(10, "A", "", 1, nil, nil); len(got) != 1 {
+		t.Fatalf("expected root insert record, got=%d", len(got))
+	}
+
+	if got := bt.Insert(10, "B", "A", 1, nil, nil); got != nil {
+		t.Fatal("insert at root height should be rejected")
+	}
+	if got := bt.Insert(9, "C", "A", 1, nil, nil); got != nil {
+		t.Fatal("insert below root height should be rejected")
+	}
+
+	if bt.Get("B") != nil || bt.Get("C") != nil {
+		t.Fatal("rejected nodes should not be linked")
+	}
+	if len(bt.orphanKeySet) != 0 {
+		t.Fatal("rejected nodes should not be buffered as orphans")
+	}
+	if bt.Len() != 1 {
+		t.Fatalf("tree len mismatch after rejected inserts: got=%d", bt.Len())
+	}
+}
+
+func TestInsertAcceptsHeaderArgAndOrphanResolves(t *testing.T) {
 	type mockHeader struct {
 		id string
 	}
@@ -159,77 +184,31 @@ func TestInsertStoresHeaderAndOrphanPreservesHeader(t *testing.T) {
 	bt := NewBlockTree(2)
 
 	hA := &mockHeader{id: "A"}
-	inserted := bt.Insert(1, "A", "", 1, hA)
+	inserted := bt.Insert(1, "A", "", 1, hA, nil)
 	if len(inserted) != 1 {
 		t.Fatalf("expected 1 inserted record, got=%d", len(inserted))
-	}
-	if inserted[0].Header != hA {
-		t.Fatalf("root linked node header mismatch: got=%v want=%v", inserted[0].Header, hA)
-	}
-	if bt.root == nil || bt.root.Header != hA {
-		t.Fatalf("root header mismatch: got=%v want=%v", bt.root, hA)
 	}
 
 	hC := &mockHeader{id: "C"}
-	if got := bt.Insert(3, "C", "B", 1, hC); got != nil {
+	if got := bt.Insert(3, "C", "B", 1, hC, nil); got != nil {
 		t.Fatal("orphan insert should return nil")
 	}
 
-	resolved := bt.Insert(2, "B", "A", 1, nil)
+	resolved := bt.Insert(2, "B", "A", 1, nil, nil)
 	if len(resolved) != 2 {
 		t.Fatalf("expected B and C to be inserted, got=%d", len(resolved))
 	}
-
-	c := mustGet(t, bt, "C")
-	if c.Header != hC {
-		t.Fatalf("orphan-resolved node header mismatch: got=%v want=%v", c.Header, hC)
-	}
-}
-
-func TestSetDataStoresPointerPayload(t *testing.T) {
-	type payload struct {
-		value string
-	}
-
-	bt := NewBlockTree(2)
-	inserted := bt.Insert(1, "A", "", 1, nil)
-	if len(inserted) != 1 {
-		t.Fatalf("expected 1 inserted record, got=%d", len(inserted))
-	}
-	if inserted[0].Data != nil {
-		t.Fatalf("expected Data to be nil before set, got=%v", inserted[0].Data)
-	}
-
-	p := &payload{value: "payload-A"}
-	if !bt.SetData("A", p) {
-		t.Fatal("expected SetData to succeed for linked node A")
-	}
-
-	node := mustGet(t, bt, "A")
-	if node.Data != p {
-		t.Fatalf("node Data mismatch: got=%v want=%v", node.Data, p)
-	}
-	if inserted[0].Data != p {
-		t.Fatalf("insert return value should reflect updated Data: got=%v want=%v", inserted[0].Data, p)
-	}
-}
-
-func TestSetDataMissingNodeReturnsFalse(t *testing.T) {
-	bt := NewBlockTree(2)
-
-	if bt.SetData("missing", &struct{}{}) {
-		t.Fatal("SetData should return false for missing node")
-	}
+	mustGet(t, bt, "C")
 }
 
 func TestInsertOrphanAndCascadeResolve(t *testing.T) {
 	bt := NewBlockTree(2)
 
-	if got := bt.Insert(1, "A", "", 1, nil); len(got) != 1 {
+	if got := bt.Insert(1, "A", "", 1, nil, nil); len(got) != 1 {
 		t.Fatalf("expected root insert record, got=%d", len(got))
 	}
 
-	if got := bt.Insert(3, "C", "B", 30, nil); got != nil {
+	if got := bt.Insert(3, "C", "B", 30, nil, nil); got != nil {
 		t.Fatal("orphan insert should return nil")
 	}
 	if _, ok := bt.orphanParentToChild["B"]["C"]; !ok {
@@ -239,7 +218,7 @@ func TestInsertOrphanAndCascadeResolve(t *testing.T) {
 		t.Fatal("orphanKeySet should record orphan C")
 	}
 
-	got := bt.Insert(2, "B", "A", 20, nil)
+	got := bt.Insert(2, "B", "A", 20, nil, nil)
 	if len(got) != 2 {
 		t.Fatalf("expected B and C to be inserted, got=%d", len(got))
 	}
@@ -258,11 +237,11 @@ func TestInsertOrphanAndCascadeResolve(t *testing.T) {
 	}
 
 	b := mustGet(t, bt, "B")
-	if b.Irreversible != nil {
-		t.Fatalf("B should not have irreversible ancestor yet: %+v", b.Irreversible)
+	if b.Irreversible.Key != "A" || b.Irreversible.Height != 1 {
+		t.Fatalf("B irreversible ancestor mismatch: %+v", b.Irreversible)
 	}
 	c := mustGet(t, bt, "C")
-	if c.Irreversible == nil || c.Irreversible.Key != "A" || c.Irreversible.Height != 1 {
+	if c.Irreversible.Key != "A" || c.Irreversible.Height != 1 {
 		t.Fatalf("C irreversible ancestor mismatch: %+v", c.Irreversible)
 	}
 }
@@ -270,11 +249,11 @@ func TestInsertOrphanAndCascadeResolve(t *testing.T) {
 func TestInsertDuplicateOrphanKeyIgnored(t *testing.T) {
 	bt := NewBlockTree(2)
 
-	bt.Insert(1, "A", "", 1, nil)
-	if got := bt.Insert(3, "C", "B", 1, nil); got != nil {
+	bt.Insert(1, "A", "", 1, nil, nil)
+	if got := bt.Insert(3, "C", "B", 1, nil, nil); got != nil {
 		t.Fatal("first orphan insert should return nil")
 	}
-	if got := bt.Insert(3, "C", "X", 2, nil); got != nil {
+	if got := bt.Insert(3, "C", "X", 2, nil, nil); got != nil {
 		t.Fatal("duplicate orphan key insert should return nil")
 	}
 
@@ -296,9 +275,9 @@ func TestHeightRange(t *testing.T) {
 		t.Fatalf("empty tree height range mismatch: start=%d end=%d ok=%v", start, end, ok)
 	}
 
-	bt.Insert(10, "A", "", 1, nil)
-	bt.Insert(11, "B", "A", 1, nil)
-	bt.Insert(12, "C", "B", 1, nil)
+	bt.Insert(10, "A", "", 1, nil, nil)
+	bt.Insert(11, "B", "A", 1, nil, nil)
+	bt.Insert(12, "C", "B", 1, nil, nil)
 
 	start, end, ok := bt.HeightRange()
 	if !ok {
@@ -312,12 +291,12 @@ func TestHeightRange(t *testing.T) {
 func TestUnlinkedNodesReturnsOrphanParentsNotInOrphanKeySet(t *testing.T) {
 	bt := NewBlockTree(2)
 
-	bt.Insert(1, "A", "", 1, nil)
-	bt.Insert(3, "C", "B", 1, nil)
-	bt.Insert(2, "B", "X", 1, nil)
-	bt.Insert(6, "F", "E", 1, nil)
-	bt.Insert(5, "E", "Y", 1, nil)
-	bt.Insert(4, "D", "A", 1, nil)
+	bt.Insert(1, "A", "", 1, nil, nil)
+	bt.Insert(3, "C", "B", 1, nil, nil)
+	bt.Insert(2, "B", "X", 1, nil, nil)
+	bt.Insert(6, "F", "E", 1, nil, nil)
+	bt.Insert(5, "E", "Y", 1, nil, nil)
+	bt.Insert(4, "D", "A", 1, nil, nil)
 
 	// orphanParentToChild: B->{C}, X->{B}, E->{F}, Y->{E}
 	// B,E are in orphanKeySet; X,Y are missing parents not buffered as orphans
@@ -342,9 +321,9 @@ func TestUnlinkedNodesReturnsOrphanParentsNotInOrphanKeySet(t *testing.T) {
 func TestLinkedNodesReturnsKeyValueNodes(t *testing.T) {
 	bt := NewBlockTree(2)
 
-	bt.Insert(1, "A", "", 1, nil)
-	bt.Insert(2, "B", "A", 1, nil)
-	bt.Insert(4, "D", "X", 1, nil)
+	bt.Insert(1, "A", "", 1, nil, nil)
+	bt.Insert(2, "B", "A", 1, nil, nil)
+	bt.Insert(4, "D", "X", 1, nil, nil)
 
 	got := nodeValueKeys(bt.LinkedNodes())
 	if len(got) != 2 {
@@ -375,12 +354,12 @@ func TestBranchesFromHeadersSortedByHeight(t *testing.T) {
 
 	// Build two linked branches with different header heights:
 	// A-B-C-D (header height 4), and A-Y-Z (header height 3).
-	bt.Insert(1, "A", "", 1, nil)
-	bt.Insert(2, "B", "A", 1, nil)
-	bt.Insert(3, "C", "B", 1, nil)
-	bt.Insert(4, "D", "C", 1, nil)
-	bt.Insert(2, "Y", "A", 1, nil)
-	bt.Insert(3, "Z", "Y", 1, nil)
+	bt.Insert(1, "A", "", 1, nil, nil)
+	bt.Insert(2, "B", "A", 1, nil, nil)
+	bt.Insert(3, "C", "B", 1, nil, nil)
+	bt.Insert(4, "D", "C", 1, nil, nil)
+	bt.Insert(2, "Y", "A", 1, nil, nil)
+	bt.Insert(3, "Z", "Y", 1, nil, nil)
 
 	branches := bt.Branches()
 	if len(branches) != 2 {
@@ -401,10 +380,10 @@ func TestBranchesFromHeadersSortedByHeight(t *testing.T) {
 func TestPruneAdvancesRootOnMainChain(t *testing.T) {
 	bt := NewBlockTree(2)
 
-	bt.Insert(1, "A", "", 1, nil)
-	bt.Insert(2, "B", "A", 1, nil)
-	bt.Insert(3, "C", "B", 1, nil)
-	bt.Insert(4, "D", "C", 1, nil)
+	bt.Insert(1, "A", "", 1, nil, nil)
+	bt.Insert(2, "B", "A", 1, nil, nil)
+	bt.Insert(3, "C", "B", 1, nil, nil)
+	bt.Insert(4, "D", "C", 1, nil, nil)
 	bt.Prune(1)
 
 	if bt.root == nil || bt.root.Key != "B" {
@@ -423,12 +402,12 @@ func TestPruneAdvancesRootOnMainChain(t *testing.T) {
 func TestPruneRemovesSideBranchesFromDeletedRange(t *testing.T) {
 	bt := NewBlockTree(2)
 
-	bt.Insert(1, "A", "", 1, nil)
-	bt.Insert(2, "Y", "A", 1, nil)
-	bt.Insert(3, "Z", "Y", 1, nil)
-	bt.Insert(2, "B", "A", 2, nil)
-	bt.Insert(3, "C", "B", 2, nil)
-	bt.Insert(4, "D", "C", 2, nil)
+	bt.Insert(1, "A", "", 1, nil, nil)
+	bt.Insert(2, "Y", "A", 1, nil, nil)
+	bt.Insert(3, "Z", "Y", 1, nil, nil)
+	bt.Insert(2, "B", "A", 2, nil, nil)
+	bt.Insert(3, "C", "B", 2, nil, nil)
+	bt.Insert(4, "D", "C", 2, nil, nil)
 	bt.Prune(1)
 
 	if bt.root == nil || bt.root.Key != "B" {
@@ -448,15 +427,15 @@ func TestPruneRemovesSideBranchesFromDeletedRange(t *testing.T) {
 func TestPruneTieBreakByWeightOnSameHeightLeaf(t *testing.T) {
 	bt := NewBlockTree(2)
 
-	bt.Insert(1, "A", "", 1, nil)
-	bt.internalInsert(2, "B", "A", 1, nil)
-	bt.internalInsert(2, "C", "A", 1, nil)
-	bt.internalInsert(3, "D", "B", 1, nil)
-	bt.internalInsert(3, "E", "C", 1, nil)
+	bt.Insert(1, "A", "", 1, nil, nil)
+	bt.internalInsert(2, "B", "A", 1, nil, nil)
+	bt.internalInsert(2, "C", "A", 1, nil, nil)
+	bt.internalInsert(3, "D", "B", 1, nil, nil)
+	bt.internalInsert(3, "E", "C", 1, nil, nil)
 
 	// Two headers at same height 4, heavier one should win as best leaf.
-	bt.internalInsert(4, "F", "D", 1, nil)
-	bt.internalInsert(4, "G", "E", 9, nil)
+	bt.internalInsert(4, "F", "D", 1, nil, nil)
+	bt.internalInsert(4, "G", "E", 9, nil, nil)
 
 	bt.Prune(1)
 
@@ -474,9 +453,55 @@ func TestPruneTieBreakByWeightOnSameHeightLeaf(t *testing.T) {
 	mustGet(t, bt, "G")
 }
 
+func TestPruneRemovesOrphansAtOrBelowNewRootAndReturnsThem(t *testing.T) {
+	bt := NewBlockTree(2)
+
+	bt.Insert(1, "A", "", 1, nil, nil)
+	bt.Insert(2, "B", "A", 1, nil, nil)
+	bt.Insert(3, "C", "B", 1, nil, nil)
+	bt.Insert(4, "D", "C", 1, nil, nil)
+
+	// Buffered orphans before prune: O2 should be removed, O3 should remain.
+	if got := bt.Insert(2, "O2", "MISSING-2", 1, nil, nil); got != nil {
+		t.Fatal("orphan insert should return nil")
+	}
+	if got := bt.Insert(3, "O3", "MISSING-3", 1, nil, nil); got != nil {
+		t.Fatal("orphan insert should return nil")
+	}
+
+	pruned := bt.Prune(1)
+	if bt.root == nil || bt.root.Key != "B" || bt.root.Height != 2 {
+		t.Fatalf("root should advance to B(height=2), got=%+v", bt.root)
+	}
+
+	prunedKeys := nodeValueKeys(pruned)
+	if _, ok := prunedKeys["A"]; !ok {
+		t.Fatal("linked node A should be in prune result")
+	}
+	if _, ok := prunedKeys["O2"]; !ok {
+		t.Fatal("orphan O2(height<=root) should be in prune result")
+	}
+	if _, ok := prunedKeys["O3"]; ok {
+		t.Fatal("orphan O3(height>root) should not be pruned")
+	}
+
+	if _, ok := bt.orphanKeySet["O2"]; ok {
+		t.Fatal("orphan O2 should be removed from orphanKeySet")
+	}
+	if _, ok := bt.orphanKeySet["O3"]; !ok {
+		t.Fatal("orphan O3 should remain in orphanKeySet")
+	}
+	if _, ok := bt.orphanParentToChild["MISSING-2"]; ok {
+		t.Fatal("empty orphan bucket MISSING-2 should be removed")
+	}
+	if _, ok := bt.orphanParentToChild["MISSING-3"]; !ok {
+		t.Fatal("orphan bucket MISSING-3 should remain")
+	}
+}
+
 func TestRootReturnsCopy(t *testing.T) {
 	bt := NewBlockTree(2)
-	bt.Insert(1, "A", "", 1, nil)
+	bt.Insert(1, "A", "", 1, nil, nil)
 
 	r := bt.Root()
 	if r == nil {
@@ -492,9 +517,9 @@ func TestRootReturnsCopy(t *testing.T) {
 func TestPruneNoopWhenNoIrreversibleNode(t *testing.T) {
 	bt := NewBlockTree(5)
 
-	bt.Insert(1, "A", "", 1, nil)
-	bt.Insert(2, "B", "A", 1, nil)
-	bt.Insert(3, "C", "B", 1, nil)
+	bt.Insert(1, "A", "", 1, nil, nil)
+	bt.Insert(2, "B", "A", 1, nil, nil)
+	bt.Insert(3, "C", "B", 1, nil, nil)
 
 	bt.Prune(1)
 
@@ -522,8 +547,10 @@ func TestComputeIrreversibleTableDriven(t *testing.T) {
 			inputs: []insertInput{
 				{height: 1, key: "A", parentKey: "", weight: 1},
 			},
-			parentKey: "A",
-			wantNil:   true,
+			parentKey:  "A",
+			wantHeight: 1,
+			wantKey:    "A",
+			wantNil:    false,
 		},
 		{
 			name:         "chain too short",
@@ -532,8 +559,10 @@ func TestComputeIrreversibleTableDriven(t *testing.T) {
 				{height: 1, key: "A", parentKey: "", weight: 1},
 				{height: 2, key: "B", parentKey: "A", weight: 1},
 			},
-			parentKey: "B",
-			wantNil:   true,
+			parentKey:  "B",
+			wantHeight: 1,
+			wantKey:    "A",
+			wantNil:    false,
 		},
 		{
 			name:         "exact depth available",
@@ -566,15 +595,12 @@ func TestComputeIrreversibleTableDriven(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			bt := buildTreeNoPrune(t, tt.irreversible, tt.inputs)
-			got := bt.computeIrreversible(tt.parentKey)
+			got := bt.computeIrreversible(tt.parentKey, nil)
 			if tt.wantNil {
-				if got != nil {
+				if got.Key != "" || got.Height != 0 {
 					t.Fatalf("computeIrreversible should return nil, got: %+v", got)
 				}
 			} else {
-				if got == nil {
-					t.Fatalf("computeIrreversible should not return nil")
-				}
 				if got.Height != tt.wantHeight || got.Key != tt.wantKey {
 					t.Fatalf("computeIrreversible mismatch: got=(%d,%s), want=(%d,%s)", got.Height, got.Key, tt.wantHeight, tt.wantKey)
 				}
@@ -647,5 +673,218 @@ func TestPruneMainChainRootProgressionTableDriven(t *testing.T) {
 				assertMissing(t, bt, k)
 			}
 		})
+	}
+}
+
+func TestRootNil(t *testing.T) {
+	bt := NewBlockTree(2)
+	if got := bt.Root(); got != nil {
+		t.Fatalf("expected nil root on empty tree, got=%+v", got)
+	}
+}
+
+func TestBlockTreeDoesNotOwnHeaderDataPayload(t *testing.T) {
+	bt := NewBlockTree(2)
+	bt.Insert(1, "A", "", 1, map[string]string{"header": "any"}, nil)
+	mustGet(t, bt, "A")
+}
+
+func TestWalkRemovesSubtree(t *testing.T) {
+	bt := NewBlockTree(2)
+	bt.Insert(1, "A", "", 1, nil, nil)
+	bt.Insert(2, "B", "A", 1, nil, nil)
+	bt.Insert(3, "C", "B", 1, nil, nil)
+	bt.Insert(2, "D", "A", 1, nil, nil)
+
+	walk(bt, "B")
+
+	mustGet(t, bt, "A")
+	mustGet(t, bt, "D")
+	assertMissing(t, bt, "B")
+	assertMissing(t, bt, "C")
+	if _, ok := bt.headers["D"]; !ok {
+		t.Fatal("D should remain a header")
+	}
+}
+
+func TestUnlinkedNodesSkipsEmptyBuckets(t *testing.T) {
+	bt := NewBlockTree(2)
+	bt.orphanParentToChild["P"] = map[Key]*Node{}
+	bt.orphanParentToChild["Q"] = map[Key]*Node{"C": {Key: "C", ParentKey: "Q"}}
+
+	got := keySet(bt.UnlinkedNodes())
+	if len(got) != 1 {
+		t.Fatalf("expected one unlinked parent, got=%d", len(got))
+	}
+	if _, ok := got["Q"]; !ok {
+		t.Fatal("Q should be returned")
+	}
+}
+
+func TestBranchesTieBreakAndMissingParentStop(t *testing.T) {
+	bt := NewBlockTree(2)
+	bt.Insert(1, "A", "", 1, nil, nil)
+	bt.Insert(2, "B", "A", 1, nil, nil)
+	bt.Insert(2, "C", "A", 1, nil, nil)
+
+	// Force both headers to same height/weight so key ordering branch is exercised.
+	bt.keyValue["B"].Weight = 5
+	bt.keyValue["C"].Weight = 5
+
+	branches := bt.Branches()
+	if len(branches) != 2 {
+		t.Fatalf("expected 2 branches, got=%d", len(branches))
+	}
+	if branches[0].Header.Key != "B" || branches[1].Header.Key != "C" {
+		t.Fatalf("expected key tie-break order B,C got %s,%s", branches[0].Header.Key, branches[1].Header.Key)
+	}
+
+	// Add a detached header whose parent is missing to hit the parent-not-found break.
+	bt.keyValue["X"] = &LinkedNode{Node: Node{Height: 9, Key: "X", ParentKey: "MISSING", Weight: 9}}
+	bt.headers["X"] = struct{}{}
+	branches = bt.Branches()
+	if len(branches) != 3 {
+		t.Fatalf("expected 3 branches after adding X, got=%d", len(branches))
+	}
+	if branches[0].Header.Key != "X" {
+		t.Fatalf("X should be first branch header by height, got=%s", branches[0].Header.Key)
+	}
+	if len(branches[0].Nodes) != 1 || branches[0].Nodes[0].Key != "X" {
+		t.Fatalf("X branch should stop at missing parent, got=%v", branchKeyPath(branches[0]))
+	}
+}
+
+func TestComputeIrreversibleFallbackBranches(t *testing.T) {
+	t.Run("parent empty uses irreversible when root missing", func(t *testing.T) {
+		bt := NewBlockTree(3)
+		irr := &IrreversibleNode{Height: 88, Key: "IRR"}
+		got := bt.computeIrreversible("", irr)
+		if got.Height != 88 || got.Key != "IRR" {
+			t.Fatalf("unexpected irreversible fallback: %+v", got)
+		}
+	})
+
+	t.Run("parent empty returns zero when nothing available", func(t *testing.T) {
+		bt := NewBlockTree(3)
+		got := bt.computeIrreversible("", nil)
+		if got.Key != "" || got.Height != 0 {
+			t.Fatalf("expected zero irreversible, got %+v", got)
+		}
+	})
+
+	t.Run("missing parent with explicit irreversible fallback", func(t *testing.T) {
+		bt := NewBlockTree(3)
+		irr := &IrreversibleNode{Height: 77, Key: "FALLBACK"}
+		got := bt.computeIrreversible("UNKNOWN", irr)
+		if got.Key != "FALLBACK" || got.Height != 77 {
+			t.Fatalf("expected irreversible fallback, got %+v", got)
+		}
+	})
+
+	t.Run("missing parent with no fallback returns zero", func(t *testing.T) {
+		bt := NewBlockTree(3)
+		got := bt.computeIrreversible("UNKNOWN", nil)
+		if got.Key != "" || got.Height != 0 {
+			t.Fatalf("expected zero irreversible for missing parent, got %+v", got)
+		}
+	})
+
+	t.Run("missing parent returns root fallback", func(t *testing.T) {
+		bt := NewBlockTree(3)
+		bt.Insert(1, "A", "", 1, nil, nil)
+		got := bt.computeIrreversible("UNKNOWN", nil)
+		if got.Key != "A" || got.Height != 1 {
+			t.Fatalf("expected root fallback, got %+v", got)
+		}
+	})
+
+	t.Run("missing parent in chain walk returns earliest reached", func(t *testing.T) {
+		bt := NewBlockTree(4)
+		bt.keyValue["P"] = &LinkedNode{Node: Node{Height: 10, Key: "P", ParentKey: "MISSING", Weight: 1}}
+		got := bt.computeIrreversible("P", nil)
+		if got.Key != "P" || got.Height != 10 {
+			t.Fatalf("expected fallback to first reachable parent, got %+v", got)
+		}
+	})
+}
+
+func TestPruneGuardBranches(t *testing.T) {
+	t.Run("count zero returns nil", func(t *testing.T) {
+		bt := NewBlockTree(2)
+		bt.Insert(1, "A", "", 1, nil, nil)
+		if got := bt.Prune(0); got != nil {
+			t.Fatalf("expected nil prune result, got=%v", got)
+		}
+	})
+
+	t.Run("best header nil returns nil", func(t *testing.T) {
+		bt := NewBlockTree(2)
+		bt.root = &Node{Height: 1, Key: "A"}
+		bt.headers["A"] = struct{}{}
+		bt.keyValue["A"] = nil
+		if got := bt.Prune(1); got != nil {
+			t.Fatalf("expected nil prune when header node is nil, got=%v", got)
+		}
+	})
+
+	t.Run("min new root greater than max returns nil", func(t *testing.T) {
+		bt := NewBlockTree(2)
+		bt.Insert(1, "A", "", 1, nil, nil)
+		bt.Insert(2, "B", "A", 1, nil, nil)
+		bt.Insert(3, "C", "B", 1, nil, nil)
+		if got := bt.Prune(3); got != nil {
+			t.Fatalf("expected nil prune when requested count too large, got=%v", got)
+		}
+	})
+
+	t.Run("main chain walk stops on missing parent", func(t *testing.T) {
+		bt := NewBlockTree(2)
+		// Corrupt-but-valid test state: header H exists but its parent is missing.
+		bt.root = &Node{Height: 1, Key: "R"}
+		bt.keyValue["H"] = &LinkedNode{Node: Node{Height: 5, Key: "H", ParentKey: "MISSING", Weight: 10}}
+		bt.headers["H"] = struct{}{}
+		// Ensure prune is allowed and reaches the mainChainPath parent-missing branch.
+		_ = bt.Prune(1)
+		if bt.Root() == nil {
+			t.Fatal("root should remain available after prune attempt")
+		}
+	})
+}
+
+func TestBranchesKeyTieBreakComparator(t *testing.T) {
+	bt := NewBlockTree(2)
+	bt.Insert(1, "A", "", 1, nil, nil)
+	bt.Insert(2, "C", "A", 1, nil, nil)
+	bt.Insert(2, "B", "A", 1, nil, nil)
+
+	// Force identical height and weight so key comparison branch is required.
+	bt.keyValue["B"].Weight = 9
+	bt.keyValue["C"].Weight = 9
+
+	branches := bt.Branches()
+	if len(branches) != 2 {
+		t.Fatalf("expected 2 branches, got=%d", len(branches))
+	}
+	if branches[0].Header.Key != "B" || branches[1].Header.Key != "C" {
+		t.Fatalf("expected key-order tie break B,C got %s,%s", branches[0].Header.Key, branches[1].Header.Key)
+	}
+}
+
+func TestBranchesWeightTieBreakComparator(t *testing.T) {
+	bt := NewBlockTree(2)
+	bt.Insert(1, "A", "", 1, nil, nil)
+	bt.Insert(2, "B", "A", 1, nil, nil)
+	bt.Insert(2, "C", "A", 1, nil, nil)
+
+	// Same height, different weight: heavier header should come first.
+	bt.keyValue["B"].Weight = 3
+	bt.keyValue["C"].Weight = 9
+
+	branches := bt.Branches()
+	if len(branches) != 2 {
+		t.Fatalf("expected 2 branches, got=%d", len(branches))
+	}
+	if branches[0].Header.Key != "C" || branches[1].Header.Key != "B" {
+		t.Fatalf("expected weight-order C,B got %s,%s", branches[0].Header.Key, branches[1].Header.Key)
 	}
 }

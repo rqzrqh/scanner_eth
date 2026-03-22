@@ -2,6 +2,7 @@ package fetch
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 )
@@ -19,6 +20,7 @@ func (n *NodeState) GetChainInfo() uint64 {
 }
 
 type NodeManager struct {
+	mu    sync.RWMutex
 	nodes []*NodeState
 }
 
@@ -37,19 +39,31 @@ func NewNodeManager(clients []*ethclient.Client) *NodeManager {
 	}
 }
 
-func (nm *NodeManager) GetNodeState(id int) *NodeState {
-	if id < 0 || id >= len(nm.nodes) {
-		return nil
-	}
-	return nm.nodes[id]
+func (nm *NodeManager) NodeCount() int {
+	nm.mu.RLock()
+	defer nm.mu.RUnlock()
+	return len(nm.nodes)
 }
 
-func (nm *NodeManager) NodeCount() int {
-	return len(nm.nodes)
+func (nm *NodeManager) Clients() []*ethclient.Client {
+	nm.mu.RLock()
+	defer nm.mu.RUnlock()
+
+	clients := make([]*ethclient.Client, len(nm.nodes))
+	for i, node := range nm.nodes {
+		if node == nil {
+			continue
+		}
+		clients[i] = node.client
+	}
+	return clients
 }
 
 // UpdateNodeChainInfo 收到 head_notifier 消息时调用，更新节点链上高度并置为可用
 func (nm *NodeManager) UpdateNodeChainInfo(id int, height uint64, hash string) {
+	nm.mu.Lock()
+	defer nm.mu.Unlock()
+
 	if id < 0 || id >= len(nm.nodes) {
 		return
 	}
@@ -59,6 +73,9 @@ func (nm *NodeManager) UpdateNodeChainInfo(id int, height uint64, hash string) {
 }
 
 func (nm *NodeManager) UpdateNodeState(id int, delay int64, success bool) {
+	nm.mu.Lock()
+	defer nm.mu.Unlock()
+
 	if id < 0 || id >= len(nm.nodes) {
 		return
 	}
@@ -70,6 +87,9 @@ func (nm *NodeManager) UpdateNodeState(id int, delay int64, success bool) {
 
 // SetNodeNotReady 将节点置为不可用（拉取失败时或节点被选去同步时调用）
 func (nm *NodeManager) SetNodeNotReady(id int) {
+	nm.mu.Lock()
+	defer nm.mu.Unlock()
+
 	if id < 0 || id >= len(nm.nodes) {
 		return
 	}
@@ -78,14 +98,34 @@ func (nm *NodeManager) SetNodeNotReady(id int) {
 
 // SetNodeReady 将节点恢复为可用（如 dispatch 时 popTask 失败，需释放已选中的节点）
 func (nm *NodeManager) SetNodeReady(id int) {
+	nm.mu.Lock()
+	defer nm.mu.Unlock()
+
 	if id < 0 || id >= len(nm.nodes) {
 		return
 	}
 	nm.nodes[id].ready = true
 }
 
+// SetAllNodesIdle marks all nodes as idle/ready and resets delay.
+func (nm *NodeManager) SetAllNodesIdle() {
+	nm.mu.Lock()
+	defer nm.mu.Unlock()
+
+	for _, node := range nm.nodes {
+		if node == nil {
+			continue
+		}
+		node.delay = 0
+		node.ready = true
+	}
+}
+
 // GetLatestHeight 返回所有节点中最大的链上高度（用于构造扫描区间）
 func (nm *NodeManager) GetLatestHeight() uint64 {
+	nm.mu.RLock()
+	defer nm.mu.RUnlock()
+
 	var latest uint64
 	for _, node := range nm.nodes {
 		if h, _ := node.remote.GetChainInfo(); h > latest {
@@ -97,8 +137,15 @@ func (nm *NodeManager) GetLatestHeight() uint64 {
 
 // GetBestNode 在高度 >= height 且 ready 的节点中，返回延迟最小的节点
 func (nm *NodeManager) GetBestNode(height uint64) (int, *ethclient.Client, error) {
+	nm.mu.RLock()
+	defer nm.mu.RUnlock()
+
 	nodeId := -1
+	bestDelay := int64(0)
 	for i, node := range nm.nodes {
+		if node == nil {
+			continue
+		}
 		if !node.ready {
 			continue
 		}
@@ -106,8 +153,9 @@ func (nm *NodeManager) GetBestNode(height uint64) (int, *ethclient.Client, error
 		if remoteHeight < height {
 			continue
 		}
-		if nodeId == -1 || node.delay < nm.nodes[nodeId].delay {
+		if nodeId == -1 || node.delay < bestDelay {
 			nodeId = i
+			bestDelay = node.delay
 		}
 	}
 	if nodeId == -1 {

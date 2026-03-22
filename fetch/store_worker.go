@@ -1,9 +1,11 @@
 package fetch
 
 import (
-	"os"
+	"encoding/json"
 	"scanner_eth/model"
 	"scanner_eth/protocol"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -17,6 +19,7 @@ var (
 	batchSize            int
 	storeTaskChannel     chan *StoreTask
 	storeCompleteChannel chan *StoreComplete
+	storeTaskMu          sync.Mutex
 )
 
 func InitStore(db *gorm.DB, _batchSize int, _workerCount int) {
@@ -30,100 +33,11 @@ func InitStore(db *gorm.DB, _batchSize int, _workerCount int) {
 		workerCount = 8
 	}
 
-	storeTaskChannel := make(chan *StoreTask, workerCount*2)
-	storeCompleteChannel := make(chan *StoreComplete, workerCount*2)
+	storeTaskChannel = make(chan *StoreTask, workerCount*2)
+	storeCompleteChannel = make(chan *StoreComplete, workerCount*2)
 	for i := 0; i < workerCount; i++ {
 		NewStoreWorker(i, db, storeTaskChannel, storeCompleteChannel).Run()
 	}
-}
-
-func Revert(db *gorm.DB, height uint64, chainBinlog *protocol.ChainBinlog, binlogData []byte) (uint64, error) {
-
-	modelChainBinlog := &model.ChainBinlog{
-		MessageId:  chainBinlog.MessageId,
-		ActionType: int(protocol.ChainActionRollback),
-		Height:     height,
-		BinlogData: binlogData,
-	}
-
-	if err := db.Transaction(func(tx *gorm.DB) error {
-
-		// Delete Block
-		if err := tx.Delete(&model.Block{}, "height = ?", height).Error; err != nil {
-			logrus.Errorf("delete block failed %v", err)
-			return err
-		}
-
-		// Delete Tx
-		if err := tx.Delete(&model.Tx{}, "height = ?", height).Error; err != nil {
-			logrus.Errorf("delete tx failed %v", err)
-			return err
-		}
-
-		// Delete TxInternal
-		if err := tx.Delete(&model.TxInternal{}, "height = ?", height).Error; err != nil {
-			logrus.Errorf("delete tx internal failed %v", err)
-			return err
-		}
-
-		// Delete EventLog
-		if err := tx.Delete(&model.EventLog{}, "height = ?", height).Error; err != nil {
-			logrus.Errorf("delete event log failed %v", err)
-			return err
-		}
-
-		// Delete EventErc20Transfer
-		if err := tx.Delete(&model.EventErc20Transfer{}, "height = ?", height).Error; err != nil {
-			logrus.Errorf("delete event erc20 transfer failed %v", err)
-			return err
-		}
-
-		// Delete EventErc721Transfer
-		if err := tx.Delete(&model.EventErc721Transfer{}, "height = ?", height).Error; err != nil {
-			logrus.Errorf("delete event erc721 transfer failed %v", err)
-			return err
-		}
-
-		// Delete EventErc1155Transfer
-		if err := tx.Delete(&model.EventErc1155Transfer{}, "height = ?", height).Error; err != nil {
-			logrus.Errorf("delete event erc1155 transfer failed %v", err)
-			return err
-		}
-
-		// Delete Contract
-		if err := tx.Delete(&model.Contract{}, "height = ?", height).Error; err != nil {
-			logrus.Errorf("delete contract failed %v", err)
-			return err
-		}
-
-		// Create ChainBinlog
-		if err := tx.Create(modelChainBinlog).Error; err != nil {
-			logrus.Errorf("store chain binlog failed %v", err)
-			return err
-		}
-
-		expectMessageId := modelChainBinlog.MessageId - 1
-
-		var result *gorm.DB
-		if result = tx.Model(&model.ScannerInfo{}).Where("chain_id = ? AND message_id = ?", chainBinlog.ChainId, expectMessageId).Update("message_id", modelChainBinlog.MessageId); result.Error != nil {
-			logrus.Fatalf("update scanner info failed %v", result.Error)
-			return result.Error
-		}
-
-		if result.RowsAffected == 0 {
-			logrus.Fatalf("update scanner info failed, expect message id not match, may be there are multiple processes. expect:%v", expectMessageId)
-			os.Exit(0)
-		}
-
-		return nil
-	}); err != nil {
-		logrus.Errorf("store chain block failed %v", err)
-		return 0, err
-	}
-
-	logrus.Infof("database revert success height:%v", height)
-
-	return modelChainBinlog.Id, nil
 }
 
 func assignStorageBlockID(fullblock *StorageFullBlock, blockID uint64) {
@@ -150,34 +64,46 @@ func assignStorageBlockID(fullblock *StorageFullBlock, blockID uint64) {
 	}
 }
 
-func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, chainBinlog *protocol.ChainBinlog, binlogData []byte) (uint64, error) {
+func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, protocolBlock *protocol.FullBlock) (uint64, error) {
+	storeTaskMu.Lock()
+	defer storeTaskMu.Unlock()
 
 	height := fullblock.Block.Height
+	if storeTaskChannel == nil || storeCompleteChannel == nil {
+		return 0, xerrors.New("store worker is not initialized")
+	}
+
+	var si model.ScannerInfo
+	if err := db.Where("chain_id = ?", protocolBlock.ChainId).First(&si).Error; err != nil {
+		return 0, err
+	}
+
+	protocolBlock.MessageId = si.MessageId + 1
+
+	protocolData, err := json.Marshal(protocolBlock)
+	if err != nil {
+		return 0, err
+	}
 
 	var blockID uint64
-	if err := db.Transaction(func(tx *gorm.DB) error {
-		fullblock.Block.Complete = false
-		if err := tx.Create(&fullblock.Block).Error; err != nil {
-			logrus.Errorf("store chain block failed %v", err)
-			return err
-		}
-		blockID = fullblock.Block.Id
-
-		var prevBlock model.Block
-		if err := tx.Where("height = ?", height-1).First(&prevBlock).Error; err != nil {
-			logrus.Errorf("get prev block failed %v", err)
-			return err
-		}
-		if prevBlock.Hash != fullblock.Block.ParentHash {
-			logrus.Fatalf("prev block hash not match. height:%v prev_hash:%v current_parent_hash:%v", height, prevBlock.Hash, fullblock.Block.ParentHash)
-			os.Exit(0)
-			return xerrors.New("prev block hash not match")
-		}
-		return nil
-	}); err != nil {
+	fullblock.Block.Complete = false
+	if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&fullblock.Block).Error; err != nil {
+		logrus.Errorf("store chain block failed %v", err)
 		logrus.Errorf("store block row failed %v", err)
 		return 0, err
 	}
+
+	var storedBlock model.Block
+	if err := db.Where("height = ?", height).First(&storedBlock).Error; err != nil {
+		logrus.Errorf("query block row failed. height:%v err:%v", height, err)
+		return 0, err
+	}
+	if storedBlock.Complete {
+		logrus.Errorf("block already complete. height:%v hash:%v", storedBlock.Height, storedBlock.Hash)
+		return 0, xerrors.Errorf("block already complete. height:%v", storedBlock.Height)
+	}
+	blockID = storedBlock.Id
+	fullblock.Block.Id = blockID
 
 	if blockID == 0 {
 		logrus.Errorf("block_id is 0, height:%v", height)
@@ -205,30 +131,25 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, chainBinlog *proto
 		taskSet[t.taskID] = struct{}{}
 	}
 
-	go func() {
-		for _, t := range allTasks {
-			storeTaskChannel <- t
-		}
-	}()
+	for _, t := range allTasks {
+		storeTaskChannel <- t
+	}
 
 	storeFailed := false
-
-	go func() {
-	Loop:
-		for {
-			select {
-			case c := <-storeCompleteChannel:
-				if c.err != nil {
-					storeFailed = true
-				}
-
-				delete(taskSet, c.taskID)
-				if len(taskSet) == 0 {
-					break Loop
-				}
-			}
+	for len(taskSet) > 0 {
+		c := <-storeCompleteChannel
+		if c == nil {
+			continue
 		}
-	}()
+		if _, ok := taskSet[c.taskID]; !ok {
+			continue
+		}
+		if c.err != nil {
+			storeFailed = true
+		}
+
+		delete(taskSet, c.taskID)
+	}
 
 	if storeFailed {
 		logrus.Errorf("store fullblock failed %v", height)
@@ -237,35 +158,33 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, chainBinlog *proto
 
 	startTime2 := time.Now()
 
-	modelChainBinlog := &model.ChainBinlog{
-		MessageId:  chainBinlog.MessageId,
-		ActionType: int(chainBinlog.ActionType),
-		Height:     chainBinlog.Height,
-		BinlogData: binlogData,
+	modelChainEvent := &model.ChainBinlog{
+		MessageId:  protocolBlock.MessageId,
+		Height:     protocolBlock.Block.Height,
+		Hash:       protocolBlock.Block.Hash,
+		ParentHash: protocolBlock.Block.ParentHash,
+		Data:       protocolData,
 	}
 
 	if err := db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(modelChainBinlog).Error; err != nil {
-			logrus.Errorf("store chain binlog failed %v", err)
+		if err := tx.Create(modelChainEvent).Error; err != nil {
+			logrus.Errorf("store chain event failed %v", err)
 			return err
 		}
 
-		expectMessageId := modelChainBinlog.MessageId - 1
-
-		var result *gorm.DB
-		if result = tx.Model(&model.ScannerInfo{}).Where("chain_id = ? AND message_id = ?", chainBinlog.ChainId, expectMessageId).Update("message_id", modelChainBinlog.MessageId); result.Error != nil {
-			logrus.Fatalf("update scanner info failed %v", result.Error)
-			return result.Error
-		}
-
-		if result.RowsAffected == 0 {
-			logrus.Fatalf("update scanner info failed, expect message id not match, may be there are multiple processes. expect:%v", expectMessageId)
-			os.Exit(0)
-		}
-
-		if err := tx.Model(&model.Block{}).Where("id = ?", blockID).Update("complete", true).Error; err != nil {
-			logrus.Errorf("mark block complete failed %v", err)
+		if err := tx.Model(&model.ScannerInfo{}).Where("chain_id = ?", protocolBlock.ChainId).Update("message_id", modelChainEvent.MessageId).Error; err != nil {
+			logrus.Errorf("update scanner info failed %v", err)
 			return err
+		}
+
+		updateResult := tx.Model(&model.Block{}).Where("id = ? AND complete = ?", blockID, false).Update("complete", true)
+		if updateResult.Error != nil {
+			logrus.Errorf("mark block complete failed %v", updateResult.Error)
+			return updateResult.Error
+		}
+		if updateResult.RowsAffected == 0 {
+			logrus.Errorf("mark block complete failed, no rows affected. block_id:%v height:%v", blockID, height)
+			return xerrors.Errorf("mark block complete failed, no rows affected. block_id:%v", blockID)
 		}
 
 		return nil
@@ -274,9 +193,9 @@ func StoreFullBlock(db *gorm.DB, fullblock *StorageFullBlock, chainBinlog *proto
 		return 0, err
 	}
 
-	logrus.Debugf("store block. height:%v cost:%v id:%v", height, time.Since(startTime2).String(), modelChainBinlog.Id)
+	logrus.Infof("store block. height:%v cost:%v id:%v", height, time.Since(startTime2).String(), modelChainEvent.Id)
 
-	return modelChainBinlog.Id, nil
+	return modelChainEvent.Id, nil
 }
 
 func splitTask(taskType StoreTaskType, modelList []interface{}, batchSize int, height uint64) []*StoreTask {
@@ -286,21 +205,21 @@ func splitTask(taskType StoreTaskType, modelList []interface{}, batchSize int, h
 	left := count % batchSize
 
 	for i := 0; i < round; i++ {
-		taskCounter++
+		taskID := atomic.AddUint64(&taskCounter, 1)
 		ay := modelList[batchSize*i : batchSize*(i+1)]
 		tasks = append(tasks, &StoreTask{
 			height:   height,
-			taskID:   taskCounter,
+			taskID:   taskID,
 			taskType: taskType,
 			data:     ay,
 		})
 	}
 	if left > 0 {
-		taskCounter++
+		taskID := atomic.AddUint64(&taskCounter, 1)
 		ay := modelList[batchSize*round:]
 		tasks = append(tasks, &StoreTask{
 			height:   height,
-			taskID:   taskCounter,
+			taskID:   taskID,
 			taskType: taskType,
 			data:     ay,
 		})

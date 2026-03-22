@@ -2,9 +2,9 @@ package fetch
 
 import (
 	"context"
-	"scanner_eth/types"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	ethTypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/sirupsen/logrus"
@@ -14,10 +14,10 @@ type HeaderNotifier struct {
 	id                       int
 	client                   *ethclient.Client
 	remote                   *RemoteChain
-	remoteChainUpdateChannel chan<- *types.RemoteChainUpdate
+	remoteChainUpdateChannel chan<- *RemoteChainUpdate
 }
 
-func NewHeaderNotifier(id int, client *ethclient.Client, remoteChainUpdateChannel chan<- *types.RemoteChainUpdate) *HeaderNotifier {
+func NewHeaderNotifier(id int, client *ethclient.Client, remoteChainUpdateChannel chan<- *RemoteChainUpdate) *HeaderNotifier {
 	return &HeaderNotifier{
 		id:                       id,
 		client:                   client,
@@ -27,6 +27,9 @@ func NewHeaderNotifier(id int, client *ethclient.Client, remoteChainUpdateChanne
 }
 
 func (ds *HeaderNotifier) Run() {
+	if ds == nil || ds.client == nil {
+		return
+	}
 
 	go func() {
 
@@ -74,14 +77,15 @@ RECONNECT:
 				blockHash := header.Hash().Hex()
 				weight := uint64(0)
 
-				logrus.Infof("header notifier new header. id:%d height:%v hash:%v", ds.id, height, blockHash)
+				logrus.Debugf("header notifier new header. id:%d height:%v hash:%v", ds.id, height, blockHash)
 
 				ds.remote.Update(height, blockHash)
-				ds.remoteChainUpdateChannel <- &types.RemoteChainUpdate{
+				ds.remoteChainUpdateChannel <- &RemoteChainUpdate{
 					NodeId:    ds.id,
 					Height:    height,
 					BlockHash: blockHash,
 					Weight:    weight,
+					Header:    toRemoteHeader(header),
 				}
 			}
 		}
@@ -111,13 +115,37 @@ func (ds *HeaderNotifier) useHttp() {
 
 		ds.remote.Update(height, blockHash)
 
-		ds.remoteChainUpdateChannel <- &types.RemoteChainUpdate{
+		ds.remoteChainUpdateChannel <- &RemoteChainUpdate{
 			NodeId:    ds.id,
 			Height:    height,
 			BlockHash: blockHash,
 			Weight:    weight,
+			Header:    toRemoteHeader(header),
 		}
 
 		time.Sleep(3000 * time.Millisecond)
+	}
+}
+
+func toRemoteHeader(header *ethTypes.Header) *RemoteHeader {
+	if header == nil {
+		return nil
+	}
+
+	difficulty := ""
+	if header.Difficulty != nil {
+		difficulty = hexutil.EncodeBig(header.Difficulty)
+	}
+
+	number := ""
+	if header.Number != nil {
+		number = hexutil.EncodeBig(header.Number)
+	}
+
+	return &RemoteHeader{
+		Hash:       header.Hash().Hex(),
+		ParentHash: header.ParentHash.Hex(),
+		Number:     number,
+		Difficulty: difficulty,
 	}
 }

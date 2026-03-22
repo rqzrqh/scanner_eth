@@ -2,10 +2,12 @@ package fetch
 
 import (
 	"context"
-	"encoding/json"
+	"expvar"
+	"fmt"
+	"scanner_eth/blocktree"
 	"scanner_eth/leader"
-	"scanner_eth/model"
-	"scanner_eth/types"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -16,246 +18,271 @@ import (
 
 type FetchManager struct {
 	election                 *leader.Election
-	interval                 time.Duration
-	executeAgain             bool
+	scanLoopCancel           context.CancelFunc
+	scanTriggerCh            chan struct{}
+	scanEnabled              atomic.Bool
 	nodeManager              *NodeManager
-	localChain               *LocalChain
-	eventHeightManager       *EventHeightManager
+	blockTree                *blocktree.BlockTree
 	db                       *gorm.DB
 	chainId                  int64
-	forkVersion              uint64
-	remoteChainUpdateChannel <-chan *types.RemoteChainUpdate
+	startHeight              uint64
+	irreversibleBlocks       int
+	storedBlocks             storedBlockState
+	pendingPayloadStore      *BlockPayloadStore
+	taskPool                 taskPool
+	remoteChainUpdateChannel <-chan *RemoteChainUpdate
 	hns                      []*HeaderNotifier
+	taskPoolOptions          TaskPoolOptions
+
+	blockFetcher BlockFetcher
+	dbOperator   DbOperator
 }
 
 func NewFetchManager(
 	chainName string,
 	clients []*ethclient.Client,
 	redisClient *redis.Client,
-	interval time.Duration,
-	executeAgain bool,
 	startHeight uint64,
 	endHeight uint64,
 	reversibleBlocks int,
+	taskPoolOptions TaskPoolOptions,
 	db *gorm.DB,
 	chainId int64,
+	dbOperator DbOperator,
+	blockFetcher BlockFetcher,
 ) *FetchManager {
-
 	InitErc20Cache()
 	InitErc721Cache()
 
-	localChain := NewLocalChain(reversibleBlocks, make([]*BlockDigest, 0))
-
 	election := leader.NewElection(chainName, redisClient)
 
-	remoteChainUpdateChannel := make(chan *types.RemoteChainUpdate, 100)
+	remoteChainUpdateChannel := make(chan *RemoteChainUpdate, 100)
 	hns := make([]*HeaderNotifier, len(clients))
 	for i, client := range clients {
 		hns[i] = NewHeaderNotifier(i, client, remoteChainUpdateChannel)
 	}
 
 	_ = endHeight
+	taskPoolOptions = normalizeTaskPoolOptions(taskPoolOptions, len(clients))
 
-	return &FetchManager{
+	fm := &FetchManager{
 		election:                 election,
-		interval:                 interval,
-		executeAgain:             executeAgain,
+		scanTriggerCh:            make(chan struct{}, 1),
 		nodeManager:              NewNodeManager(clients),
-		localChain:               localChain,
-		eventHeightManager:       NewEventHeightManager(),
 		db:                       db,
 		chainId:                  chainId,
-		forkVersion:              0,
+		startHeight:              startHeight,
+		irreversibleBlocks:       reversibleBlocks,
 		remoteChainUpdateChannel: remoteChainUpdateChannel,
 		hns:                      hns,
+		taskPoolOptions:          taskPoolOptions,
+		dbOperator:               dbOperator,
+		blockFetcher:             blockFetcher,
 	}
+	fm.createRuntimeState()
+	return fm
 }
 
 func (fm *FetchManager) Run() {
+	if fm == nil {
+		return
+	}
+	fm.startHeaderNotifiersAndConsumer()
+	if fm.election == nil {
+		return
+	}
+	go fm.election.DoWithLeaderElection(context.Background(), "scanEvents", time.Second, fm.onBecameLeader, fm.onLostLeader)
+}
 
+func (fm *FetchManager) Stop() {
+	if fm == nil {
+		return
+	}
+	fm.stopScanLoop()
+	if fm.election != nil {
+		fm.election.TriggerLostLeader()
+	}
+	fm.taskPool.stop()
+}
+
+func (fm *FetchManager) EnableTaskPoolMetrics(name string) {
+	if strings.TrimSpace(name) == "" {
+		name = "fetch_task_pool"
+	}
+	fm.taskPool.metricsOnce.Do(func() {
+		expvar.Publish(name, expvar.Func(func() any {
+			return fm.taskPool.metricsPayload()
+		}))
+	})
+}
+
+func (fm *FetchManager) startHeaderNotifiersAndConsumer() {
 	for _, hn := range fm.hns {
 		hn.Run()
 	}
-	go fm.election.DoWithLeaderElection(context.Background(), "scanEvents", fm.interval, fm.executeAgain, fm.scanEvents)
+	go func() {
+		for remoteChainUpdate := range fm.remoteChainUpdateChannel {
+			if remoteChainUpdate == nil {
+				continue
+			}
+			fm.nodeManager.UpdateNodeChainInfo(remoteChainUpdate.NodeId, remoteChainUpdate.Height, remoteChainUpdate.BlockHash)
+			if remoteChainUpdate.Header != nil && fm.isScanEnabled() {
+				fm.insertHeader(&BlockHeaderJson{
+					Hash:       remoteChainUpdate.Header.Hash,
+					ParentHash: remoteChainUpdate.Header.ParentHash,
+					Number:     remoteChainUpdate.Header.Number,
+					Difficulty: remoteChainUpdate.Header.Difficulty,
+				})
+			}
+			fm.triggerScan()
+		}
+	}()
+}
+
+func (fm *FetchManager) onBecameLeader(ctx context.Context) error {
+	_ = ctx
+	fm.createRuntimeState()
+
+	blocks, err := fm.dbOperator.LoadBlockWindowFromDB()
+	if err != nil {
+		return err
+	}
+
+	loaded, err := fm.restoreBlockTree(blocks)
+	if err != nil {
+		return fmt.Errorf("leader bootstrap load latest blocks from db failed: %w", err)
+	}
+
+	if loaded > 0 {
+		logrus.Infof("leader bootstrap from db success. loaded:%v", loaded)
+	} else {
+		if !fm.ensureBootstrapHeader() {
+			return fmt.Errorf("leader bootstrap from remote failed")
+		}
+
+		logrus.Infof("leader bootstrap from remote success")
+	}
+
+	fm.taskPool.start()
+	fm.scanEnabled.Store(true)
+	fm.stopScanLoop()
+	fm.startScanLoop()
+
+	return nil
+}
+
+func (fm *FetchManager) onLostLeader(ctx context.Context) error {
+	_ = ctx
+	fm.scanEnabled.Store(false)
+	fm.stopScanLoop()
+	fm.taskPool.stop()
+	fm.deleteRuntimeState()
+	logrus.Infof("leader runtime state released")
+	return nil
+}
+
+func (fm *FetchManager) startScanLoop() {
+
+	loopCtx, cancel := context.WithCancel(context.Background())
+	fm.scanLoopCancel = cancel
 
 	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+
 		for {
 			select {
-			case remoteChainUpdate := <-fm.remoteChainUpdateChannel:
-				fm.nodeManager.UpdateNodeChainInfo(remoteChainUpdate.NodeId, remoteChainUpdate.Height, remoteChainUpdate.BlockHash)
+			case <-loopCtx.Done():
+				return
+			case <-ticker.C:
+				fm.scanEvents(loopCtx)
+			case <-fm.scanTriggerCh:
+				fm.scanEvents(loopCtx)
 			}
 		}
 	}()
 }
 
-func (fm *FetchManager) scanEvents(ctx context.Context) (bool, error) {
-
-	blkDigestList := loadLatestBlock(clients, db, startHeight, reversibleBlocks)
-	logrus.Infof("load latest block success. count:%v", len(blkDigestList))
-	for _, blk := range blkDigestList {
-		logrus.Infof("latest block height:%v hash:%v parentHash:%v", blk.Height, blk.Hash, blk.ParentHash)
+func (fm *FetchManager) triggerScan() {
+	if fm == nil || fm.scanTriggerCh == nil || !fm.isScanEnabled() {
+		return
 	}
-
-	// 需要事务读取当前的信息
-	// 先获取本地节点最高的高度
-	// 从数据库里读取最新高度。
-	// 先从localchain里读取最新高度，如果为空，要用startHeight进行代替。
-
-	// 遍历localchain最高高度后面的窗口。
-
-	var latestHeight uint64
-	if err := fm.db.Model(&model.Block{}).Order("height desc").Limit(1).Pluck("height", &latestHeight).Error; err != nil {
-		logrus.Warnf("scanEvents get latest height from db failed: %v", err)
-		return true, nil
+	select {
+	case fm.scanTriggerCh <- struct{}{}:
+	default:
 	}
-	if latestHeight == 0 {
-		return true, nil
-	}
-
-	rangeSize := 2 * fm.nodeManager.NodeCount()
-	var startHeight uint64 = 1
-	if latestHeight > uint64(rangeSize) {
-		startHeight = latestHeight - uint64(rangeSize) + 1
-	}
-
-	for h := startHeight; h <= latestHeight; h++ {
-		item := fm.eventHeightManager.GetOrCreate(h)
-
-		if item.State == EventHeightStateNoData {
-			nodeId, client, err := fm.nodeManager.GetBestNode(h)
-			if err != nil {
-				return true, nil
-			}
-
-			fm.eventHeightManager.SetState(h, EventHeightStateSyncing)
-			height := h
-			syncTaskId := item.SyncTaskId
-			go func() {
-				startTime := time.Now()
-				fullBlock := FetchFullBlock(nodeId, syncTaskId, client, fm.db, height)
-				costTime := time.Since(startTime)
-				var blockData *EventBlockData
-				if fullBlock != nil {
-					blockData = &EventBlockData{
-						Height:            fullBlock.Block.Height,
-						Hash:              fullBlock.Block.Hash,
-						ParentHash:        fullBlock.Block.ParentHash,
-						StorageFullBlock:  ConvertStorageFullBlock(fullBlock),
-						ProtocolFullBlock: ConvertProtocolFullBlock(fullBlock),
-					}
-				}
-				fm.eventHeightManager.SetResult(height, blockData)
-				fm.nodeManager.UpdateNodeState(nodeId, costTime.Microseconds(), fullBlock != nil)
-			}()
-			continue
-		} else if item.State == EventHeightStateWriting {
-			return false, nil
-		} else if item.State == EventHeightStateHasData {
-
-		}
-
-		if item.BlockData == nil {
-			continue
-		}
-		bd := item.BlockData
-		currentHeight, tipHash := fm.localChain.GetChainInfo()
-
-		if bd.ParentHash != tipHash {
-			fm.forkVersion++
-			logrus.Warnf("scanEvents parent hash mismatch height:%v tip:%v parent:%v", h, tipHash, bd.ParentHash)
-			if currentHeight > 0 {
-				fm.localChain.Revert(currentHeight)
-				var si model.ScannerInfo
-				if err := fm.db.Where("chain_id = ?", fm.chainId).First(&si).Error; err != nil {
-					logrus.Errorf("scanEvents revert get scanner_info failed: %v", err)
-				} else {
-					rb := buildChainBinlogRevert(currentHeight)
-					rb.ChainId = fm.chainId
-					rb.MessageId = si.MessageId + 1
-					bd, _ := json.Marshal(rb)
-					if _, err := Revert(fm.db, currentHeight, rb, bd); err != nil {
-						logrus.Errorf("scanEvents db revert failed: %v", err)
-					}
-				}
-			}
-			continue
-		}
-
-		var si model.ScannerInfo
-		if err := fm.db.Where("chain_id = ?", fm.chainId).First(&si).Error; err != nil {
-			logrus.Errorf("scanEvents get scanner_info failed: %v", err)
-			return true, nil
-		}
-
-		chainBinlog := buildChainBinlogApply(bd.Height, bd.ProtocolFullBlock)
-		if chainBinlog == nil {
-			continue
-		}
-		chainBinlog.ChainId = fm.chainId
-		chainBinlog.MessageId = si.MessageId + 1
-		binlogData, err := json.Marshal(chainBinlog)
-		if err != nil {
-			logrus.Errorf("scanEvents marshal chain binlog failed: %v", err)
-			continue
-		}
-
-		if bd.StorageFullBlock == nil {
-			continue
-		}
-		var doneBlk model.Block
-		if err := fm.db.Where("height = ? AND complete = ?", bd.Height, true).First(&doneBlk).Error; err == nil {
-			if cur, _ := fm.localChain.GetChainInfo(); cur < bd.Height {
-				if err := fm.localChain.Grow(bd.Height, bd.Hash, bd.ParentHash); err != nil {
-					rb := buildChainBinlogRevert(cur)
-					rb.ChainId = fm.chainId
-					rb.MessageId = si.MessageId + 1
-					bd, _ := json.Marshal(rb)
-					if _, err := Revert(fm.db, cur, rb, bd); err != nil {
-						logrus.Errorf("scanEvents db revert failed: %v", err)
-					}
-					fm.localChain.Revert(cur)
-				}
-			}
-			fm.eventHeightManager.SetState(h, EventHeightStateWriting)
-			continue
-		}
-
-		if err := fm.localChain.Grow(bd.Height, bd.Hash, bd.ParentHash); err != nil {
-			rb := buildChainBinlogRevert(currentHeight)
-			rb.ChainId = fm.chainId
-			rb.MessageId = si.MessageId + 1
-			bd, _ := json.Marshal(rb)
-			if _, err := Revert(fm.db, currentHeight, rb, bd); err != nil {
-				logrus.Errorf("scanEvents db revert failed: %v", err)
-			}
-			fm.localChain.Revert(currentHeight)
-			continue
-		}
-		fm.eventHeightManager.SetState(h, EventHeightStateWriting)
-		_, err = StoreFullBlock(fm.db, bd.StorageFullBlock, chainBinlog, binlogData)
-		if err != nil {
-			logrus.Errorf("scanEvents StoreFullBlock failed height:%v err:%v", h, err)
-			fm.localChain.Revert(bd.Height)
-			continue
-		}
-	}
-	return true, nil
 }
 
-func (fm *FetchManager) fetch(nodeId int, syncTaskId int, client *ethclient.Client, height uint64) {
-	startTime := time.Now()
-	fullBlock := FetchFullBlock(nodeId, syncTaskId, client, fm.db, height)
-	costTime := time.Since(startTime)
-	var blockData *EventBlockData
-	if fullBlock != nil {
-		blockData = &EventBlockData{
-			Height:            fullBlock.Block.Height,
-			Hash:              fullBlock.Block.Hash,
-			ParentHash:        fullBlock.Block.ParentHash,
-			StorageFullBlock:  ConvertStorageFullBlock(fullBlock),
-			ProtocolFullBlock: ConvertProtocolFullBlock(fullBlock),
-		}
+func (fm *FetchManager) isScanEnabled() bool {
+	if fm == nil {
+		return false
 	}
-	fm.eventHeightManager.SetResult(height, blockData)
-	fm.nodeManager.UpdateNodeState(nodeId, costTime.Microseconds(), fullBlock != nil)
+	return fm.scanEnabled.Load()
+}
+
+func (fm *FetchManager) stopScanLoop() {
+	if fm.scanLoopCancel != nil {
+		fm.scanLoopCancel()
+		fm.scanLoopCancel = nil
+	}
+}
+
+func (fm *FetchManager) createRuntimeState() {
+	fm.nodeManager.SetAllNodesIdle()
+	fm.storedBlocks = newStoredBlockState()
+	fm.pendingPayloadStore = NewBlockPayloadStore()
+	fm.blockTree = blocktree.NewBlockTree(fm.irreversibleBlocks)
+	fm.taskPool = newTaskPoolWithStop(fm.taskPoolOptions, fm.nodeManager.NodeCount(), fm.handleTaskPoolTask)
+}
+
+func (fm *FetchManager) deleteRuntimeState() {
+	fm.storedBlocks = storedBlockState{}
+	fm.pendingPayloadStore = nil
+	fm.blockTree = nil
+	fm.taskPool = taskPool{}
+}
+
+func (fm *FetchManager) setNodeBlockHeader(hash string, header *BlockHeaderJson) bool {
+	if fm.blockTree == nil || fm.pendingPayloadStore == nil {
+		return false
+	}
+	node := fm.blockTree.Get(hash)
+	if node == nil {
+		return false
+	}
+	fm.pendingPayloadStore.SetBlockHeader(hash, header)
+	return true
+}
+
+func (fm *FetchManager) setNodeBlockBody(hash string, data *EventBlockData) bool {
+	if fm.blockTree == nil || fm.pendingPayloadStore == nil {
+		return false
+	}
+	node := fm.blockTree.Get(hash)
+	if node == nil {
+		return false
+	}
+	fm.pendingPayloadStore.SetBlockBody(hash, data)
+	return true
+}
+
+func (fm *FetchManager) getNodeBlockHeader(hash string) *BlockHeaderJson {
+	if fm.pendingPayloadStore == nil {
+		return nil
+	}
+	return fm.pendingPayloadStore.GetBlockHeader(hash)
+}
+
+func (fm *FetchManager) getNodeBlockBody(hash string) *EventBlockData {
+	if fm.pendingPayloadStore == nil {
+		return nil
+	}
+	return fm.pendingPayloadStore.GetBlockBody(hash)
+}
+
+func (fm *FetchManager) deleteNodeBlockPayload(hash string) {
+	if fm.pendingPayloadStore == nil {
+		return
+	}
+	fm.pendingPayloadStore.DeleteBlockPayload(hash)
 }

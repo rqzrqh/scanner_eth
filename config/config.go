@@ -53,26 +53,28 @@ type Store struct {
 	WorkerCount      int      `mapstructure:"worker_count"`
 }
 
+type TaskPool struct {
+	WorkerCount      int           `mapstructure:"worker_count"`
+	HighQueueSize    int           `mapstructure:"high_queue_size"`
+	NormalQueueSize  int           `mapstructure:"normal_queue_size"`
+	MaxRetry         int           `mapstructure:"max_retry"`
+	StatsLogInterval time.Duration `mapstructure:"stats_log_interval"`
+}
+
 type Fetch struct {
 	RpcNodes         []string      `mapstructure:"rpc_nodes"`
 	Timeout          time.Duration `mapstructure:"timeout"`
 	StartHeight      uint64        `mapstructure:"start_height"`
 	EndHeight        uint64        `mapstructure:"end_height"`
 	EnableInternalTx bool          `mapstructure:"enable_internal_tx"`
-	Interval         time.Duration `mapstructure:"interval"`
-	ExecuteAgain     bool          `mapstructure:"execute_again"`
 	Filter           Filter        `mapstructure:"filter"`
 	Store            Store         `mapstructure:"store"`
+	TaskPool         TaskPool      `mapstructure:"task_pool"`
 }
 
 type Kafka struct {
 	Brokers []string `mapstructure:"brokers"`
 	Topic   string   `mapstructure:"topic"`
-}
-
-type Publish struct {
-	Interval     time.Duration `mapstructure:"interval"`
-	ExecuteAgain bool          `mapstructure:"execute_again"`
 }
 
 type console struct {
@@ -94,15 +96,21 @@ type Log struct {
 	File    file    `mapstructure:"file"`
 }
 
+type Metrics struct {
+	Enable bool   `mapstructure:"enable"`
+	Addr   string `mapstructure:"addr"`
+	Path   string `mapstructure:"path"`
+}
+
 type Config struct {
 	AppName  string                 `mapstructure:"app_name"`
 	Chain    Chain                  `mapstructure:"chain"`
 	Fetch    Fetch                  `mapstructure:"fetch"`
-	Publish  Publish                `mapstructure:"publish"`
 	Database middleware.Database    `mapstructure:"database"`
 	Redis    middleware.RedisConfig `mapstructure:"redis"`
 	Kafka    Kafka                  `mapstructure:"kafka"`
 	Log      Log                    `mapstructure:"log"`
+	Metrics  Metrics                `mapstructure:"metrics"`
 }
 
 func readConfig(filename string, v *viper.Viper) error {
@@ -142,6 +150,16 @@ func LoadConf(fpath string, env string) (*Config, error) {
 				BatchSize:        128,
 				WorkerCount:      8,
 			},
+			TaskPool: TaskPool{
+				HighQueueSize:    1024,
+				NormalQueueSize:  2048,
+				MaxRetry:         2,
+				StatsLogInterval: 30 * time.Second,
+			},
+		},
+		Metrics: Metrics{
+			Addr: "127.0.0.1:6060",
+			Path: "/debug/vars",
 		},
 	}
 	vip := viper.New()

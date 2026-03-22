@@ -1,6 +1,15 @@
 package fetch
 
-import "scanner_eth/model"
+import (
+	"scanner_eth/model"
+	"scanner_eth/protocol"
+)
+
+// EventBlockData carries converted block payloads for storage and publish flow.
+type EventBlockData struct {
+	StorageFullBlock  *StorageFullBlock
+	ProtocolFullBlock *protocol.FullBlock
+}
 
 type StorageFullBlock struct {
 	Block                    model.Block
@@ -19,4 +28,19 @@ type StorageFullBlock struct {
 	BalanceErc20List   []model.BalanceErc20
 	BalanceErc1155List []model.BalanceErc1155
 	TokenErc721List    []model.TokenErc721
+}
+
+type RemoteHeader struct {
+	Hash       string
+	ParentHash string
+	Number     string
+	Difficulty string
+}
+
+type RemoteChainUpdate struct {
+	NodeId    int
+	Height    uint64
+	BlockHash string
+	Weight    uint64
+	Header    *RemoteHeader
 }

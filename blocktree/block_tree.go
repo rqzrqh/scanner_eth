@@ -1,6 +1,9 @@
 package blocktree
 
-import "sort"
+import (
+	"sort"
+	"sync"
+)
 
 // Key is the identifier type for tree nodes.
 // Declared as a type alias so it can be swapped without touching other code.
@@ -12,7 +15,6 @@ type Node struct {
 	Key       Key
 	ParentKey Key
 	Weight    uint64
-	Header    interface{}
 }
 
 // IrreversibleNode represents the irreversible ancestor of a block.
@@ -24,8 +26,7 @@ type IrreversibleNode struct {
 // LinkedNode extends Node with cached irreversibility information.
 type LinkedNode struct {
 	Node
-	Data         interface{}
-	Irreversible *IrreversibleNode
+	Irreversible IrreversibleNode
 }
 
 // Branch represents one chain branch from a header back to the linked root.
@@ -35,11 +36,21 @@ type Branch struct {
 	Nodes  []*LinkedNode
 }
 
+func cloneLinkedNode(n *LinkedNode) *LinkedNode {
+	if n == nil {
+		return nil
+	}
+	v := *n
+	return &v
+}
+
 // BlockTree is a fork-aware block tree. Blocks whose parent is not yet known
 // are buffered as orphans and adopted once the parent arrives.
 //
-// Not safe for concurrent use without external synchronisation.
+// Safe for concurrent use.
 type BlockTree struct {
+	mu sync.RWMutex
+
 	// keyValue maps a block key to its LinkedNode.
 	keyValue map[Key]*LinkedNode
 
@@ -84,11 +95,17 @@ func NewBlockTree(irreversibleCount int) *BlockTree {
 // existed or was buffered as an orphan.
 //
 // header is metadata attached to Node.
-func (t *BlockTree) Insert(height uint64, key, parentKey Key, weight uint64, header interface{}) []*LinkedNode {
+func (t *BlockTree) Insert(height uint64, key, parentKey Key, weight uint64, header interface{}, irreversible *IrreversibleNode) []*LinkedNode {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	if _, exists := t.keyValue[key]; exists {
 		return nil
 	}
 	if _, exists := t.orphanKeySet[key]; exists {
+		return nil
+	}
+	if t.root != nil && height <= t.root.Height {
 		return nil
 	}
 
@@ -96,27 +113,32 @@ func (t *BlockTree) Insert(height uint64, key, parentKey Key, weight uint64, hea
 
 	if parentExists || t.root == nil {
 		if t.root == nil {
-			t.root = &Node{Height: height, Key: key, ParentKey: parentKey, Weight: weight, Header: header}
+			t.root = &Node{Height: height, Key: key, ParentKey: parentKey, Weight: weight}
 		}
-		return t.internalInsert(height, key, parentKey, weight, header)
+		inserted := t.internalInsert(height, key, parentKey, weight, header, irreversible)
+		result := make([]*LinkedNode, 0, len(inserted))
+		for _, nv := range inserted {
+			result = append(result, cloneLinkedNode(nv))
+		}
+		return result
 	}
 
 	// Parent unknown: buffer as orphan.
 	if t.orphanParentToChild[parentKey] == nil {
 		t.orphanParentToChild[parentKey] = make(map[Key]*Node)
 	}
-	t.orphanParentToChild[parentKey][key] = &Node{Height: height, Key: key, ParentKey: parentKey, Weight: weight, Header: header}
+	t.orphanParentToChild[parentKey][key] = &Node{Height: height, Key: key, ParentKey: parentKey, Weight: weight}
 	t.orphanKeySet[key] = struct{}{}
 	return nil
 }
 
 // internalInsert links the block into the tree and resolves orphans waiting
 // on this block. Does NOT call prune.
-func (t *BlockTree) internalInsert(height uint64, key, parentKey Key, weight uint64, header interface{}) []*LinkedNode {
-	perfectIrr := t.computeIrreversible(parentKey)
+func (t *BlockTree) internalInsert(height uint64, key, parentKey Key, weight uint64, header interface{}, irreversible *IrreversibleNode) []*LinkedNode {
+	perfectIrr := t.computeIrreversible(parentKey, irreversible)
 
 	nv := &LinkedNode{
-		Node:         Node{Height: height, Key: key, ParentKey: parentKey, Weight: weight, Header: header},
+		Node:         Node{Height: height, Key: key, ParentKey: parentKey, Weight: weight},
 		Irreversible: perfectIrr,
 	}
 	t.keyValue[key] = nv
@@ -142,25 +164,45 @@ func (t *BlockTree) internalInsert(height uint64, key, parentKey Key, weight uin
 // The new node counts as hop 0, so the walk starts at parentKey (hop 1) and
 // continues for irreversibleCount-1 more hops.
 //
-// Returns nil when the chain is shallower than irreversibleCount or the node
-// is not found.
-func (t *BlockTree) computeIrreversible(parentKey Key) *IrreversibleNode {
-	if t.irreversibleCount <= 0 || parentKey == "" {
-		return nil
-	}
-	currentKey := parentKey
-	for i := 1; i < t.irreversibleCount; i++ {
-		nv, ok := t.keyValue[currentKey]
-		if !ok || nv.ParentKey == "" {
-			return nil
+// If the required ancestor depth is not available, returns the first
+// (oldest reachable) node on this path.
+func (t *BlockTree) computeIrreversible(parentKey Key, irreversible *IrreversibleNode) IrreversibleNode {
+	if parentKey == "" {
+		if t.root != nil {
+			return IrreversibleNode{Height: t.root.Height, Key: t.root.Key}
 		}
-		currentKey = nv.ParentKey
+		if irreversible != nil {
+			return IrreversibleNode{Height: irreversible.Height, Key: irreversible.Key}
+		}
+		return IrreversibleNode{}
 	}
-	nv, ok := t.keyValue[currentKey]
-	if !ok {
-		return nil
+
+	if parent, ok := t.keyValue[parentKey]; ok {
+		first := parent
+		current := parent
+		for i := 1; i < t.irreversibleCount; i++ {
+			if current.ParentKey == "" {
+				return IrreversibleNode{Height: first.Height, Key: first.Key}
+			}
+			next, ok := t.keyValue[current.ParentKey]
+			if !ok {
+				return IrreversibleNode{Height: first.Height, Key: first.Key}
+			}
+			current = next
+			first = current
+		}
+		return IrreversibleNode{Height: first.Height, Key: first.Key}
 	}
-	return &IrreversibleNode{Height: nv.Height, Key: nv.Key}
+
+	if irreversible != nil {
+		return IrreversibleNode{Height: irreversible.Height, Key: irreversible.Key}
+	}
+
+	if t.root != nil {
+		return IrreversibleNode{Height: t.root.Height, Key: t.root.Key}
+	}
+
+	return IrreversibleNode{}
 }
 
 // checkOrphan resolves orphans whose parent key matches key, inserting them
@@ -175,7 +217,7 @@ func (t *BlockTree) checkOrphan(key Key) []*LinkedNode {
 	var result []*LinkedNode
 	for _, v := range siblings {
 		delete(t.orphanKeySet, v.Key)
-		result = append(result, t.internalInsert(v.Height, v.Key, v.ParentKey, v.Weight, v.Header)...)
+		result = append(result, t.internalInsert(v.Height, v.Key, v.ParentKey, v.Weight, nil, nil)...)
 	}
 	return result
 }
@@ -184,6 +226,9 @@ func (t *BlockTree) checkOrphan(key Key) []*LinkedNode {
 // The height difference between the longest chain and root must be at least irreversibleCount.
 // Returns the list of pruned nodes.
 func (t *BlockTree) Prune(count uint64) []*LinkedNode {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	if t.root == nil || len(t.headers) == 0 || count == 0 {
 		return nil
 	}
@@ -271,7 +316,7 @@ func (t *BlockTree) Prune(count uint64) []*LinkedNode {
 	// Collect and delete marked nodes.
 	for k := range toDelete {
 		if nv, ok := t.keyValue[k]; ok && nv != nil {
-			prunedNodes = append(prunedNodes, nv)
+			prunedNodes = append(prunedNodes, cloneLinkedNode(nv))
 		}
 		delete(t.headers, k)
 		delete(t.keyValue, k)
@@ -280,9 +325,6 @@ func (t *BlockTree) Prune(count uint64) []*LinkedNode {
 
 	// Remove deleted nodes from parent-child maps.
 	for parentKey := range t.parentToChild {
-		if toDelete[parentKey] {
-			continue // This parent is also deleted
-		}
 		for childKey := range t.parentToChild[parentKey] {
 			if toDelete[childKey] {
 				delete(t.parentToChild[parentKey], childKey)
@@ -301,9 +343,38 @@ func (t *BlockTree) Prune(count uint64) []*LinkedNode {
 	if newRoot != nil {
 		newRootValue := newRoot.Node
 		t.root = &newRootValue
+		prunedNodes = append(prunedNodes, t.pruneOrphansAtOrBelow(t.root.Height)...)
 	}
 
 	return prunedNodes
+}
+
+// pruneOrphansAtOrBelow removes orphan nodes whose height is less than or
+// equal to threshold and returns them as LinkedNodes for unified prune output.
+func (t *BlockTree) pruneOrphansAtOrBelow(threshold uint64) []*LinkedNode {
+	var prunedOrphans []*LinkedNode
+
+	for parentKey, siblings := range t.orphanParentToChild {
+		for childKey, orphanNode := range siblings {
+			if orphanNode == nil {
+				delete(siblings, childKey)
+				delete(t.orphanKeySet, childKey)
+				continue
+			}
+
+			if orphanNode.Height <= threshold {
+				prunedOrphans = append(prunedOrphans, &LinkedNode{Node: *orphanNode})
+				delete(siblings, childKey)
+				delete(t.orphanKeySet, childKey)
+			}
+		}
+
+		if len(siblings) == 0 {
+			delete(t.orphanParentToChild, parentKey)
+		}
+	}
+
+	return prunedOrphans
 }
 
 // walk recursively removes the entire subtree rooted at key from the tree.
@@ -319,6 +390,9 @@ func walk(t *BlockTree, key Key) {
 
 // Root returns a copy of the current root, or nil if the tree is empty.
 func (t *BlockTree) Root() *Node {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	if t.root == nil {
 		return nil
 	}
@@ -328,28 +402,19 @@ func (t *BlockTree) Root() *Node {
 
 // Get returns the LinkedNode for key, or nil if not present.
 func (t *BlockTree) Get(key Key) *LinkedNode {
-	return t.keyValue[key]
-}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 
-// SetData attaches data to a linked node.
-//
-// data is typically a pointer payload; callers can check for nil to determine
-// whether data has been attached.
-//
-// Returns false when key is not present in the linked tree.
-func (t *BlockTree) SetData(key Key, data interface{}) bool {
-	node := t.keyValue[key]
-	if node == nil {
-		return false
-	}
-	node.Data = data
-	return true
+	return cloneLinkedNode(t.keyValue[key])
 }
 
 // HeightRange returns the current linked tree height range.
 // start is the root height, end is the maximum height among headers.
 // ok is false when the tree is empty.
 func (t *BlockTree) HeightRange() (start, end uint64, ok bool) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	if t.root == nil || len(t.keyValue) == 0 {
 		return 0, 0, false
 	}
@@ -369,6 +434,9 @@ func (t *BlockTree) HeightRange() (start, end uint64, ok bool) {
 // blocks are waiting for. Only parents that are not themselves buffered as
 // orphans (not in orphanKeySet) are included.
 func (t *BlockTree) UnlinkedNodes() []Key {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	var result []Key
 	for parentKey, children := range t.orphanParentToChild {
 		if len(children) == 0 {
@@ -384,10 +452,13 @@ func (t *BlockTree) UnlinkedNodes() []Key {
 
 // LinkedNodes returns all linked nodes currently present in keyValue.
 func (t *BlockTree) LinkedNodes() []*LinkedNode {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	result := make([]*LinkedNode, 0, len(t.keyValue))
 	for _, nv := range t.keyValue {
 		if nv != nil {
-			result = append(result, nv)
+			result = append(result, cloneLinkedNode(nv))
 		}
 	}
 	return result
@@ -400,6 +471,9 @@ func (t *BlockTree) LinkedNodes() []*LinkedNode {
 //
 // Node ordering within a branch: header -> root.
 func (t *BlockTree) Branches() []Branch {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	if len(t.headers) == 0 {
 		return nil
 	}
@@ -408,7 +482,7 @@ func (t *BlockTree) Branches() []Branch {
 	for k := range t.headers {
 		nv := t.keyValue[k]
 		if nv != nil {
-			headerList = append(headerList, nv)
+			headerList = append(headerList, cloneLinkedNode(nv))
 		}
 	}
 
@@ -426,15 +500,15 @@ func (t *BlockTree) Branches() []Branch {
 	for _, header := range headerList {
 		nodes := make([]*LinkedNode, 0)
 		for cur := header; cur != nil; {
-			nodes = append(nodes, cur)
+			nodes = append(nodes, cloneLinkedNode(cur))
 			parent, ok := t.keyValue[cur.ParentKey]
 			if !ok {
 				break
 			}
-			cur = parent
+			cur = cloneLinkedNode(parent)
 		}
 
-		result = append(result, Branch{Header: header, Nodes: nodes})
+		result = append(result, Branch{Header: cloneLinkedNode(header), Nodes: nodes})
 	}
 
 	return result
@@ -442,5 +516,8 @@ func (t *BlockTree) Branches() []Branch {
 
 // Len returns the number of blocks in the tree (excluding orphans).
 func (t *BlockTree) Len() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	return len(t.keyValue)
 }

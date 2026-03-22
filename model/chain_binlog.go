@@ -6,7 +6,7 @@ type ChainBinlog struct {
 	Height     uint64 `gorm:"type:bigint unsigned;comment:height"`
 	Hash       string `gorm:"type:varchar(255);comment:hash"`
 	ParentHash string `gorm:"type:varchar(255);comment:parent_hash"`
-	BinlogData []byte `gorm:"type:blob;comment:binlog_data"`
+	Data       []byte `gorm:"type:blob;comment:data"`
 }
 
 func (ChainBinlog) TableName() string {

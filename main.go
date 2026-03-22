@@ -53,11 +53,6 @@ func main() {
 		os.Exit(0)
 	}
 
-	if err != nil {
-		logrus.Errorf("failed to connect database %v", err)
-		os.Exit(0)
-	}
-
 	logrus.Infof("connect database success")
 
 	sqlDB, err := db.DB()
@@ -95,6 +90,13 @@ func main() {
 		); err != nil {
 			logrus.Errorf("auto migrate failed %v", err)
 			os.Exit(0)
+		}
+
+		if db.Migrator().HasColumn(&model.ChainBinlog{}, "action_type") {
+			if err := db.Migrator().DropColumn(&model.ChainBinlog{}, "action_type"); err != nil {
+				logrus.Errorf("drop chain_binlog.action_type failed %v", err)
+				os.Exit(0)
+			}
 		}
 
 		logrus.Infof("database auto migrate success")
@@ -183,6 +185,7 @@ func main() {
 	//err = w.Close()
 
 	s := newSyncer(conf, clients, db, rds, w, chainId, genesisBlockHash, messageId, publishedMessageId, optionalTables)
+	metricsServer := startMetricsServer(conf.Metrics)
 	s.Run()
 
 	logrus.Infof("start success")
@@ -190,6 +193,12 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
 	<-sigCh
+	s.Stop()
+	if metricsServer != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		metricsServer.Shutdown(shutdownCtx)
+		cancel()
+	}
 	logrus.Infof("stop scanner eth")
 }
 

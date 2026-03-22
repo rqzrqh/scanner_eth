@@ -1,6 +1,7 @@
 package fetch
 
 import (
+	"scanner_eth/blocktree"
 	"scanner_eth/data"
 	"scanner_eth/model"
 	"scanner_eth/protocol"
@@ -38,7 +39,7 @@ func SetOptionalFeatures(optionalFeature map[string]struct{}) {
 	_, optionalTokenErc721 = optionalFeature[model.TokenErc721.TableName(model.TokenErc721{})]
 }
 
-func ConvertStorageFullBlock(fullblock *data.FullBlock) *StorageFullBlock {
+func ConvertStorageFullBlock(fullblock *data.FullBlock, irreversible blocktree.IrreversibleNode) *StorageFullBlock {
 	if fullblock == nil {
 		return nil
 	}
@@ -47,6 +48,8 @@ func ConvertStorageFullBlock(fullblock *data.FullBlock) *StorageFullBlock {
 		Height:          fullblock.Block.Height,
 		Hash:            fullblock.Block.Hash,
 		ParentHash:      fullblock.Block.ParentHash,
+		IrreversibleHeight: irreversible.Height,
+		IrreversibleHash:   irreversible.Key,
 		Timestamp:       fullblock.Block.Timestamp,
 		TxCount:         fullblock.Block.TxCount,
 		Miner:           fullblock.Block.Miner,
@@ -305,7 +308,7 @@ func ConvertStorageFullBlock(fullblock *data.FullBlock) *StorageFullBlock {
 	}
 }
 
-func ConvertProtocolFullBlock(fullblock *data.FullBlock) *protocol.FullBlock {
+func ConvertProtocolFullBlock(fullblock *data.FullBlock, irreversible blocktree.IrreversibleNode) *protocol.FullBlock {
 	if fullblock == nil {
 		return nil
 	}
@@ -316,6 +319,8 @@ func ConvertProtocolFullBlock(fullblock *data.FullBlock) *protocol.FullBlock {
 			Height:          fullblock.Block.Height,
 			Hash:            fullblock.Block.Hash,
 			ParentHash:      fullblock.Block.ParentHash,
+			IrreversibleHeight: irreversible.Height,
+			IrreversibleHash:   irreversible.Key,
 			Timestamp:       fullblock.Block.Timestamp,
 			TxCount:         fullblock.Block.TxCount,
 			Miner:           fullblock.Block.Miner,

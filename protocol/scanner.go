@@ -1,17 +1,8 @@
 package protocol
 
-type ChainBinlog struct {
-	ChainId            int64  `json:"chain_id"`
-	MessageId          uint64 `json:"message_id"`
-	Height             uint64 `json:"height"`
-	Hash               string `json:"hash"`
-	ParentHash         string `json:"parent_hash"`
-	IrreversibleHeight string `json:"irreversible_height"`
-	IrreversibleHash   string `json:"irreversible_hash"`
-	Data               []byte `json:"full_block"`
-}
-
 type FullBlock struct {
+	ChainId             int64         `json:"chain_id"`
+	MessageId           uint64        `json:"message_id"`
 	Block               *Block        `json:"block"`
 	StateSet            *StateSet     `json:"state_set"`
 	MemeEvent           []interface{} `json:"meme_event"`
@@ -22,25 +13,27 @@ type FullBlock struct {
 }
 
 type Block struct {
-	Height          uint64 `json:"height"`
-	Hash            string `json:"hash"`
-	ParentHash      string `json:"parent_hash"`
-	Timestamp       int64  `json:"timestamp"`
-	TxCount         int    `json:"tx_count"`
-	Miner           string `json:"miner"`
-	Size            int    `json:"size"`
-	Nonce           string `json:"nonce"`
-	BaseFee         string `json:"base_fee"`
-	BurntFees       string `json:"burnt_fees"`
-	GasLimit        uint64 `json:"gas_limit"`
-	GasUsed         uint64 `json:"gas_used"`
-	UnclesCount     int    `json:"uncles_count"`
-	Difficulty      string `json:"difficulty"`
-	TotalDifficulty string `json:"total_difficulty"`
-	StateRoot       string `json:"state_root"`
-	TransactionRoot string `json:"transaction_root"`
-	ReceiptRoot     string `json:"receipt_root"`
-	ExtraData       string `json:"extra_data"`
+	Height             uint64 `json:"height"`
+	Hash               string `json:"hash"`
+	ParentHash         string `json:"parent_hash"`
+	IrreversibleHeight uint64 `json:"irreversible_height"`
+	IrreversibleHash   string `json:"irreversible_hash"`
+	Timestamp          int64  `json:"timestamp"`
+	TxCount            int    `json:"tx_count"`
+	Miner              string `json:"miner"`
+	Size               int    `json:"size"`
+	Nonce              string `json:"nonce"`
+	BaseFee            string `json:"base_fee"`
+	BurntFees          string `json:"burnt_fees"`
+	GasLimit           uint64 `json:"gas_limit"`
+	GasUsed            uint64 `json:"gas_used"`
+	UnclesCount        int    `json:"uncles_count"`
+	Difficulty         string `json:"difficulty"`
+	TotalDifficulty    string `json:"total_difficulty"`
+	StateRoot          string `json:"state_root"`
+	TransactionRoot    string `json:"transaction_root"`
+	ReceiptRoot        string `json:"receipt_root"`
+	ExtraData          string `json:"extra_data"`
 }
 
 type StateSet struct {
