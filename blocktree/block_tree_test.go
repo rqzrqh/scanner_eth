@@ -405,7 +405,7 @@ func TestPruneAdvancesRootOnMainChain(t *testing.T) {
 	bt.Insert(2, "B", "A", 1, nil)
 	bt.Insert(3, "C", "B", 1, nil)
 	bt.Insert(4, "D", "C", 1, nil)
-	bt.Prune()
+	bt.Prune(1)
 
 	if bt.root == nil || bt.root.Key != "B" {
 		t.Fatalf("root should advance to B after prune, got=%+v", bt.root)
@@ -429,7 +429,7 @@ func TestPruneRemovesSideBranchesFromDeletedRange(t *testing.T) {
 	bt.Insert(2, "B", "A", 2, nil)
 	bt.Insert(3, "C", "B", 2, nil)
 	bt.Insert(4, "D", "C", 2, nil)
-	bt.Prune()
+	bt.Prune(1)
 
 	if bt.root == nil || bt.root.Key != "B" {
 		t.Fatalf("root should be B after prune, got=%+v", bt.root)
@@ -458,7 +458,7 @@ func TestPruneTieBreakByWeightOnSameHeightLeaf(t *testing.T) {
 	bt.internalInsert(4, "F", "D", 1, nil)
 	bt.internalInsert(4, "G", "E", 9, nil)
 
-	bt.Prune()
+	bt.Prune(1)
 
 	if bt.root == nil || bt.root.Key != "C" {
 		t.Fatalf("expected heavier branch to win and root to become C, got=%+v", bt.root)
@@ -496,7 +496,7 @@ func TestPruneNoopWhenNoIrreversibleNode(t *testing.T) {
 	bt.Insert(2, "B", "A", 1, nil)
 	bt.Insert(3, "C", "B", 1, nil)
 
-	bt.Prune()
+	bt.Prune(1)
 
 	if bt.root == nil || bt.root.Key != "A" {
 		t.Fatalf("root should stay A when irreversible key is not available, got=%+v", bt.root)
@@ -634,7 +634,7 @@ func TestPruneMainChainRootProgressionTableDriven(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			bt := NewBlockTree(tt.irreversible)
 			applyInsertList(bt, tt.inputs)
-			bt.Prune()
+			bt.Prune(1)
 
 			if bt.root == nil {
 				t.Fatal("root should not be nil")

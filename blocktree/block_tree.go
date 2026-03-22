@@ -180,13 +180,12 @@ func (t *BlockTree) checkOrphan(key Key) []*LinkedNode {
 	return result
 }
 
-// Prune removes blocks that have become irreversibly buried under the longest
-// chain.
-func (t *BlockTree) Prune() { t.prune() }
-
-func (t *BlockTree) prune() {
-	if t.root == nil || len(t.headers) == 0 {
-		return
+// Prune removes blocks from root up to count heights and all their branch nodes.
+// The height difference between the longest chain and root must be at least irreversibleCount.
+// Returns the list of pruned nodes.
+func (t *BlockTree) Prune(count uint64) []*LinkedNode {
+	if t.root == nil || len(t.headers) == 0 || count == 0 {
+		return nil
 	}
 
 	// Find the best leaf: greatest height, ties broken by heaviest weight.
@@ -202,51 +201,109 @@ func (t *BlockTree) prune() {
 			bestNV = nv
 		}
 	}
-	if bestNV == nil || bestNV.Irreversible == nil || bestNV.Irreversible.Key == "" {
-		return
+	if bestNV == nil {
+		return nil
 	}
 
-	newRootNV, ok := t.keyValue[bestNV.Irreversible.Key]
-	if !ok {
-		return
+	// Height difference between longest chain and root must be at least irreversibleCount.
+	heightDiff := bestNV.Height - t.root.Height
+	if int(heightDiff) < t.irreversibleCount {
+		return nil
 	}
 
-	// Only prune when the new root is strictly deeper than the current root.
-	if newRootNV.Height <= t.root.Height {
-		return
+	// Calculate the minimum and maximum possible new root heights:
+	// - Minimum: current root height + count
+	// - Maximum: highest height that maintains irreversible count
+	minNewRootHeight := t.root.Height + count
+	maxNewRootHeight := bestNV.Height - uint64(t.irreversibleCount)
+
+	// The new root height must satisfy: minNewRootHeight <= newRoot.Height <= maxNewRootHeight
+	if minNewRootHeight > maxNewRootHeight {
+		return nil
 	}
 
-	// Walk backwards from the new root towards the old root.
-	// At each step, delete sibling branches, then delete the parent node.
-	current := newRootNV
-	for {
-		parentKey := current.ParentKey
-		if parentKey == "" {
+	// Choose the maximum possible new root height (to preserve as much as possible while pruning).
+	targetHeight := maxNewRootHeight
+
+	var prunedNodes []*LinkedNode
+
+	// Determine the main chain path from best leaf back to root.
+	mainChainPath := make(map[Key]bool)
+	current := bestNV
+	for current != nil {
+		mainChainPath[current.Key] = true
+		if current.ParentKey == "" {
 			break
 		}
-		parentNV, ok := t.keyValue[parentKey]
-		if !ok {
+		if parent, ok := t.keyValue[current.ParentKey]; ok {
+			current = parent
+		} else {
 			break
 		}
+	}
 
-		// Delete all children of parentKey except the one on the main path.
-		for childKey := range t.parentToChild[parentKey] {
-			if childKey != current.Key {
-				walk(t, childKey)
+	// Collect nodes to delete:
+	// 1. All nodes with height < targetHeight
+	// 2. Nodes off the main chain whose ancestors were deleted (branch nodes)
+	toDelete := make(map[Key]bool)
+
+	// First pass: mark all nodes with height < target height.
+	for k, nv := range t.keyValue {
+		if nv != nil && nv.Height < targetHeight {
+			toDelete[k] = true
+		}
+	}
+
+	// Second pass: mark branch nodes (off main chain) whose parent is deleted.
+	changed := true
+	for changed {
+		changed = false
+		for k, nv := range t.keyValue {
+			if !toDelete[k] && nv != nil && nv.ParentKey != "" {
+				if toDelete[nv.ParentKey] && !mainChainPath[k] {
+					toDelete[k] = true
+					changed = true
+				}
 			}
 		}
-
-		delete(t.keyValue, parentKey)
-		delete(t.parentToChild, parentKey)
-
-		if parentKey == t.root.Key {
-			break
-		}
-		current = parentNV
 	}
 
-	rootValue := newRootNV.Node
-	t.root = &rootValue
+	// Collect and delete marked nodes.
+	for k := range toDelete {
+		if nv, ok := t.keyValue[k]; ok && nv != nil {
+			prunedNodes = append(prunedNodes, nv)
+		}
+		delete(t.headers, k)
+		delete(t.keyValue, k)
+		delete(t.parentToChild, k)
+	}
+
+	// Remove deleted nodes from parent-child maps.
+	for parentKey := range t.parentToChild {
+		if toDelete[parentKey] {
+			continue // This parent is also deleted
+		}
+		for childKey := range t.parentToChild[parentKey] {
+			if toDelete[childKey] {
+				delete(t.parentToChild[parentKey], childKey)
+			}
+		}
+	}
+
+	// Find the new root: the lowest remaining linked node.
+	var newRoot *LinkedNode
+	for _, nv := range t.keyValue {
+		if nv != nil && (newRoot == nil || nv.Height < newRoot.Height) {
+			newRoot = nv
+		}
+	}
+
+	if newRoot != nil {
+		newRootValue := newRoot.Node
+		t.root = &newRootValue
+	}
+
+	return prunedNodes
 }
 
 // walk recursively removes the entire subtree rooted at key from the tree.
