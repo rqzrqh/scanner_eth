@@ -21,6 +21,10 @@ type Database struct {
 	Charset   string
 	ParseTime bool
 	Loc       string
+	// SlowQueryThresholdMs is passed to GORM as SlowThreshold. When 0, defaults to 300.
+	// Block storage issues large multi-row INSERTs (tx, event_log, balances, …) with many
+	// secondary indexes; sub-100ms is uncommon on real MySQL, so 100ms spams WARN "SLOW SQL".
+	SlowQueryThresholdMs int `mapstructure:"slow_query_threshold_ms"`
 }
 
 // InitDB opens a GORM MySQL connection.
@@ -28,8 +32,13 @@ func InitDB(config Database) (*gorm.DB, error) {
 
 	logrusLogger := logrus.New()
 
+	slowMs := config.SlowQueryThresholdMs
+	if slowMs <= 0 {
+		slowMs = 300
+	}
+
 	opts := gormv2logrus.GormOptions{
-		SlowThreshold: 100 * time.Millisecond,
+		SlowThreshold: time.Duration(slowMs) * time.Millisecond,
 		LogLevel:      gormlogger.Info,
 		TruncateLen:   1000,
 		LogLatency:    true,
@@ -38,7 +47,6 @@ func InitDB(config Database) (*gorm.DB, error) {
 	gormLogger := gormv2logrus.NewGormlog(gormv2logrus.WithGormOptions(opts), gormv2logrus.WithLogrus(logrusLogger))
 	gormLogger.LogMode(gormlogger.Warn)
 	gormLogger.SkipErrRecordNotFound = true
-	//gormLogger.SlowThreshold = 200 * time.Millisecond
 
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=%t&loc=%s&timeout=10s",
 		config.User,
