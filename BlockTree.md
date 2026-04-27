@@ -30,14 +30,14 @@ This document describes the **fork-aware block tree** in the `scanner_eth/blockt
 
 ## 3. Main API
 
-### 3.1 `Insert(height, key, parentKey, weight, header, irreversible) []*LinkedNode`
+### 3.1 `Insert(height, key, parentKey, weight, irreversible) []*LinkedNode`
 
 - If `key` is already in the tree or in the orphan set → returns `nil`.
 - If `height <= root.Height` (tree non-empty) → reject insert, return `nil`.
 - **Parent already in tree or tree is empty**: establish first root if needed, `internalInsert`, **cascade adoption** of orphans that waited on this `key`; returns list of newly inserted `LinkedNode` copies.
 - **Parent unknown**: enqueue as orphan, return `nil`.
 
-`header` and `irreversible` are extra metadata: when the parent cannot be resolved, `irreversible` may still populate irreversible info (see `computeIrreversible`).
+`irreversible` is optional context for `computeIrreversible` when the parent cannot be resolved yet.
 
 ### 3.2 Irreversible ancestor `computeIrreversible`
 

@@ -30,7 +30,7 @@ func TestPruneStoredBlocksIrreversibleDisabledNoop(t *testing.T) {
 	t.Cleanup(func() { fm.taskPool.stop() })
 	fm.irreversibleBlocks = 0
 
-	fm.blockTree.Insert(1, "a", "", 1, nil, nil)
+	fm.blockTree.Insert(1, "a", "", 1, nil)
 	fm.storedBlocks.MarkStored("a")
 	fm.taskPool.addTask("a")
 

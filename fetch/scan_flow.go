@@ -572,20 +572,28 @@ func (fm *FetchManager) fetchAndInsertHeaderByHash(hash string) bool {
 	return fm.fetchAndInsertHeaderByHashCore(hash)
 }
 
-func (fm *FetchManager) fetchAndInsertHeaderByHashCore(hash string) bool {
-
+// fetchAndInsertHeaderByHashImmediate loads a full header from RPC and links it in the
+// block tree. Body sync will refetch the same header by hash. Used by the new-head
+// channel without taking the task-pool header-by-hash slot (avoids missing a tip when busy).
+func (fm *FetchManager) fetchAndInsertHeaderByHashImmediate(hash string) bool {
+	hash = normalizeHash(hash)
+	if hash == "" {
+		return false
+	}
 	_, nodeOp, err := fm.nodeManager.GetBestNode(0)
 	if err != nil {
 		return false
 	}
-
 	header := fm.blockFetcher.FetchBlockHeaderByHash(context.Background(), nodeOp, 0, hash)
 	if header == nil {
 		return false
 	}
-
 	fm.insertHeader(header)
 	return true
+}
+
+func (fm *FetchManager) fetchAndInsertHeaderByHashCore(hash string) bool {
+	return fm.fetchAndInsertHeaderByHashImmediate(hash)
 }
 func (fm *FetchManager) processBranchesLowToHigh(ctx context.Context) {
 	branches := fm.blockTree.Branches()

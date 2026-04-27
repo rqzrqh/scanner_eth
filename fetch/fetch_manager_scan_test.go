@@ -316,7 +316,7 @@ func TestScanEventsRule2WindowExpandsToDoubleIrreversible(t *testing.T) {
 func TestScanEventsRule3SyncOrphanParentsByHash(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
 	fm.insertHeader(makeHeader(10, "0xroot", ""))
-	fm.blockTree.Insert(12, "0xchild", "0xmissing", 1, nil, nil)
+	fm.blockTree.Insert(12, "0xchild", "0xmissing", 1, nil)
 	setNodeLatestHeight(fm, 10)
 	fm.blockFetcher = &mockBlockFetcher{fetchByHashFn: func(_ context.Context, nodeOp *NodeOperator, taskID int, hash string) *BlockHeaderJson {
 		if hash != "0xmissing" {
@@ -337,11 +337,11 @@ func TestScanEventsRule3SyncOrphanParentsByHash(t *testing.T) {
 func TestScanEventsRule4BranchWriteCondition(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
 
-	fm.blockTree.Insert(1, "a", "", 1, nil, nil)
-	fm.blockTree.Insert(2, "b", "a", 1, nil, nil)
-	fm.blockTree.Insert(3, "c", "b", 1, nil, nil)
-	fm.blockTree.Insert(2, "y", "a", 1, nil, nil)
-	fm.blockTree.Insert(3, "z", "y", 1, nil, nil)
+	fm.blockTree.Insert(1, "a", "", 1, nil)
+	fm.blockTree.Insert(2, "b", "a", 1, nil)
+	fm.blockTree.Insert(3, "c", "b", 1, nil)
+	fm.blockTree.Insert(2, "y", "a", 1, nil)
+	fm.blockTree.Insert(3, "z", "y", 1, nil)
 	fm.setNodeBlockHeader("b", makeHeader(2, "b", "a"))
 	fm.setNodeBlockHeader("c", makeHeader(3, "c", "b"))
 	fm.setNodeBlockHeader("y", makeHeader(2, "y", "a"))
@@ -389,7 +389,7 @@ func TestScanEventsRule5PruneRemovesStoredAndTasks(t *testing.T) {
 	parent := ""
 	for h := uint64(1); h <= 6; h++ {
 		hash := fmt.Sprintf("h%v", h)
-		fm.blockTree.Insert(h, hash, parent, 1, nil, nil)
+		fm.blockTree.Insert(h, hash, parent, 1, nil)
 		fm.storedBlocks.MarkStored(hash)
 		fm.taskPool.addTask(hash)
 		parent = hash
@@ -417,7 +417,7 @@ func TestScanEventsRule5PruneRemovesStoredAndTasks(t *testing.T) {
 
 func TestTaskPoolAsyncDeduplicated(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
-	fm.blockTree.Insert(1, "0xabc", "", 1, nil, nil)
+	fm.blockTree.Insert(1, "0xabc", "", 1, nil)
 	fm.setNodeBlockHeader("0xabc", makeHeader(1, "0xabc", ""))
 	setNodeLatestHeight(fm, 1)
 
@@ -464,8 +464,8 @@ func TestTaskPoolAsyncDeduplicated(t *testing.T) {
 
 func TestTaskPoolPriorityHighFirst(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
-	fm.blockTree.Insert(1, "normal", "", 1, nil, nil)
-	fm.blockTree.Insert(2, "high", "normal", 1, nil, nil)
+	fm.blockTree.Insert(1, "normal", "", 1, nil)
+	fm.blockTree.Insert(2, "high", "normal", 1, nil)
 	fm.setNodeBlockHeader("normal", makeHeader(1, "normal", ""))
 	fm.setNodeBlockHeader("high", makeHeader(2, "high", "normal"))
 	setNodeLatestHeight(fm, 2)
@@ -506,7 +506,7 @@ func TestTaskPoolPriorityHighFirst(t *testing.T) {
 
 func TestTaskPoolRetryAndStats(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
-	fm.blockTree.Insert(1, "retry-me", "", 1, nil, nil)
+	fm.blockTree.Insert(1, "retry-me", "", 1, nil)
 	setNodeLatestHeight(fm, 1)
 	fm.taskPool.maxRetry = 2
 	var attempts int32
@@ -610,15 +610,15 @@ func TestComplexOrphanCascadeInsertionTracksTreeAndStoredRange(t *testing.T) {
 	fm.storedBlocks.MarkStored("g")
 	fm.storedBlocks.MarkStored("y")
 
-	fm.blockTree.Insert(1, "a", "", 1, nil, nil)
-	fm.blockTree.Insert(5, "e", "d", 1, nil, nil)
-	fm.blockTree.Insert(3, "c", "b", 1, nil, nil)
-	fm.blockTree.Insert(7, "g", "f", 1, nil, nil)
-	fm.blockTree.Insert(6, "f", "e", 1, nil, nil)
-	fm.blockTree.Insert(2, "b", "a", 1, nil, nil)
-	fm.blockTree.Insert(4, "d", "c", 1, nil, nil)
-	fm.blockTree.Insert(4, "x", "c", 1, nil, nil)
-	fm.blockTree.Insert(5, "y", "x", 1, nil, nil)
+	fm.blockTree.Insert(1, "a", "", 1, nil)
+	fm.blockTree.Insert(5, "e", "d", 1, nil)
+	fm.blockTree.Insert(3, "c", "b", 1, nil)
+	fm.blockTree.Insert(7, "g", "f", 1, nil)
+	fm.blockTree.Insert(6, "f", "e", 1, nil)
+	fm.blockTree.Insert(2, "b", "a", 1, nil)
+	fm.blockTree.Insert(4, "d", "c", 1, nil)
+	fm.blockTree.Insert(4, "x", "c", 1, nil)
+	fm.blockTree.Insert(5, "y", "x", 1, nil)
 
 	for _, key := range []string{"a", "b", "c", "d", "e", "f", "g", "x", "y"} {
 		if fm.blockTree.Get(key) == nil {
@@ -672,13 +672,13 @@ func TestComplexOrphanCascadeInsertionTracksTreeAndStoredRange(t *testing.T) {
 func TestPruneComplexForkRemovesPrunedBranchesAndStoredState(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
 
-	fm.blockTree.Insert(1, "a", "", 1, nil, nil)
-	fm.blockTree.Insert(2, "b", "a", 1, nil, nil)
-	fm.blockTree.Insert(3, "c", "b", 1, nil, nil)
-	fm.blockTree.Insert(4, "d", "c", 1, nil, nil)
-	fm.blockTree.Insert(5, "e", "d", 1, nil, nil)
-	fm.blockTree.Insert(3, "x", "b", 1, nil, nil)
-	fm.blockTree.Insert(4, "y", "x", 1, nil, nil)
+	fm.blockTree.Insert(1, "a", "", 1, nil)
+	fm.blockTree.Insert(2, "b", "a", 1, nil)
+	fm.blockTree.Insert(3, "c", "b", 1, nil)
+	fm.blockTree.Insert(4, "d", "c", 1, nil)
+	fm.blockTree.Insert(5, "e", "d", 1, nil)
+	fm.blockTree.Insert(3, "x", "b", 1, nil)
+	fm.blockTree.Insert(4, "y", "x", 1, nil)
 
 	for _, key := range []string{"a", "b", "c", "d", "e", "x", "y"} {
 		fm.storedBlocks.MarkStored(key)
@@ -734,9 +734,9 @@ func TestPruneComplexForkRemovesPrunedBranchesAndStoredState(t *testing.T) {
 func TestProcessBranchesDoesNotStoreWhenParentNotStored(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
 
-	fm.blockTree.Insert(1, "a", "", 1, nil, nil)
-	fm.blockTree.Insert(2, "b", "a", 1, nil, nil)
-	fm.blockTree.Insert(3, "c", "b", 1, nil, nil)
+	fm.blockTree.Insert(1, "a", "", 1, nil)
+	fm.blockTree.Insert(2, "b", "a", 1, nil)
+	fm.blockTree.Insert(3, "c", "b", 1, nil)
 	fm.setNodeBlockHeader("b", makeHeader(2, "b", "a"))
 	fm.setNodeBlockHeader("c", makeHeader(3, "c", "b"))
 
@@ -769,8 +769,8 @@ func TestProcessBranchesDoesNotStoreWhenParentNotStored(t *testing.T) {
 func TestProcessBranchesMarksStoredOnlyOnSuccessfulWrite(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
 
-	fm.blockTree.Insert(1, "a", "", 1, nil, nil)
-	fm.blockTree.Insert(2, "b", "a", 1, nil, nil)
+	fm.blockTree.Insert(1, "a", "", 1, nil)
+	fm.blockTree.Insert(2, "b", "a", 1, nil)
 	fm.storedBlocks.MarkStored("a")
 	fm.setNodeBlockHeader("b", makeHeader(2, "b", "a"))
 	fm.setNodeBlockBody("b", makeEventBlockData(2, "b", "a"))
@@ -796,9 +796,9 @@ func TestProcessBranchesMarksStoredOnlyOnSuccessfulWrite(t *testing.T) {
 func TestPruneNoopWhenStoredSpanWithinKeepEvenWithStaleStoredHashes(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
 
-	fm.blockTree.Insert(10, "a", "", 1, nil, nil)
-	fm.blockTree.Insert(11, "b", "a", 1, nil, nil)
-	fm.blockTree.Insert(12, "c", "b", 1, nil, nil)
+	fm.blockTree.Insert(10, "a", "", 1, nil)
+	fm.blockTree.Insert(11, "b", "a", 1, nil)
+	fm.blockTree.Insert(12, "c", "b", 1, nil)
 
 	fm.storedBlocks.MarkStored("a")
 	fm.storedBlocks.MarkStored("b")
@@ -830,6 +830,7 @@ func TestPruneNoopWhenStoredSpanWithinKeepEvenWithStaleStoredHashes(t *testing.T
 	}
 }
 
+// C3, I1. FormalVerification.md §3.7.3, I8: Complete=true rows MarkStored; incomplete do not. DB row integrity is not revalidated on restore.
 func TestRestoreBlockTreeLoadsWindowAndCompleteState(t *testing.T) {
 	db := newTestDB(t)
 	blocks := []model.Block{
@@ -884,8 +885,8 @@ func TestRestoreBlockTreeLoadsWindowAndCompleteState(t *testing.T) {
 	if node == nil || node.Weight != 10 {
 		t.Fatalf("unexpected stored weight for height 10 node: %+v", node)
 	}
-	if fm.getNodeBlockHeader("0x0a") == nil {
-		t.Fatalf("expected non-nil header on inserted node")
+	if fm.getNodeBlockHeader("0x0a") != nil {
+		t.Fatalf("expected nil header after restore until RPC body/header fetch fills it")
 	}
 	if node.Irreversible.Key == "" {
 		t.Fatalf("expected non-empty irreversible key on inserted node")

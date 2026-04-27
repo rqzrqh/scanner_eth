@@ -6,8 +6,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 
 type restoreBranch struct {
@@ -112,16 +110,10 @@ func (fm *FetchManager) restoreBlockTree(blocks []model.Block) (int, error) {
 			if irreversible.Key == "" {
 				irreversible = blocktree.IrreversibleNode{Height: blk.Height, Key: hash}
 			}
-			header := &BlockHeaderJson{
-				Number:       hexutil.EncodeUint64(blk.Height),
-				Hash:         hash,
-				ParentHash:   parentHash,
-				Difficulty:   blk.Difficulty,
-				Transactions: []string{},
-			}
 
-			fm.blockTree.Insert(blk.Height, hash, parentHash, weight, header, &irreversible)
-			fm.pendingPayloadStore.SetBlockHeader(hash, header)
+			// Never cache a synthetic header: body sync uses eth_getBlockByHash (see insertHeader).
+			fm.blockTree.Insert(blk.Height, hash, parentHash, weight, &irreversible)
+			fm.pendingPayloadStore.SetBlockHeader(hash, nil)
 			if blk.Complete {
 				fm.storedBlocks.MarkStored(hash)
 			}

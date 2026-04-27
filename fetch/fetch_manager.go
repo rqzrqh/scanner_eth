@@ -158,13 +158,9 @@ func (fm *FetchManager) startHeaderNotifiersWithChannel(ctx context.Context, ch 
 				continue
 			}
 			fm.nodeManager.UpdateNodeChainInfo(update.NodeId, update.Height, update.BlockHash)
-			if update.Header != nil && fm.isScanEnabled() {
-				fm.insertHeader(&BlockHeaderJson{
-					Hash:       update.Header.Hash,
-					ParentHash: update.Header.ParentHash,
-					Number:     update.Header.Number,
-					Difficulty: update.Header.Difficulty,
-				})
+			// Remote updates do not carry tx hashes; link the tip by hash via BlockFetcher only.
+			if update.BlockHash != "" && fm.isScanEnabled() {
+				fm.fetchAndInsertHeaderByHashImmediate(normalizeHash(update.BlockHash))
 			}
 			fm.triggerScan()
 		}

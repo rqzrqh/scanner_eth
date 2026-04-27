@@ -28,6 +28,9 @@ type StorageFullBlock struct {
 	TokenErc721List    []model.TokenErc721
 }
 
+// RemoteHeader is the subset we take from an eth subscription / HTTP poll (see HeaderNotifier).
+// It never includes the transactions list—only BlockFetcher (eth_getBlockByNumber/ByHash) returns
+// BlockHeaderJson with transaction hashes for full block fetch.
 type RemoteHeader struct {
 	Hash       string
 	ParentHash string

@@ -5,15 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"testing"
-
-	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 
 func TestPlanP2DBIntermittentFailureThenRecovery(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
 
-	fm.blockTree.Insert(1, "a", "", 1, nil, nil)
-	fm.blockTree.Insert(2, "b", "a", 1, nil, nil)
+	fm.blockTree.Insert(1, "a", "", 1, nil)
+	fm.blockTree.Insert(2, "b", "a", 1, nil)
 	fm.storedBlocks.MarkStored("a")
 	fm.setNodeBlockHeader("b", makeHeader(2, "b", "a"))
 	fm.setNodeBlockBody("b", makeEventBlockData(2, "b", "a"))
@@ -106,22 +104,8 @@ func TestPlanP3HeaderFetchTimeoutAndDisorderConverges(t *testing.T) {
 		t.Fatalf("unexpected parent for 0x0c: got=%s want=0x0b", n12.ParentKey)
 	}
 
-	if h := fm.pendingPayloadStore.GetBlockHeader("0x0b"); h == nil {
-		t.Fatal("expected pending header entry for 0x0b")
-	}
-	if h := fm.pendingPayloadStore.GetBlockHeader("0x0c"); h == nil {
-		t.Fatal("expected pending header entry for 0x0c")
-	}
-
 	if n11.Height != 11 || n12.Height != 12 {
 		t.Fatalf("unexpected linked heights: h11=%d h12=%d", n11.Height, n12.Height)
-	}
-
-	if got := fm.pendingPayloadStore.GetBlockHeader("0x0b").Number; got != hexutil.EncodeUint64(11) {
-		t.Fatalf("unexpected number for 0x0b: %s", got)
-	}
-	if got := fm.pendingPayloadStore.GetBlockHeader("0x0c").Number; got != hexutil.EncodeUint64(12) {
-		t.Fatalf("unexpected number for 0x0c: %s", got)
 	}
 }
 
@@ -132,7 +116,7 @@ func TestPlanP5FrequentPruneAndStoreAlternationConsistency(t *testing.T) {
 	parent := ""
 	for h := uint64(1); h <= 12; h++ {
 		hash := fmt.Sprintf("h%d", h)
-		fm.blockTree.Insert(h, hash, parent, 1, nil, nil)
+		fm.blockTree.Insert(h, hash, parent, 1, nil)
 		fm.setNodeBlockHeader(hash, makeHeader(h, hash, parent))
 		fm.setNodeBlockBody(hash, makeEventBlockData(h, hash, parent))
 		parent = hash
@@ -197,7 +181,7 @@ func TestPlanP4OrphanCapacityPressureConverges(t *testing.T) {
 	parent := ""
 	for h := uint64(1); h <= 30; h++ {
 		hash := fmt.Sprintf("h%d", h)
-		fm.blockTree.Insert(h, hash, parent, 1, nil, nil)
+		fm.blockTree.Insert(h, hash, parent, 1, nil)
 		parent = hash
 	}
 
@@ -205,14 +189,14 @@ func TestPlanP4OrphanCapacityPressureConverges(t *testing.T) {
 	for h := uint64(2); h <= 21; h++ {
 		childKey := fmt.Sprintf("oa%d", h)
 		missingParentKey := fmt.Sprintf("ma%d", h)
-		fm.blockTree.Insert(h, childKey, missingParentKey, 1, nil, nil)
+		fm.blockTree.Insert(h, childKey, missingParentKey, 1, nil)
 	}
 
 	// Group B: high-height orphans for parent backfill convergence checks.
 	for h := uint64(40); h <= 99; h++ {
 		childKey := fmt.Sprintf("ob%d", h)
 		missingParentKey := fmt.Sprintf("pb%d", h)
-		fm.blockTree.Insert(h, childKey, missingParentKey, 1, nil, nil)
+		fm.blockTree.Insert(h, childKey, missingParentKey, 1, nil)
 	}
 
 	initialOrphanParents := len(fm.blockTree.UnlinkedNodes())
@@ -228,7 +212,7 @@ func TestPlanP4OrphanCapacityPressureConverges(t *testing.T) {
 	// Backfill half of high-height orphan parents and prune in-between to emulate real load.
 	for h := uint64(40); h <= 69; h++ {
 		parentKey := fmt.Sprintf("pb%d", h)
-		fm.blockTree.Insert(h-1, parentKey, "h30", 1, nil, nil)
+		fm.blockTree.Insert(h-1, parentKey, "h30", 1, nil)
 		fm.blockTree.Prune(1)
 	}
 

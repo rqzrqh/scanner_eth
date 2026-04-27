@@ -94,9 +94,7 @@ func NewBlockTree(irreversibleCount int) *BlockTree {
 // Returns the list of LinkedNodes inserted during this call (the block itself
 // plus any cascadingly resolved orphans). Returns nil if the block already
 // existed or was buffered as an orphan.
-//
-// header is metadata attached to Node.
-func (t *BlockTree) Insert(height uint64, key, parentKey Key, weight uint64, header interface{}, irreversible *IrreversibleNode) []*LinkedNode {
+func (t *BlockTree) Insert(height uint64, key, parentKey Key, weight uint64, irreversible *IrreversibleNode) []*LinkedNode {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -116,7 +114,7 @@ func (t *BlockTree) Insert(height uint64, key, parentKey Key, weight uint64, hea
 		if t.root == nil {
 			t.root = &Node{Height: height, Key: key, ParentKey: parentKey, Weight: weight}
 		}
-		inserted := t.internalInsert(height, key, parentKey, weight, header, irreversible)
+		inserted := t.internalInsert(height, key, parentKey, weight, irreversible)
 		result := make([]*LinkedNode, 0, len(inserted))
 		for _, nv := range inserted {
 			result = append(result, cloneLinkedNode(nv))
@@ -135,7 +133,7 @@ func (t *BlockTree) Insert(height uint64, key, parentKey Key, weight uint64, hea
 
 // internalInsert links the block into the tree and resolves orphans waiting
 // on this block. Does NOT call prune.
-func (t *BlockTree) internalInsert(height uint64, key, parentKey Key, weight uint64, header interface{}, irreversible *IrreversibleNode) []*LinkedNode {
+func (t *BlockTree) internalInsert(height uint64, key, parentKey Key, weight uint64, irreversible *IrreversibleNode) []*LinkedNode {
 	perfectIrr := t.computeIrreversible(parentKey, irreversible)
 
 	nv := &LinkedNode{
@@ -218,7 +216,7 @@ func (t *BlockTree) checkOrphan(key Key) []*LinkedNode {
 	var result []*LinkedNode
 	for _, v := range siblings {
 		delete(t.orphanKeySet, v.Key)
-		result = append(result, t.internalInsert(v.Height, v.Key, v.ParentKey, v.Weight, nil, nil)...)
+		result = append(result, t.internalInsert(v.Height, v.Key, v.ParentKey, v.Weight, nil)...)
 	}
 	return result
 }

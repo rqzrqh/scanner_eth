@@ -5,14 +5,14 @@ import "testing"
 func TestInvariantPruneReturnsRemovedOrphans(t *testing.T) {
 	bt := NewBlockTree(2)
 
-	bt.Insert(1, "A", "", 1, nil, nil)
-	bt.Insert(2, "B", "A", 1, nil, nil)
-	bt.Insert(3, "C", "B", 1, nil, nil)
-	bt.Insert(4, "D", "C", 1, nil, nil)
+	bt.Insert(1, "A", "", 1, nil)
+	bt.Insert(2, "B", "A", 1, nil)
+	bt.Insert(3, "C", "B", 1, nil)
+	bt.Insert(4, "D", "C", 1, nil)
 
 	// o2 should be removed (height <= new root), o3 should remain.
-	bt.Insert(2, "o2", "missing-2", 1, nil, nil)
-	bt.Insert(3, "o3", "missing-3", 1, nil, nil)
+	bt.Insert(2, "o2", "missing-2", 1, nil)
+	bt.Insert(3, "o3", "missing-3", 1, nil)
 
 	pruned := bt.Prune(1)
 	prunedKeys := nodeValueKeys(pruned)
@@ -28,17 +28,17 @@ func TestInvariantPruneReturnsRemovedOrphans(t *testing.T) {
 func TestInvariantOrphansAboveRootAfterPrune(t *testing.T) {
 	bt := NewBlockTree(2)
 
-	bt.Insert(1, "A", "", 1, nil, nil)
-	bt.Insert(2, "B", "A", 1, nil, nil)
-	bt.Insert(3, "C", "B", 1, nil, nil)
-	bt.Insert(4, "D", "C", 1, nil, nil)
-	bt.Insert(5, "E", "D", 1, nil, nil)
+	bt.Insert(1, "A", "", 1, nil)
+	bt.Insert(2, "B", "A", 1, nil)
+	bt.Insert(3, "C", "B", 1, nil)
+	bt.Insert(4, "D", "C", 1, nil)
+	bt.Insert(5, "E", "D", 1, nil)
 
 	// Will be removed after prune because new root height is 3.
-	bt.Insert(1, "o1", "missing-1", 1, nil, nil)
-	bt.Insert(3, "o3", "missing-3", 1, nil, nil)
+	bt.Insert(1, "o1", "missing-1", 1, nil)
+	bt.Insert(3, "o3", "missing-3", 1, nil)
 	// Should remain.
-	bt.Insert(4, "o4", "missing-4", 1, nil, nil)
+	bt.Insert(4, "o4", "missing-4", 1, nil)
 
 	_ = bt.Prune(1)
 

@@ -7,36 +7,46 @@ import (
 	"testing"
 )
 
+// C1. See FormalVerification.md §3.7.2: insertHeader never caches a full header, so
+// newHeads-only slim headers and DB restore cannot skip eth_getBlockByHash on the body path.
+func TestInsertHeaderDoesNotCacheForBodySync(t *testing.T) {
+	fm := newTestFetchManager(t, 2)
+	fm.insertHeader(makeHeader(10, "0x10", "0x0f"))
+	if fm.blockTree.Get("0x10") == nil {
+		t.Fatal("expected block in tree")
+	}
+	if fm.pendingPayloadStore.GetBlockHeader("0x10") != nil {
+		t.Fatal("insertHeader must not cache header; body sync refetches by hash")
+	}
+}
+
 func TestInvariantHeaderInsertThenPending(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
-	header := makeHeader(10, "0x10", "0x0f")
-
-	fm.insertHeader(header)
+	fm.insertHeader(makeHeader(10, "0x10", "0x0f"))
 
 	if fm.blockTree.Get("0x10") == nil {
 		t.Fatal("expected block to be inserted into blocktree")
 	}
-	got := fm.pendingPayloadStore.GetBlockHeader("0x10")
-	if got == nil || normalizeHash(got.Hash) != "0x10" {
-		t.Fatalf("expected pending header for 0x10, got=%+v", got)
+	// C1 + FormalVerification.md §3.7.2: payload header is not filled by insertHeader.
+	if fm.pendingPayloadStore.GetBlockHeader("0x10") != nil {
+		t.Fatalf("expected no pending header from insertHeader alone, got=%+v", fm.pendingPayloadStore.GetBlockHeader("0x10"))
 	}
 }
 
-func TestInvariantHeaderInsertRejectedStillWritesPendingHeader(t *testing.T) {
+func TestInvariantHeaderInsertRejectedTreeUnchanged(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
 
 	// Build root at height 10.
 	fm.insertHeader(makeHeader(10, "0xroot", ""))
 
 	// Same height as root but different key: Insert will be rejected by blocktree.
-	rejected := makeHeader(10, "0x10", "0x0f")
-	fm.insertHeader(rejected)
+	fm.insertHeader(makeHeader(10, "0x10", "0x0f"))
 
 	if fm.blockTree.Get("0x10") != nil {
 		t.Fatal("expected 0x10 to be rejected by blocktree insert guard")
 	}
-	if got := fm.pendingPayloadStore.GetBlockHeader("0x10"); got == nil {
-		t.Fatal("expected pending header to still be written on insert rejection path")
+	if fm.pendingPayloadStore.GetBlockHeader("0x10") != nil {
+		t.Fatal("expected no cached header for rejected insert")
 	}
 }
 
@@ -54,8 +64,8 @@ func TestInvariantSetBlockBodyNoImplicitCreate(t *testing.T) {
 func TestInvariantStoredOnlyAfterSuccessfulStore(t *testing.T) {
 	t.Run("success path adds stored hash", func(t *testing.T) {
 		fm := newTestFetchManager(t, 2)
-		fm.blockTree.Insert(1, "a", "", 1, nil, nil)
-		fm.blockTree.Insert(2, "b", "a", 1, nil, nil)
+		fm.blockTree.Insert(1, "a", "", 1, nil)
+		fm.blockTree.Insert(2, "b", "a", 1, nil)
 		fm.storedBlocks.MarkStored("a")
 		fm.setNodeBlockHeader("b", makeHeader(2, "b", "a"))
 		fm.setNodeBlockBody("b", makeEventBlockData(2, "b", "a"))
@@ -72,8 +82,8 @@ func TestInvariantStoredOnlyAfterSuccessfulStore(t *testing.T) {
 
 	t.Run("failure path does not add stored hash", func(t *testing.T) {
 		fm := newTestFetchManager(t, 2)
-		fm.blockTree.Insert(1, "a", "", 1, nil, nil)
-		fm.blockTree.Insert(2, "b", "a", 1, nil, nil)
+		fm.blockTree.Insert(1, "a", "", 1, nil)
+		fm.blockTree.Insert(2, "b", "a", 1, nil)
 		fm.storedBlocks.MarkStored("a")
 		fm.setNodeBlockHeader("b", makeHeader(2, "b", "a"))
 		fm.setNodeBlockBody("b", makeEventBlockData(2, "b", "a"))
@@ -95,7 +105,7 @@ func TestInvariantPruneDeletesPendingAndStored(t *testing.T) {
 	parent := ""
 	for h := uint64(1); h <= 6; h++ {
 		hash := fmt.Sprintf("h%v", h)
-		fm.blockTree.Insert(h, hash, parent, 1, nil, nil)
+		fm.blockTree.Insert(h, hash, parent, 1, nil)
 		fm.storedBlocks.MarkStored(hash)
 		fm.setNodeBlockHeader(hash, makeHeader(h, hash, parent))
 		fm.setNodeBlockBody(hash, makeEventBlockData(h, hash, parent))

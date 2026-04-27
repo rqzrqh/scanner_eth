@@ -73,8 +73,11 @@ func (fm *FetchManager) insertHeader(header *BlockHeaderJson) {
 	weight := headerWeight(header)
 	key := normalizeHash(header.Hash)
 	parentKey := normalizeHash(header.ParentHash)
-	fm.blockTree.Insert(height, key, parentKey, weight, header, nil)
-	fm.pendingPayloadStore.SetBlockHeader(key, header)
+	fm.blockTree.Insert(height, key, parentKey, weight, nil)
+	// Do not cache this header for body fetch: header_notify and other slim paths lack
+	// transaction hashes; only headers from BlockFetcher (eth_getBlock*) are complete. Body
+	// sync always refetches via eth_getBlockByHash.
+	fm.pendingPayloadStore.SetBlockHeader(key, nil)
 }
 
 func headerWeight(header *BlockHeaderJson) uint64 {

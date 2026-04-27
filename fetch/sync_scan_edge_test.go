@@ -19,7 +19,7 @@ func TestSyncNodeDataByHashEarlyReturnAndFailures(t *testing.T) {
 	}
 
 	// Insert node with no header to force header-by-hash fetch path.
-	fm.blockTree.Insert(10, "0x10", "", 1, nil, nil)
+	fm.blockTree.Insert(10, "0x10", "", 1, nil)
 
 	// No ready node -> GetBestNode error.
 	fm.nodeManager.SetNodeNotReady(0)
@@ -42,7 +42,7 @@ func TestSyncNodeDataByHashDecodeFallbackAndFullBlockFail(t *testing.T) {
 	t.Cleanup(func() { fm.taskPool.stop() })
 
 	// Node height=12 with invalid header number to hit decode fallback branch.
-	fm.blockTree.Insert(12, "0x12", "", 1, &BlockHeaderJson{Hash: "0x12", Number: "invalid"}, nil)
+	fm.blockTree.Insert(12, "0x12", "", 1, nil)
 	setNodeLatestHeight(fm, 12)
 
 	fm.blockFetcher = &mockBlockFetcher{
@@ -120,7 +120,7 @@ func TestScanFlowEdgeBranches(t *testing.T) {
 		t.Fatal("expected false when hash already syncing")
 	}
 
-	fm.blockTree.Insert(20, "0x20", "", 1, nil, nil)
+	fm.blockTree.Insert(20, "0x20", "", 1, nil)
 	if fm.shouldSyncOrphanParent("") {
 		t.Fatal("empty hash should not be sync target")
 	}
@@ -134,7 +134,7 @@ func TestScanFlowEdgeBranches(t *testing.T) {
 func TestSyncBodyTargetStopsWhenContextCancelled(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
 	t.Cleanup(func() { fm.taskPool.stop() })
-	fm.blockTree.Insert(1, "h1", "", 1, nil, nil)
+	fm.blockTree.Insert(1, "h1", "", 1, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

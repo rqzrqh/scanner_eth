@@ -166,7 +166,7 @@ func TestSyncHeaderWindowAndSyncOrphanParents(t *testing.T) {
 	}
 
 	// orphan child waits for parent 0x10.
-	fm.blockTree.Insert(17, "0x11", "0x10", 1, nil, nil)
+	fm.blockTree.Insert(17, "0x11", "0x10", 1, nil)
 	fm.syncOrphanParents()
 	if fm.blockTree.Get("0x10") == nil || fm.blockTree.Get("0x11") == nil {
 		t.Fatal("expected orphan parent and child to be linked after syncOrphanParents")
@@ -230,8 +230,8 @@ func TestGetHeaderByHashSyncTargetsFormalPredicates(t *testing.T) {
 	t.Cleanup(func() { fm.taskPool.stop() })
 
 	fm.insertHeader(makeHeader(10, "0x0a", ""))
-	fm.blockTree.Insert(11, "0x0b", "0x0f", 1, nil, nil)
-	fm.blockTree.Insert(12, "0x0c", "0x10", 1, nil, nil)
+	fm.blockTree.Insert(11, "0x0b", "0x0f", 1, nil)
+	fm.blockTree.Insert(12, "0x0c", "0x10", 1, nil)
 
 	targets := fm.getHeaderByHashSyncTargets()
 	if len(targets) != 2 {
@@ -313,7 +313,7 @@ func TestHeaderHashSyncFailureLeavesTargetRetryable(t *testing.T) {
 	t.Cleanup(func() { fm.taskPool.stop() })
 
 	fm.insertHeader(makeHeader(10, "0x0a", ""))
-	fm.blockTree.Insert(11, "0x0b", "0x0f", 1, nil, nil)
+	fm.blockTree.Insert(11, "0x0b", "0x0f", 1, nil)
 	fm.blockFetcher = &mockBlockFetcher{
 		fetchByHashFn: func(_ context.Context, nodeOp *NodeOperator, taskID int, hash string) *BlockHeaderJson {
 			return nil
@@ -340,8 +340,8 @@ func TestCountActionableAndStoredLinkedNodes(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
 	t.Cleanup(func() { fm.taskPool.stop() })
 
-	fm.blockTree.Insert(10, "0xaa", "", 1, nil, nil)
-	fm.blockTree.Insert(11, "0xbb", "0xaa", 1, nil, nil)
+	fm.blockTree.Insert(10, "0xaa", "", 1, nil)
+	fm.blockTree.Insert(11, "0xbb", "0xaa", 1, nil)
 
 	// Root has storable data and parent is ready; child has nil data.
 	fm.setNodeBlockBody("0xaa", makeEventBlockData(10, "0xaa", ""))

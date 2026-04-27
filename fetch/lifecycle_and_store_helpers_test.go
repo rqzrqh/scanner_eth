@@ -77,6 +77,22 @@ func TestStartHeaderNotifiersAndConsumerAppliesRemoteUpdate(t *testing.T) {
 	fm.hns = []*HeaderNotifier{NewHeaderNotifier(0, nil)}
 	fm.scanEnabled.Store(true)
 
+	// New-head path now calls eth_getBlockByHash; mock the full header for 0x0f.
+	fm.blockFetcher = &mockBlockFetcher{
+		fetchByHashFn: func(_ context.Context, _ *NodeOperator, _ int, hash string) *BlockHeaderJson {
+			if normalizeHash(hash) == "0x0f" {
+				return &BlockHeaderJson{
+					Number:       "0xf",
+					Hash:         "0x0f",
+					ParentHash:   "0x0e",
+					Difficulty:   "0x2",
+					Transactions: []string{},
+				}
+			}
+			return nil
+		},
+	}
+
 	fm.startHeaderNotifiersWithChannel(ctx, updates)
 
 	updates <- &RemoteChainUpdate{
@@ -106,6 +122,72 @@ func TestStartHeaderNotifiersAndConsumerAppliesRemoteUpdate(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("header from remote update was not inserted into blocktree")
+}
+
+// FormalVerification.md §3.7.1: newHeads only carries a slim RemoteHeader; the consumer must
+// use fetchAndInsertHeaderByHashImmediate. If the tree matched RemoteHeader’s parent, that
+// would indicate the slim path was used for insert; we assert the parent comes from the RPC response.
+func TestStartHeaderNotifiersRemoteUpdateUsesBlockFetcherNotSlimHeader(t *testing.T) {
+	fm := newTestFetchManager(t, 2)
+	t.Cleanup(func() { fm.taskPool.stop() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	t.Cleanup(func() { fm.stopHeaderNotifiersAndConsumer() })
+
+	updates := make(chan *RemoteChainUpdate, 1)
+	fm.hns = []*HeaderNotifier{NewHeaderNotifier(0, nil)}
+	fm.scanEnabled.Store(true)
+
+	var fetchByHashCalls int
+	fm.blockFetcher = &mockBlockFetcher{
+		fetchByHashFn: func(_ context.Context, _ *NodeOperator, _ int, hash string) *BlockHeaderJson {
+			if normalizeHash(hash) != "0xabc1" {
+				return nil
+			}
+			fetchByHashCalls++
+			return &BlockHeaderJson{
+				Number:       "0x64",
+				Hash:         "0xabc1",
+				ParentHash:   "0xrpc_parent",
+				Difficulty:   "0x3",
+				Transactions: []string{"0xtx1"},
+			}
+		},
+	}
+
+	fm.startHeaderNotifiersWithChannel(ctx, updates)
+
+	updates <- &RemoteChainUpdate{
+		NodeId:    0,
+		Height:    100,
+		BlockHash: "0xabc1",
+		Header: &RemoteHeader{
+			Hash:       "0xabc1",
+			ParentHash: "0xwrong_parent",
+			Number:     "0x64",
+			Difficulty: "0x9999",
+		},
+	}
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		n := fm.blockTree.Get("0xabc1")
+		if n != nil {
+			if fetchByHashCalls == 0 {
+				t.Fatal("expected at least one FetchBlockHeaderByHash from newHead consumer")
+			}
+			if n.ParentKey != "0xrpc_parent" {
+				t.Fatalf("expected parent from BlockFetcher (0xrpc_parent), got %q (slim had 0xwrong_parent)", n.ParentKey)
+			}
+			if n.Weight == 0 {
+				t.Fatal("expected non-zero weight from rpc difficulty 0x3")
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("block never appeared in tree; BlockFetcher may not be used on new head path")
 }
 
 func TestHeaderNotifierRunNilSafe(t *testing.T) {

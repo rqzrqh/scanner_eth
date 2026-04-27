@@ -15,7 +15,7 @@ Block tree **T** fields and API: [BlockTree.md](BlockTree.md). This document foc
 1. **Entry conditions** (still tested, but **not** the “steady-state main loop”): Goal 7 and C7, `restoreBlockTree` / `ensureBootstrapHeader` describe the state **at the end of** `onBecameLeader`, defining initial \(T,P,D\) for the main scope—not every tick of stable leadership.
 2. **Snapshots vs main function**: See implementation vs unit-test bullets above; both encode the same leader-ready semantics.
 3. **Out of main scope**: Pre-leader `Run`/election wait, `onLostLeader` teardown, follower-only `nodeManager` updates with `scanEnabled=false`—may stay in component tests; **not** folded into C1–C9 “main Fetch experience”.
-4. **HeaderNotifier lifecycle**: Notifiers and the channel consumer start only **after** successful `onBecameLeader` bootstrap; `onLostLeader` cancels context, stops notifiers, closes the channel. **I6 / `GetLatestHeight`** tip updates therefore occur **during** leadership; tests such as `TestStartHeaderNotifiersConsumerIgnoresRegressiveRemoteHeight` use `startHeaderNotifiersWithChannel` + `scanEnabled=false` to isolate tip updates without `insertHeader` side effects.
+4. **HeaderNotifier lifecycle**: Notifiers and the channel consumer start only **after** successful `onBecameLeader` bootstrap; `onLostLeader` cancels context, stops notifiers, closes the channel. **I6 / `GetLatestHeight`** tip updates therefore occur **during** leadership; tests such as `TestStartHeaderNotifiersConsumerIgnoresRegressiveRemoteHeight` use `startHeaderNotifiersWithChannel` + `scanEnabled=false` to isolate tip updates without `insertHeader` side effects. **Subscription headers are not used as full headers**; see §3.7.
 
 The following behaviors are required:
 
@@ -81,16 +81,16 @@ Transitions:
 
 Input header \(h\), key \(k\).
 
-1. `BlockTree.Insert(height, k, parent, weight, …)`.
-2. `BlockPayloadStore.SetBlockHeader(k, h)`.
+1. `BlockTree.Insert(height, k, parent, weight, irreversible)` — `insertHeader` passes `irreversible == nil` (see `fetch/sync_block_data.go`).
+2. `BlockPayloadStore.SetBlockHeader(k, nil)` — `insertHeader` never caches a header for body fetch; `syncNodeDataByHash` always loads a full header via `eth_getBlockByHash`.
+3. New-head channel: `fetchAndInsertHeaderByHashImmediate(blockHash)` (full RPC header) updates the tree only; it does not use the slim `RemoteHeader` alone.
 
 Effects:
 
 1. If the tree accepts insert, \(k\) enters \(L\) or \(O\).
 2. If rejected (duplicate key, height rules, …), \(T\) may be unchanged.
-3. Current code **always** sets `P[k].Header` after `Insert` (`insertHeader`).
 
-Code: `fetch/sync_block_data.go` `insertHeader`; `fetch/fetch_manager.go` notifier consumer.
+Code: `fetch/sync_block_data.go` `insertHeader`; `fetch/scan_flow.go` `fetchAndInsertHeaderByHashImmediate`; `fetch/fetch_manager.go` notifier consumer.
 
 ### 3.2 Body fill
 
@@ -144,6 +144,24 @@ Each scan coordinator round:
 
 Code: `scan_flow.go` `runScanCoordinator`, target getters, `handleTaskPoolTask`, fetch helpers.
 
+### 3.7 Data accuracy: `header_notify` / newHeads vs DB restore
+
+Two entry points can **signal** new work without carrying a full Ethereum block, but **correct persisted data** (tx/logs/etc.) only comes from the normal fetch path. This section records how that split is enforced.
+
+**3.7.1 Header subscription (`newHeads` / HTTP poll).**  
+`HeaderNotifier` publishes a `RemoteChainUpdate` with `RemoteHeader` (hash, parent, number, difficulty only—**no** transaction hashes/roots list). The consumer **must not** call `insertHeader` with a “slim” object equivalent to a full `BlockHeaderJson` from subscription alone.  
+Implementation: `fetch_manager.go` new-head channel handler only passes `BlockHash` into `fetchAndInsertHeaderByHashImmediate(hash)`, which calls `BlockFetcher.FetchBlockHeaderByHash` and then `insertHeader` with a **full** header from RPC. Tree structure follows RPC; the subscription is only a **wakeup** for a hash. See `types.go` (`RemoteHeader` comment) and `scan_flow.go` `fetchAndInsertHeaderByHashImmediate`.  
+Regression: `TestStartHeaderNotifiersRemoteUpdateUsesBlockFetcherNotSlimHeader` (slim `ParentHash` disagrees with mock RPC; node parent must match RPC).
+
+**3.7.2 `insertHeader` and body sync (all header paths).**  
+Regardless of whether the header first arrived via new-head immediate fetch or height/hash scan, `insertHeader` does `SetBlockHeader(k, nil)` so the payload store never treats the insert path as a cache hit for a complete header. `syncNodeDataByHash` then always obtains a full header via `getNodeBlockHeader` → `eth_getBlockByHash` if needed, and `FetchFullBlock` for body data (`sync_block_data.go`). So **no path** uses subscription-only or restore-only state to skip those RPCs for body work.
+
+**3.7.3 DB restore (`restoreBlockTree`).**  
+Restore rebuilds the block tree and `D` (stored hashes) from DB rows. For each block: `BlockTree.Insert` with stored metadata; `SetBlockHeader(k, nil)` (same as §3.1—no cached header at startup). `Complete=true` in the row ⇒ `MarkStored(k)`; incomplete rows are not in `D` until a later successful `StoreBlockData` on the scan path. **Accuracy of already-persisted chain data** is an **operational assumption**: we trust the `Complete` bit as set by a prior successful store (I8), not re-validated by counting child table rows on restore. Corrupt DBs require external repair; C1 + §3.7.1–3.7.2 still guarantee **new** fetches and **new** stores go through `BlockFetcher` / `StoreBlockData`.
+
+**Formal-doc placement.**  
+Machine-checked pieces already cover the critical mechanism: **C1** (no header cached on `insertHeader`); **C3** (restore `Complete` ⇒ `D`); **I1** (membership of `D`). **I8** states the **non–machine-checked** trust boundary for DB rows. **R11.5·8** (residual) notes the gap if `Complete` and child tables disagree.
+
 ## 4. Invariants
 
 ### I1 Persist correctness
@@ -152,7 +170,7 @@ $$
 \forall k,\ k \in D \Rightarrow (\text{successful } StoreBlockData(k) \text{ on scan-bound } ctx \lor \text{restored Complete})
 $$
 
-Runtime “success” means `StoreBlockData(ctx,·)` **fully** returns without error under the scan `ctx` (cancelled `ctx` or errors do not count); same `ctx` as §3.3 / `syncBodyTarget`.
+Runtime “success” means `StoreBlockData(ctx,·)` **fully** returns without error under the scan `ctx` (cancelled `ctx` or errors do not count); same `ctx` as §3.3 / `syncBodyTarget`. The “restored Complete” disjunct is qualified by the operational trust boundary **I8** and §3.7.3.
 
 ### I2 No implicit body row
 
@@ -212,13 +230,21 @@ $$
 \forall q \in Q_t,\ q \in normalize(U) \land q \neq "" \land blockTree.Get(q)=nil \land \neg isHeaderHashSyncing(q)
 $$
 
+### I8 DB `Complete` on restore (operational)
+
+$$
+\text{“restored Complete” in I1} \Rightarrow \text{assumed: row was written by a prior full successful } StoreBlockData \text{ (or out-of-band repair)}
+$$
+
+Restore does not verify `tx` / other child tables against `Complete`. Consistency of **new** work still follows I1’s runtime arm and C1. See §3.7.3, §11.5·8.
+
 ## 5. Preservation
 
-- **§5.1 Header insert**: Touches \(T\) and \(P\) headers only; not \(D\) (I1). May leave “header in P without node in T” (C1b).
+- **§5.1 Header insert**: Touches \(T\); `insertHeader` sets `P[k].Header` to **nil** (body fetch always refetches). May leave “payload key with nil header” for tree keys (C1/C1b). New heads use §3.7.1 (`fetchAndInsertHeaderByHashImmediate`), not slim `RemoteHeader` alone.
 - **§5.2 Body fill**: Preserves I2 when key missing; updates `P[k].Body` when present.
 - **§5.3 Persist**: I1 preserved; failures skip `MarkStored`.
 - **§5.4 Prune**: I3–I4 via `prune_state` + `Prune` orphan rules.
-- **§5.5 Restore**: Sets \(T\) and \(D\) from DB; empty DB bootstraps header; preserves I2–I4.
+- **§5.5 Restore**: Sets \(T\) and \(D\) from DB; empty DB bootstraps header; preserves I2–I4. `Complete` → \(D\) per I8; no child-table revalidation (§3.7.3).
 - **§5.6 Header sync enum**: Success paths align with §5.1; failures do not touch \(D\).
 
 ## 6. Alignment with goals 1–8
@@ -239,8 +265,8 @@ Goals in §1 match implementation (header/tree, P, D, store, prune cleanup, orph
 
 | Item | Primary | Helpers | Note |
 |---|---|---|---|
-| C1 header happy path | `insertHeader` | `Insert` / `SetBlockHeader` | T and P aligned |
-| C1b header reject | `insertHeader` | same | T unchanged, P may have header |
+| C1 header happy path | `insertHeader` | `Insert` / `SetBlockHeader(nil)` | node in T; no cached header |
+| C1b header reject | `insertHeader` | same | T unchanged; no cached header for rejected key |
 | C2 body no implicit row | `SetBlockBody` | `GetBlockBody` | no silent create |
 | C3 D only on success/Complete | `storeNodeBodyData` / `restoreBlockTree` | `MarkStored` | runtime + restore |
 | C4 prune cleans P/D/tasks | `pruneStoredBlocks` | delete/unmark/delTask | consistent |
@@ -249,18 +275,19 @@ Goals in §1 match implementation (header/tree, P, D, store, prune cleanup, orph
 | C7 leader DB-first bootstrap | `onBecameLeader` | load/restore/ensure | |
 | C8 height targets | `getHeaderByHeightSyncTargets` | `HeightRange` / window / tip | |
 | C9 hash targets | `getHeaderByHashSyncTargets` | `UnlinkedNodes` / fetch-by-hash | |
+| I8 / newHeads | `startHeaderNotifiers` consumer | `fetchAndInsertHeaderByHashImmediate` | not `insertHeader` from slim `RemoteHeader` (§3.7) |
 
 ## 8. Machine-checkable checklist (C1–C9)
 
 ### C1 Happy header insert
 
 Pre: valid header \(h\), key \(k\).  
-Post: `blockTree.Get(k) != nil` and `pendingPayloadStore.GetBlockHeader(k) != nil`.
+Post: `blockTree.Get(k) != nil` and `pendingPayloadStore.GetBlockHeader(k) == nil` (header not cached by `insertHeader`).
 
 ### C1b Rejected header insert
 
 Pre: tree has root; header rejected by `Insert` (e.g. height \(\le\) root).  
-Post: `blockTree.Get(k) == nil` and pending header **may** be non-nil.
+Post: `blockTree.Get(k) == nil` and `pendingPayloadStore.GetBlockHeader(k) == nil`.
 
 ### C2 No implicit body row
 
@@ -310,8 +337,8 @@ Predicates as in §I7; successful parent fetch links children; failures remain r
 
 | Check | Test | File | Pass criterion | Status |
 |---|---|---|---|---|
-| C1 | `TestInvariantHeaderInsertThenPending` | `fetch/invariant_formal_test.go` | Get + pending header | done |
-| C1b | `TestInvariantHeaderInsertRejectedStillWritesPendingHeader` | same | tree nil, pending header | done |
+| C1 | `TestInvariantHeaderInsertThenPending` | `fetch/invariant_formal_test.go` | `Get(k)!=nil`, no cached header from `insertHeader` | done |
+| C1b | `TestInvariantHeaderInsertRejectedTreeUnchanged` | same | rejected key not in tree, no cached header | done |
 | C2 | `TestInvariantSetBlockBodyNoImplicitCreate` | same | no body row | done |
 | C3 | `TestInvariantStoredOnlyAfterSuccessfulStore` / `TestRestoreBlockTreeLoadsWindowAndCompleteState` | `invariant_formal` / `fetch_manager_scan_test` | success/fail/restore | done |
 | C4 | `TestInvariantPruneDeletesPendingAndStored` / `TestScanEventsRule5PruneRemovesStoredAndTasks` | same | P/D/tasks clean | done |
@@ -323,7 +350,7 @@ Predicates as in §I7; successful parent fetch links children; failures remain r
 
 ### 10.1 Assertion anchors
 
-Minimal assertions per check (C1–C9, I5): same predicates as §8—each `TestInvariant*` / scan-rule test should assert the corresponding bullets (e.g. C1: `Get(k)!=nil` and pending header non-nil; C1b: tree nil and pending header non-nil; etc.).
+Minimal assertions per check (C1–C9, I5): same predicates as §8—each `TestInvariant*` / scan-rule test should assert the corresponding bullets (e.g. C1: `Get(k)!=nil` and `P[k].Header` still nil after `insertHeader` alone; C1b: rejected key absent from tree and no header row; etc.).
 
 ### 10.2 C8/C9 templates
 
@@ -344,7 +371,7 @@ Templates A–D for height and hash (bounds, continuity, dedup, convergence, fai
 
 All C8/C9 templates in §10.2 are fully covered by the tests above.
 
-### 10.4 I1–I7 ↔ tests
+### 10.4 I1–I8 ↔ tests
 
 | Inv. | Tests |
 |---|---|
@@ -355,6 +382,8 @@ All C8/C9 templates in §10.2 are fully covered by the tests above.
 | I5 | `TestInvariantI5StoredBlockStateNormalizedClosure`, `stored_block_state_test.go` |
 | I6 | height-target tests, `TestRemoteChainUpdateMonotonicHeight`, `TestNodeManagerResetRemoteChainTips`, `TestStartHeaderNotifiersConsumerIgnoresRegressiveRemoteHeight` |
 | I7 | hash-target tests, `TestHeaderHashSyncFailureLeavesTargetRetryable`, `TestScanEventsRule3SyncOrphanParentsByHash` |
+| I8 | No dedicated test (operational/DB-repair scope); I1 + C3 on restore; gap §11.5·8 |
+| §3.7.1 (newHeads) | `TestStartHeaderNotifiersRemoteUpdateUsesBlockFetcherNotSlimHeader`, `TestStartHeaderNotifiersAndConsumerAppliesRemoteUpdate` in `lifecycle_and_store_helpers_test` — tree follows `FetchBlockHeaderByHash`, not slim `RemoteHeader` |
 
 Run hints:
 
@@ -398,7 +427,8 @@ Notes: I6 uses max tip across nodes; `ResetRemoteChainTips` on each `createRunti
 4. **§11.5·4** Canonical tip regression deep reorg within one leader term without reset—monotonic tip + reset only on `createRuntimeState` may diverge I6 from chain truth until leadership/reset.
 5. **§11.5·5** I1 exhaustive proof—all branches not theorem-checked; rely on review + §14.1.
 6. **§11.5·6** Real chain/network vs mocks.
-7. **§11.5·7** Optional design: `SetBlockHeader` only after successful `Insert`—would break current C1/C1b tests until migrated.
+7. **§11.5·7** Earlier optional design (set header only after successful `Insert`) is superseded: `insertHeader` always uses `SetBlockHeader(k, nil)`.
+8. **§11.5·8** If the DB has `block.complete=true` but child rows (e.g. `tx`) are missing, restore still puts \(k \in D\) (I8). Repair is operational (dump/repair); not re-checked at startup. §3.7.1–3.7.2 still protect **new** fetches and stores.
 
 ### 11.6 Concurrency & lost leader (async body)
 
@@ -423,11 +453,11 @@ Order (historical): P2→P3→P5→P4→P6. Merge: at least `go test ./...`; per
 
 ### 13.1 Current behavior
 
-`insertHeader`: **Insert then always `SetBlockHeader`**. Documented by C1/C1b.
+`insertHeader`: **Insert then `SetBlockHeader(k, nil)`** so body sync always refetches a full header by hash. New-head notifications use `fetchAndInsertHeaderByHashImmediate` (full RPC header) for the tree only.
 
 ### 13.2 Optional
 
-Only `SetBlockHeader` when `Insert` succeeds—tighter P/T, but impacts restore/retry; needs dedicated change + tests.
+Caching a full `BlockHeaderJson` under `P[k]` after `insertHeader` could avoid duplicate `eth_getBlockByHash` on the body path; would need invalidation when new-head or restore overwrites.
 
 ## 14. Five-minute audit
 
@@ -435,7 +465,7 @@ Only `SetBlockHeader` when `Insert` succeeds—tighter P/T, but impacts restore/
 
 ### 14.1 Read these functions (order)
 
-1. `insertHeader` — Insert + SetBlockHeader semantics.
+1. `insertHeader` — Insert + `SetBlockHeader(nil)`; `fetchAndInsertHeaderByHashImmediate` on new heads.
 2. `SetBlockBody` — no create if key missing.
 3. `storeNodeBodyData` — `MarkStored` only after success.
 4. `restoreBlockTree` — `Complete` → stored.
@@ -451,7 +481,7 @@ Only `SetBlockHeader` when `Insert` succeeds—tighter P/T, but impacts restore/
 
 One-line regression (full `-run` regex for fetch + blocktree):
 
-`go test ./fetch -run 'TestInvariant(HeaderInsertThenPending|HeaderInsertRejectedStillWritesPendingHeader|SetBlockBodyNoImplicitCreate|StoredOnlyAfterSuccessfulStore|PruneDeletesPendingAndStored|I5StoredBlockStateNormalizedClosure)|TestRestoreBlockTreeLoadsWindowAndCompleteState|TestOnBecameLeaderUsesDBBootstrapWithoutRemoteFetch|TestOnBecameLeaderFallsBackToRemoteBootstrapWhenDBEmpty|TestScanEventsRule2WindowExpandsToDoubleIrreversible|TestScanEventsRule3SyncOrphanParentsByHash|TestSyncHeaderWindowAndSyncOrphanParents|TestScanEventsRule5PruneRemovesStoredAndTasks' -count=1 && go test ./blocktree -run 'TestInvariant(PruneReturnsRemovedOrphans|OrphansAboveRootAfterPrune)' -count=1`
+`go test ./fetch -run 'TestInvariant(HeaderInsertThenPending|HeaderInsertRejectedTreeUnchanged|SetBlockBodyNoImplicitCreate|StoredOnlyAfterSuccessfulStore|PruneDeletesPendingAndStored|I5StoredBlockStateNormalizedClosure)|TestRestoreBlockTreeLoadsWindowAndCompleteState|TestOnBecameLeaderUsesDBBootstrapWithoutRemoteFetch|TestOnBecameLeaderFallsBackToRemoteBootstrapWhenDBEmpty|TestScanEventsRule2WindowExpandsToDoubleIrreversible|TestScanEventsRule3SyncOrphanParentsByHash|TestSyncHeaderWindowAndSyncOrphanParents|TestScanEventsRule5PruneRemovesStoredAndTasks' -count=1 && go test ./blocktree -run 'TestInvariant(PruneReturnsRemovedOrphans|OrphansAboveRootAfterPrune)' -count=1`
 
 #### 14.2.2 Full formal regression
 
@@ -464,7 +494,7 @@ go test ./fetch -count=1 \
 Step-by-step (15 commands, audit trail): run each line below in order.
 
 1. `go test ./fetch -run TestInvariantHeaderInsertThenPending -count=1`
-2. `go test ./fetch -run TestInvariantHeaderInsertRejectedStillWritesPendingHeader -count=1`
+2. `go test ./fetch -run TestInvariantHeaderInsertRejectedTreeUnchanged -count=1`
 3. `go test ./fetch -run TestInvariantSetBlockBodyNoImplicitCreate -count=1`
 4. `go test ./fetch -run TestInvariantStoredOnlyAfterSuccessfulStore -count=1`
 5. `go test ./fetch -run TestInvariantI5StoredBlockStateNormalizedClosure -count=1`
@@ -559,7 +589,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-   G[Goals 1-8] --> I[I1-I7]
+   G[Goals 1-8] --> I[I1-I8]
    I --> C[C1-C9]
    C --> T[TestInvariant/TestPlan/Scan rules]
    T --> F[Implementation]
