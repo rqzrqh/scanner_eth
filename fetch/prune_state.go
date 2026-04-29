@@ -2,162 +2,74 @@ package fetch
 
 import (
 	"context"
-
-	"github.com/sirupsen/logrus"
+	fetchstore "scanner_eth/fetch/store"
 )
 
-type pruneNodeSnapshot struct {
-	Height uint64 `json:"height"`
-	Hash   string `json:"hash"`
-	Weight uint64 `json:"weight"`
-}
-
-type pruneBranchSnapshot struct {
-	Header    pruneNodeSnapshot `json:"header"`
-	NodeCount int               `json:"node_count"`
-}
-
-type pruneStateSnapshot struct {
-	Root     *pruneNodeSnapshot    `json:"root"`
-	Branches []pruneBranchSnapshot `json:"branches"`
-}
+type pruneNodeSnapshot = fetchstore.PruneNodeSnapshot
+type pruneBranchSnapshot = fetchstore.PruneBranchSnapshot
+type pruneStateSnapshot = fetchstore.PruneStateSnapshot
 
 func (fm *FetchManager) capturePruneStateSnapshot() *pruneStateSnapshot {
-	if fm == nil || fm.blockTree == nil {
-		return &pruneStateSnapshot{Branches: make([]pruneBranchSnapshot, 0)}
+	if fm == nil {
+		return (&fetchstore.TreeRuntimeDeps{}).CapturePruneStateSnapshot()
 	}
-
-	state := &pruneStateSnapshot{
-		Branches: make([]pruneBranchSnapshot, 0),
+	payloadStore := fm.runtimePayloadStore()
+	blockTree := fm.runtimeBlockTree()
+	deps := fetchstore.TreeRuntimeDeps{
+		BlockTree: blockTree,
+		PayloadAccessor: &treePayloadAccessorAdapter{
+			nodeExists: func(hash string) bool { return blockTree != nil && blockTree.Get(hash) != nil },
+			store:      payloadStore,
+		},
+		StoredBlocks:  fm.runtimeStoredBlocks(),
+		TaskPool:      fm.runtimeTaskPool(),
+		NormalizeHash: normalizeHash,
+		ParseWeight:   parseStoredBlockWeight,
 	}
-	root := fm.blockTree.Root()
-	if root != nil {
-		state.Root = &pruneNodeSnapshot{
-			Height: root.Height,
-			Hash:   normalizeHash(root.Key),
-			Weight: root.Weight,
-		}
-	}
-
-	branches := fm.blockTree.Branches()
-	for _, branch := range branches {
-		state.Branches = append(state.Branches, pruneBranchSnapshot{
-			Header: pruneNodeSnapshot{
-				Height: branch.Header.Height,
-				Hash:   normalizeHash(branch.Header.Key),
-				Weight: branch.Header.Weight,
-			},
-			NodeCount: len(branch.Nodes),
-		})
-	}
-
-	return state
+	return deps.CapturePruneStateSnapshot()
 }
 
 func (fm *FetchManager) logPruneSnapshot(stage string, snapshot *pruneStateSnapshot) {
-	if snapshot == nil {
-		logrus.Infof("prune %s snapshot root:null branchs:0", stage)
-		return
-	}
+	logPruneSnapshot(stage, snapshot)
+}
 
-	if snapshot.Root == nil {
-		logrus.Infof("prune %s snapshot root:null branchs:0", stage)
-	} else {
-		logrus.Infof(
-			"prune %s snapshot root height:%v hash:%v weight:%v branchs:%v",
-			stage,
-			snapshot.Root.Height,
-			snapshot.Root.Hash,
-			snapshot.Root.Weight,
-			len(snapshot.Branches),
-		)
-	}
-
-	for i, branch := range snapshot.Branches {
-		logrus.Infof(
-			"prune %s snapshot branch[%v] header_height:%v header_hash:%v header_weight:%v node_count:%v",
-			stage,
-			i,
-			branch.Header.Height,
-			branch.Header.Hash,
-			branch.Header.Weight,
-			branch.NodeCount,
-		)
-	}
+func logPruneSnapshot(stage string, snapshot *pruneStateSnapshot) {
+	fetchstore.LogPruneSnapshot(stage, snapshot)
 }
 
 func (fm *FetchManager) storedHeightRangeOnTree() (uint64, uint64, bool) {
-	linkedNodes := fm.blockTree.LinkedNodes()
-	var minHeight uint64
-	var maxHeight uint64
-	hasStored := false
-	for _, nv := range linkedNodes {
-		hash := normalizeHash(nv.Key)
-		if !fm.storedBlocks.IsStored(hash) {
-			continue
-		}
-		if !hasStored {
-			minHeight = nv.Height
-			maxHeight = nv.Height
-			hasStored = true
-			continue
-		}
-		if nv.Height < minHeight {
-			minHeight = nv.Height
-		}
-		if nv.Height > maxHeight {
-			maxHeight = nv.Height
-		}
+	payloadStore := fm.runtimePayloadStore()
+	blockTree := fm.runtimeBlockTree()
+	deps := fetchstore.TreeRuntimeDeps{
+		BlockTree: blockTree,
+		PayloadAccessor: &treePayloadAccessorAdapter{
+			nodeExists: func(hash string) bool { return blockTree != nil && blockTree.Get(hash) != nil },
+			store:      payloadStore,
+		},
+		StoredBlocks:  fm.runtimeStoredBlocks(),
+		TaskPool:      fm.runtimeTaskPool(),
+		NormalizeHash: normalizeHash,
+		ParseWeight:   parseStoredBlockWeight,
 	}
-	return minHeight, maxHeight, hasStored
+	return deps.StoredHeightRangeOnTree()
 }
 
 func (fm *FetchManager) pruneStoredBlocks(ctx context.Context) {
-	if ctx != nil && ctx.Err() != nil {
+	if fm == nil {
 		return
 	}
-	if fm.irreversibleBlocks <= 0 {
-		return
+	payloadStore := fm.runtimePayloadStore()
+	blockTree := fm.runtimeBlockTree()
+	deps := fetchstore.TreeRuntimeDeps{
+		BlockTree: blockTree,
+		PayloadAccessor: &treePayloadAccessorAdapter{
+			nodeExists: func(hash string) bool { return blockTree != nil && blockTree.Get(hash) != nil },
+			store:      payloadStore,
+		},
+		StoredBlocks:  fm.runtimeStoredBlocks(),
+		TaskPool:      fm.runtimeTaskPool(),
+		NormalizeHash: normalizeHash,
+		ParseWeight:   parseStoredBlockWeight,
 	}
-
-	start, end, ok := fm.storedHeightRangeOnTree()
-	if !ok {
-		return
-	}
-
-	storedSpan := end - start + 1
-	if storedSpan <= uint64(fm.irreversibleBlocks) {
-		return
-	}
-
-	keep := uint64(fm.irreversibleBlocks + 1)
-	if storedSpan <= keep {
-		return
-	}
-
-	pruneCount := storedSpan - keep
-	beforeState := fm.capturePruneStateSnapshot()
-	if ctx != nil {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-	}
-	prunedNodes := fm.blockTree.Prune(pruneCount)
-	if len(prunedNodes) == 0 {
-		return
-	}
-	afterState := fm.capturePruneStateSnapshot()
-
-	for _, nv := range prunedNodes {
-		hash := normalizeHash(nv.Key)
-		fm.deleteNodeBlockPayload(hash)
-		fm.storedBlocks.UnmarkStored(hash)
-		fm.taskPool.delTask(hash)
-	}
-
-	fm.logPruneSnapshot("before", beforeState)
-	logrus.Infof("prune blocktree nodes. pruned:%v keep:%v", len(prunedNodes), keep)
-	fm.logPruneSnapshot("after", afterState)
+	deps.PruneStoredBlocks(ctx, fm.irreversibleBlocks)
 }

@@ -18,7 +18,7 @@ func TestCapturePruneStateSnapshotNilReceiverAndLogPaths(t *testing.T) {
 	}
 
 	fm := newTestFetchManager(t, 2)
-	t.Cleanup(func() { fm.taskPool.stop() })
+	t.Cleanup(func() { fm.taskPool.Stop() })
 
 	// Ensure log branches execute without panic.
 	fm.logPruneSnapshot("nil", nil)
@@ -27,22 +27,22 @@ func TestCapturePruneStateSnapshotNilReceiverAndLogPaths(t *testing.T) {
 
 func TestPruneStoredBlocksIrreversibleDisabledNoop(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
-	t.Cleanup(func() { fm.taskPool.stop() })
+	t.Cleanup(func() { fm.taskPool.Stop() })
 	fm.irreversibleBlocks = 0
 
 	fm.blockTree.Insert(1, "a", "", 1, nil)
 	fm.storedBlocks.MarkStored("a")
-	fm.taskPool.addTask("a")
+	fm.taskPool.AddTask("a")
 
 	fm.pruneStoredBlocks(context.Background())
-	if fm.blockTree.Get("a") == nil || !fm.storedBlocks.IsStored("a") || !fm.taskPool.hasTask("a") {
+	if fm.blockTree.Get("a") == nil || !fm.storedBlocks.IsStored("a") || !fm.taskPool.HasTask("a") {
 		t.Fatal("prune should be noop when irreversibleBlocks <= 0")
 	}
 }
 
 func TestPruneStoredBlocksReturnsEarlyWhenContextCancelled(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
-	t.Cleanup(func() { fm.taskPool.stop() })
+	t.Cleanup(func() { fm.taskPool.Stop() })
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	fm.pruneStoredBlocks(ctx)
@@ -65,7 +65,7 @@ func TestParseStoredBlockWeightEdges(t *testing.T) {
 
 func TestRestoreBlockTreeSkipsInvalidHashAndRepeatedRestore(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
-	t.Cleanup(func() { fm.taskPool.stop() })
+	t.Cleanup(func() { fm.taskPool.Stop() })
 
 	blocks := []model.Block{
 		{Height: 1, Hash: "", ParentHash: "", Difficulty: "1", Complete: true},

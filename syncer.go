@@ -7,6 +7,10 @@ import (
 	"os"
 	"scanner_eth/config"
 	"scanner_eth/fetch"
+	fetchconvert "scanner_eth/fetch/convert"
+	fetcherpkg "scanner_eth/fetch/fetcher"
+	fetchstore "scanner_eth/fetch/store"
+	fetchtask "scanner_eth/fetch/task"
 	"scanner_eth/filter"
 
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -34,16 +38,16 @@ func newSyncer(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, re
 
 	filter.InitBaseFilter()
 
-	fetch.SetEnableInternalTx(enableInternalTx)
-	fetch.SetOptionalFeatures(optionalTables)
+	fetcherpkg.SetEnableInternalTx(enableInternalTx)
+	fetchconvert.SetOptionalFeatures(optionalTables)
 
-	fetch.InitStore(db, conf.Fetch.Store.BatchSize, conf.Fetch.Store.WorkerCount)
+	fetchstore.DefaultRuntime().Init(db, conf.Fetch.Store.BatchSize, conf.Fetch.Store.WorkerCount)
 
 	checkNodeChainInfo(clients, chainId, genesisBlockHash)
 
 	logrus.Infof("node chain info check passed")
 
-	taskPoolOptions := fetch.TaskPoolOptions{
+	taskPoolOptions := fetchtask.TaskPoolOptions{
 		WorkerCount:      conf.Fetch.TaskPool.WorkerCount,
 		HighQueueSize:    conf.Fetch.TaskPool.HighQueueSize,
 		NormalQueueSize:  conf.Fetch.TaskPool.NormalQueueSize,
@@ -58,8 +62,13 @@ func newSyncer(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, re
 		taskPoolOptions.StatsLogInterval,
 	)
 
-	dbOperator := fetch.NewDbOperator(db, conf.Chain.ChainId, reversibleBlocks)
-	blockFetcher := fetch.NewBlockFetcher(db)
+	dbOperator := fetchstore.NewFullBlockDbOperator[*fetch.EventBlockData](db, conf.Chain.ChainId, reversibleBlocks, func(blockData *fetch.EventBlockData) *fetchstore.StorageFullBlock {
+		if blockData == nil {
+			return nil
+		}
+		return blockData.StorageFullBlock
+	})
+	blockFetcher := fetcherpkg.NewBlockFetcher(db)
 
 	fm := fetch.NewFetchManager(
 		conf.Chain.ChainName,
