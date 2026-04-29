@@ -1,3 +1,4 @@
+// Formal verification: global S=(T,P,D) checks C1/C1b/C3 and coordinated with FormalVerification.md.
 package fetch
 
 import (

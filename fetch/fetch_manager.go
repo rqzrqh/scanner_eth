@@ -36,9 +36,9 @@ type FetchManager struct {
 	chainName              string
 	chainId                int64
 	irreversibleBlocks     int
-	storedBlocks           fetchstore.StoredBlockState
-	pendingPayloadStore    *fetchstore.PayloadStore[*BlockHeaderJson, *EventBlockData]
-	taskPool               fetchtask.Pool
+	storedBlocks           *fetchstore.StoredBlockState
+	pendingPayloadStore    *fetchstore.PayloadStore
+	taskPool               *fetchtask.Pool
 	hns                    []*headernotify.HeaderNotifier
 	taskPoolOptions        fetchtask.TaskPoolOptions
 	scanConfig             fetchscan.Config
@@ -51,33 +51,22 @@ type FetchManager struct {
 	dbOperator DbOperator
 }
 
+// buildTreeRuntimeDeps assembles store.TreeRuntimeDeps from the current runtime (block tree, payload store, stored flags, task queue).
+func (fm *FetchManager) buildTreeRuntimeDeps() fetchstore.TreeRuntimeDeps {
+	if fm == nil {
+		return fetchstore.TreeRuntimeDeps{}
+	}
+	return fetchstore.TreeRuntimeDeps{
+		BlockTree:    fm.runtimeBlockTree(),
+		PayloadStore: fm.runtimePayloadStore(),
+		StoredBlocks: fm.runtimeStoredBlocks(),
+		TaskPool:     fm.runtimeTaskPool(),
+	}
+}
+
 type DbOperator interface {
 	LoadBlockWindowFromDB(ctx context.Context) ([]model.Block, error)
 	StoreBlockData(ctx context.Context, blockData *EventBlockData) error
-}
-
-type treePayloadAccessorAdapter struct {
-	nodeExists func(string) bool
-	store      *fetchstore.PayloadStore[*BlockHeaderJson, *EventBlockData]
-}
-
-func (a *treePayloadAccessorAdapter) SetNodeBlockHeader(hash string, header any) bool {
-	if a == nil || a.store == nil || a.nodeExists == nil {
-		return false
-	}
-	if !a.nodeExists(hash) {
-		return false
-	}
-	typed, _ := header.(*BlockHeaderJson)
-	a.store.SetHeader(hash, typed)
-	return true
-}
-
-func (a *treePayloadAccessorAdapter) DeleteNodeBlockPayload(hash string) {
-	if a == nil || a.store == nil {
-		return
-	}
-	a.store.DeletePayload(hash)
 }
 
 func NewFetchManager(
@@ -117,7 +106,7 @@ func NewFetchManager(
 		chainId:              chainId,
 		irreversibleBlocks:   reversibleBlocks,
 		hns:                  hns,
-		taskPoolOptions: taskPoolOptions,
+		taskPoolOptions:      taskPoolOptions,
 		scanConfig: fetchscan.Config{
 			StartHeight: startHeight,
 		},
@@ -134,27 +123,19 @@ func (fm *FetchManager) scanFlowRuntimeDeps() fetchscan.RuntimeDeps {
 	}
 	blockFetcher := fm.blockFetcher
 	nodeManager := fm.nodeManager
-	blockTree := fm.runtimeBlockTree()
+	treeStoreDeps := fm.buildTreeRuntimeDeps()
+	blockTree := treeStoreDeps.BlockTree
 	payloadStore := fm.runtimePayloadStore()
 	nodeExists := func(hash string) bool {
 		return blockTree != nil && blockTree.Get(hash) != nil
 	}
-	treeStoreDeps := fetchstore.TreeRuntimeDeps{
-		BlockTree:       blockTree,
-		PayloadAccessor: &treePayloadAccessorAdapter{nodeExists: nodeExists, store: payloadStore},
-		StoredBlocks:    fm.runtimeStoredBlocks(),
-		TaskPool:        fm.runtimeTaskPool(),
-		NormalizeHash:   normalizeHash,
-		ParseWeight:     parseStoredBlockWeight,
-	}
 	return fetchscan.RuntimeDeps{
-		StartHeight:     fm.scanConfig.StartHeight,
-		Irreversible:    fm.irreversibleBlocks,
-		BlockTree:       blockTree,
-		TaskPool:        fetchscan.NewTaskPoolAdapter(fm.runtimeTaskPool()),
-		PayloadAccessor: fetchscan.NewPayloadStoreAccessor(nodeExists, payloadStore),
-		StoreWorker:     fetchscan.NewStoreWorkerAdapter(fm.runtimeStoreWorker()),
-		StoredBlocks:    treeStoreDeps.StoredBlocks,
+		StartHeight:  fm.scanConfig.StartHeight,
+		Irreversible: fm.irreversibleBlocks,
+		BlockTree:    blockTree,
+		TaskPool:     fetchscan.NewTaskPoolAdapter(fm.runtimeTaskPool()),
+		StoreWorker:  fetchscan.NewStoreWorkerAdapter(fm.runtimeStoreWorker()),
+		StoredBlocks: treeStoreDeps.StoredBlocks,
 		TriggerScan: func() {
 			if scanWorker := fm.runtimeScanWorker(); scanWorker != nil {
 				scanWorker.Trigger()
@@ -162,6 +143,34 @@ func (fm *FetchManager) scanFlowRuntimeDeps() fetchscan.RuntimeDeps {
 		},
 		PruneStoredBlocks: func(ctx context.Context, irreversible int) {
 			treeStoreDeps.PruneStoredBlocks(ctx, irreversible)
+		},
+		SetNodeBlockHeader: func(hash string, header any) bool {
+			if payloadStore == nil || !nodeExists(hash) {
+				return false
+			}
+			typed, _ := header.(*BlockHeaderJson)
+			payloadStore.SetHeader(hash, typed)
+			return true
+		},
+		SetNodeBlockBody: func(hash string, body any) bool {
+			if payloadStore == nil || !nodeExists(hash) {
+				return false
+			}
+			typed, _ := body.(*EventBlockData)
+			payloadStore.SetBody(hash, typed)
+			return true
+		},
+		GetNodeBlockHeader: func(hash string) any {
+			if payloadStore == nil {
+				return nil
+			}
+			return payloadStore.GetHeader(hash)
+		},
+		GetNodeBlockBody: func(hash string) any {
+			if payloadStore == nil {
+				return nil
+			}
+			return payloadStore.GetBody(hash)
 		},
 		LatestRemoteHeight: func() uint64 {
 			if nodeManager == nil {

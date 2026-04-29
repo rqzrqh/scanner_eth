@@ -5,10 +5,7 @@ import (
 	fetchstore "scanner_eth/fetch/store"
 )
 
-// EventBlockData carries converted block payloads for storage and Redis export.
-type EventBlockData struct {
-	StorageFullBlock *StorageFullBlock
-}
+type EventBlockData = fetchstore.EventBlockData
 
 type BlockHeaderJson = fetcherpkg.BlockHeaderJson
 type TxJson = fetcherpkg.TxJson

@@ -24,11 +24,12 @@ import (
 
 func newTestFetchManager(t *testing.T, irreversible int) *FetchManager {
 	t.Helper()
+	stored := fetchstore.NewStoredBlockState()
 	fm := &FetchManager{
 		blockTree:           blocktree.NewBlockTree(irreversible),
-		pendingPayloadStore: fetchstore.NewPayloadStore[*BlockHeaderJson, *EventBlockData](),
-		storedBlocks:        fetchstore.NewStoredBlockState(),
-		irreversibleBlocks: irreversible,
+		pendingPayloadStore: fetchstore.NewPayloadStore(),
+		storedBlocks:        &stored,
+		irreversibleBlocks:  irreversible,
 		scanConfig: fetchscan.Config{
 			StartHeight: 1,
 		},
@@ -40,18 +41,18 @@ func newTestFetchManager(t *testing.T, irreversible int) *FetchManager {
 	fm.scanFlow = flow
 	fm.scanWorker = fm.newScanWorker(flow)
 	attachTestRuntime(fm)
-	fm.taskPool = fetchtask.NewTaskPoolWithStop(
+	pool := fetchtask.NewTaskPoolWithStop(
 		fetchtask.TaskPoolOptions{WorkerCount: 1, HighQueueSize: 64, NormalQueueSize: 64, MaxRetry: 2},
 		1,
 		func(task *fetchtask.SyncTask, stopCh <-chan struct{}) bool {
 			return fetchscan.HandleTaskPoolTask(flow, task, stopCh)
 		},
 	)
+	fm.taskPool = &pool
 	attachTestRuntime(fm)
 	fm.storeWorker = fm.newStoreWorker()
 	attachTestRuntime(fm)
 	flow.BindRuntimeDeps()
-	fm.storeWorker.Start()
 	t.Cleanup(func() {
 		if scanWorker := fm.runtimeScanWorker(); scanWorker != nil {
 			scanWorker.Stop()
@@ -79,9 +80,9 @@ func attachTestRuntime(fm *FetchManager) {
 		fm.runtime = rt
 	}
 	rt.blockTree = fm.blockTree
-	rt.storedBlocks = &fm.storedBlocks
+	rt.storedBlocks = fm.storedBlocks
 	rt.pendingPayloadStore = fm.pendingPayloadStore
-	rt.taskPool = &fm.taskPool
+	rt.taskPool = fm.taskPool
 	rt.headerManager = fm.headerManager
 	rt.scanFlow = fm.scanFlow
 	rt.scanWorker = fm.scanWorker
@@ -125,7 +126,7 @@ func mustTestHeaderManager(t *testing.T, fm *FetchManager) *headernotify.Manager
 	return headerManager
 }
 
-func mustTestPayloadStore(t *testing.T, fm *FetchManager) *fetchstore.PayloadStore[*BlockHeaderJson, *EventBlockData] {
+func mustTestPayloadStore(t *testing.T, fm *FetchManager) *fetchstore.PayloadStore {
 	t.Helper()
 	if fm == nil {
 		t.Fatal("fetch manager is nil")
@@ -257,7 +258,7 @@ func runScanAndWait(t *testing.T, fm *FetchManager) {
 	if taskPool == nil {
 		t.Fatal("taskPool is nil")
 	}
-	scanFlow.ScanEvents(context.Background())
+	scanFlow.RunScanCycle(context.Background())
 
 	deadline := time.Now().Add(2 * time.Second)
 	quietSince := time.Time{}
@@ -267,7 +268,7 @@ func runScanAndWait(t *testing.T, fm *FetchManager) {
 			select {
 			case <-scanWorker.TriggerChan():
 				drainedTrigger = true
-				scanFlow.ScanEvents(context.Background())
+				scanFlow.RunScanCycle(context.Background())
 			default:
 				goto checkIdle
 			}

@@ -1,10 +1,11 @@
+// Formal verification tests for BlockPayloadStore; see FormalVerification.md §4 I2 / §8 C2.
 package store
 
 import "testing"
 
 func TestInvariantSetBlockBodyNoImplicitCreate(t *testing.T) {
-	store := NewPayloadStore[any, any]()
-	body := struct{ Hash string }{Hash: "0x10"}
+	store := NewPayloadStore()
+	body := &EventBlockData{}
 
 	store.SetBody("0x10", body)
 

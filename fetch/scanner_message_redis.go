@@ -11,7 +11,10 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const defaultScannerMessageRedisBatch = 64
+const (
+	defaultScannerMessageRedisBatch  = 64
+	redisMessageFlushTickerInterval = 200 * time.Millisecond
+)
 
 func (fm *FetchManager) scannerMessageRedisBatchSize() int {
 	if fm == nil || fm.scannerMsgRedisBatch <= 0 {
@@ -92,10 +95,8 @@ func (fm *FetchManager) startRedisMessagePushLoop() {
 
 	loopCtx, cancel := context.WithCancel(context.Background())
 	fm.redisMessageLoopCancel = cancel
-	interval := 200 * time.Millisecond
-
 	go func() {
-		ticker := time.NewTicker(interval)
+		ticker := time.NewTicker(redisMessageFlushTickerInterval)
 		defer ticker.Stop()
 
 		for {

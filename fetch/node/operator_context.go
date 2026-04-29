@@ -8,7 +8,7 @@ import (
 // defaultFetchRPCTimeout is the per-RPC context deadline when fetch.timeout is unset or zero.
 const defaultFetchRPCTimeout = 10 * time.Second
 
-func (n *NodeOperator) withNodeRPCTimeout(parent context.Context) (context.Context, context.CancelFunc) {
+func (n *NodeOperatorImpl) withNodeRPCTimeout(parent context.Context) (context.Context, context.CancelFunc) {
 	if parent == nil {
 		parent = context.Background()
 	}

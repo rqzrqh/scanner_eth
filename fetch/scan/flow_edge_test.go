@@ -83,7 +83,7 @@ func TestScanFlowEdgeBranches(t *testing.T) {
 	if env.flow.RunScanCoordinator(ctx) {
 		t.Fatal("canceled context should stop scan coordinator")
 	}
-	env.flow.ScanEvents(ctx)
+	env.flow.RunScanCycle(ctx)
 
 	if ok, msg := env.flow.SyncHeaderByHeightTarget(context.Background(), "bad"); ok || msg == "" {
 		t.Fatal("expected invalid header-by-height target error")

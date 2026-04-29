@@ -11,6 +11,12 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const (
+	wsReconnectDelay = 3 * time.Second
+	httpPollInterval = 3 * time.Second
+	httpRetryDelay   = 5 * time.Second
+)
+
 type HeaderNotifier struct {
 	id     int
 	client *ethclient.Client
@@ -65,7 +71,7 @@ RECONNECT:
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(3000 * time.Millisecond):
+		case <-time.After(wsReconnectDelay):
 			goto RECONNECT
 		}
 	}
@@ -88,7 +94,7 @@ RECONNECT:
 				select {
 				case <-ctx.Done():
 					return
-				case <-time.After(3000 * time.Millisecond):
+				case <-time.After(wsReconnectDelay):
 					goto RECONNECT
 				}
 			}
@@ -118,7 +124,7 @@ RECONNECT:
 }
 
 func (ds *HeaderNotifier) useHttp(ctx context.Context, out chan<- *RemoteChainUpdate) {
-	ticker := time.NewTicker(3000 * time.Millisecond)
+	ticker := time.NewTicker(httpPollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -128,7 +134,7 @@ func (ds *HeaderNotifier) useHttp(ctx context.Context, out chan<- *RemoteChainUp
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(5000 * time.Millisecond):
+			case <-time.After(httpRetryDelay):
 			}
 			continue
 		}
@@ -137,7 +143,7 @@ func (ds *HeaderNotifier) useHttp(ctx context.Context, out chan<- *RemoteChainUp
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(5000 * time.Millisecond):
+			case <-time.After(httpRetryDelay):
 			}
 			continue
 		}

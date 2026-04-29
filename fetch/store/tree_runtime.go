@@ -11,22 +11,15 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type TreePayloadAccessor interface {
-	SetNodeBlockHeader(string, any) bool
-	DeleteNodeBlockPayload(string)
-}
-
 type TreeTaskPool interface {
 	DelTask(string)
 }
 
 type TreeRuntimeDeps struct {
-	BlockTree       *blocktree.BlockTree
-	PayloadAccessor TreePayloadAccessor
-	StoredBlocks    *StoredBlockState
-	TaskPool        TreeTaskPool
-	NormalizeHash   func(string) string
-	ParseWeight     func(string) uint64
+	BlockTree    *blocktree.BlockTree
+	PayloadStore *PayloadStore
+	StoredBlocks *StoredBlockState
+	TaskPool     TreeTaskPool
 }
 
 type PruneNodeSnapshot struct {
@@ -51,19 +44,10 @@ type restoreBranch struct {
 }
 
 func (deps TreeRuntimeDeps) normalizeHash(hash string) string {
-	if deps.NormalizeHash != nil {
-		return deps.NormalizeHash(hash)
-	}
-	if hash == "" {
-		return ""
-	}
-	return strings.ToLower(hash)
+	return normalizeHash(hash)
 }
 
 func (deps TreeRuntimeDeps) parseWeight(v string) uint64 {
-	if deps.ParseWeight != nil {
-		return deps.ParseWeight(v)
-	}
 	return ParseStoredBlockWeight(v)
 }
 
@@ -178,8 +162,8 @@ func (deps TreeRuntimeDeps) PruneStoredBlocks(ctx context.Context, irreversibleB
 
 	for _, nv := range prunedNodes {
 		hash := deps.normalizeHash(nv.Key)
-		if deps.PayloadAccessor != nil {
-			deps.PayloadAccessor.DeleteNodeBlockPayload(hash)
+		if deps.PayloadStore != nil {
+			deps.PayloadStore.DeletePayload(hash)
 		}
 		if deps.StoredBlocks != nil {
 			deps.StoredBlocks.UnmarkStored(hash)
@@ -295,8 +279,8 @@ func (deps TreeRuntimeDeps) RestoreBlockTree(blocks []model.Block) (int, error) 
 			}
 
 			deps.BlockTree.Insert(blk.Height, hash, parentHash, weight, &irreversible)
-			if deps.PayloadAccessor != nil {
-				deps.PayloadAccessor.SetNodeBlockHeader(hash, nil)
+			if deps.PayloadStore != nil && deps.BlockTree.Get(hash) != nil {
+				deps.PayloadStore.SetHeader(hash, nil)
 			}
 			if blk.Complete && deps.StoredBlocks != nil {
 				deps.StoredBlocks.MarkStored(hash)

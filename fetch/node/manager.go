@@ -10,7 +10,7 @@ import (
 )
 
 type NodeState struct {
-	operator *NodeOperator
+	operator *NodeOperatorImpl
 	remote   *headernotify.RemoteChain
 	delay    int64
 	ready    bool
@@ -42,6 +42,12 @@ func NewNodeManager(clients []*ethclient.Client, rpcTimeout time.Duration) *Node
 	return &NodeManager{nodes: nodes}
 }
 
+// validNodeLocked reports whether id is in range and nm.nodes[id] is non-nil.
+// Caller must hold nm.mu.
+func (nm *NodeManager) validNodeLocked(id int) bool {
+	return nm != nil && id >= 0 && id < len(nm.nodes) && nm.nodes[id] != nil
+}
+
 func (nm *NodeManager) NodeCount() int {
 	nm.mu.RLock()
 	defer nm.mu.RUnlock()
@@ -60,10 +66,10 @@ func (nm *NodeManager) Clients() []*ethclient.Client {
 	return clients
 }
 
-func (nm *NodeManager) NodeOperators() []*NodeOperator {
+func (nm *NodeManager) NodeOperators() []NodeOperator {
 	nm.mu.RLock()
 	defer nm.mu.RUnlock()
-	ops := make([]*NodeOperator, len(nm.nodes))
+	ops := make([]NodeOperator, len(nm.nodes))
 	for i, node := range nm.nodes {
 		if node != nil {
 			ops[i] = node.operator
@@ -84,7 +90,7 @@ func (nm *NodeManager) Node(id int) *NodeState {
 func (nm *NodeManager) ResetNodeRemoteTip(id int) {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
-	if id < 0 || id >= len(nm.nodes) || nm.nodes[id] == nil {
+	if !nm.validNodeLocked(id) {
 		return
 	}
 	nm.nodes[id].remote = headernotify.NewRemoteChain()
@@ -93,7 +99,7 @@ func (nm *NodeManager) ResetNodeRemoteTip(id int) {
 func (nm *NodeManager) UpdateNodeChainInfo(id int, height uint64, hash string) {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
-	if id < 0 || id >= len(nm.nodes) || nm.nodes[id] == nil {
+	if !nm.validNodeLocked(id) {
 		return
 	}
 	nm.nodes[id].remote.Update(height, hash)
@@ -103,7 +109,7 @@ func (nm *NodeManager) UpdateNodeChainInfo(id int, height uint64, hash string) {
 func (nm *NodeManager) UpdateNodeState(id int, delay int64, success bool) {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
-	if id < 0 || id >= len(nm.nodes) || nm.nodes[id] == nil {
+	if !nm.validNodeLocked(id) {
 		return
 	}
 	nm.nodes[id].delay = delay
@@ -113,7 +119,7 @@ func (nm *NodeManager) UpdateNodeState(id int, delay int64, success bool) {
 func (nm *NodeManager) SetNodeNotReady(id int) {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
-	if id < 0 || id >= len(nm.nodes) || nm.nodes[id] == nil {
+	if !nm.validNodeLocked(id) {
 		return
 	}
 	nm.nodes[id].ready = false
@@ -122,7 +128,7 @@ func (nm *NodeManager) SetNodeNotReady(id int) {
 func (nm *NodeManager) SetNodeReady(id int) {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
-	if id < 0 || id >= len(nm.nodes) || nm.nodes[id] == nil {
+	if !nm.validNodeLocked(id) {
 		return
 	}
 	nm.nodes[id].ready = true
@@ -165,7 +171,7 @@ func (nm *NodeManager) GetLatestHeight() uint64 {
 	return latest
 }
 
-func (nm *NodeManager) GetBestNode(height uint64) (int, *NodeOperator, error) {
+func (nm *NodeManager) GetBestNode(height uint64) (int, NodeOperator, error) {
 	nm.mu.RLock()
 	defer nm.mu.RUnlock()
 	nodeId := -1

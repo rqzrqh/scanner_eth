@@ -93,7 +93,7 @@ func TestContinuousGeneratedScenarios(t *testing.T) {
 	addBlock(17, "0x11", "0x10", true)
 	setNodeLatestHeight(fm, 17)
 	mustTestScanWorker(t, fm).SetEnabled(true)
-	mustTestScanFlow(t, fm).ScanEvents(context.Background())
+	mustTestScanFlow(t, fm).RunScanCycle(context.Background())
 	time.Sleep(50 * time.Millisecond)
 	if fm.blockTree.Get("0x10") != nil {
 		t.Fatalf("expected missing parent to be absent before parent header arrives")

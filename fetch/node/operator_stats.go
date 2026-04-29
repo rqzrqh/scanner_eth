@@ -40,7 +40,7 @@ func recordNodeOperatorRPC(nodeID int, method string, delta int64) {
 	nodeOperatorStatsMu.Unlock()
 }
 
-func recordRPCBatchElems(n *NodeOperator, business string, elems []rpc.BatchElem) {
+func recordRPCBatchElems(n *NodeOperatorImpl, business string, elems []rpc.BatchElem) {
 	if n == nil || len(elems) == 0 {
 		return
 	}
@@ -63,7 +63,7 @@ func rpcStatKey(business, rpcMethod string) string {
 	return business + ":" + rpcMethod
 }
 
-func (n *NodeOperator) recordRPC(business, rpcMethod string, delta int64) {
+func (n *NodeOperatorImpl) recordRPC(business, rpcMethod string, delta int64) {
 	if n == nil {
 		return
 	}

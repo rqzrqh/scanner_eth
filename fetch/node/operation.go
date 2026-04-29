@@ -24,9 +24,15 @@ type BlockHeaderJson = fetcherpkg.BlockHeaderJson
 type TxJson = fetcherpkg.TxJson
 type TxInternalTraceResultJson = fetcherpkg.TxInternalTraceResultJson
 
-// NodeOperatorInterface abstracts batched on-chain reads (balances, contract metadata, etc.).
-type NodeOperatorInterface interface {
+// NodeOperator abstracts all RPC reads issued through a managed node.
+type NodeOperator interface {
 	ID() int
+	EthClient() *ethclient.Client
+	FetchBlockHeaderByHeight(ctx context.Context, taskId int, height uint64) *BlockHeaderJson
+	FetchBlockHeaderByHash(ctx context.Context, taskId int, hash string) *BlockHeaderJson
+	FetchInternalTxTracesByBlockHash(ctx context.Context, taskId int, blockHash string, height uint64) ([]*TxInternalTraceResultJson, error)
+	FetchTransactionsByHashBatch(ctx context.Context, txHashes []string, txs []*TxJson) error
+	FetchReceiptsBatch(ctx context.Context, txHashes []string, receipts []*ethTypes.Receipt) error
 	FetchBalanceNative(ctx context.Context, balancesNative []*data.BalanceNative, height uint64) error
 	FetchErc20BalancesBatch(ctx context.Context, bs []*data.BalanceErc20, height uint64) error
 	FetchErc1155BalancesBatch(ctx context.Context, bs []*data.BalanceErc1155, height uint64) error
@@ -36,26 +42,26 @@ type NodeOperatorInterface interface {
 	FetchTokenErc721(ctx context.Context, contractAddr *common.Address, tokenId *big.Int) (*data.TokenErc721, error)
 }
 
-// NodeOperator implements NodeOperatorInterface via ethclient.
-type NodeOperator struct {
+// NodeOperatorImpl implements NodeOperator via ethclient.
+type NodeOperatorImpl struct {
 	id         int
 	client     *ethclient.Client
 	rpcTimeout time.Duration
 }
 
-func NewNodeOperator(id int, client *ethclient.Client, rpcTimeout time.Duration) *NodeOperator {
-	return &NodeOperator{id: id, client: client, rpcTimeout: rpcTimeout}
+func NewNodeOperator(id int, client *ethclient.Client, rpcTimeout time.Duration) *NodeOperatorImpl {
+	return &NodeOperatorImpl{id: id, client: client, rpcTimeout: rpcTimeout}
 }
 
-func (n *NodeOperator) ID() int {
+func (n *NodeOperatorImpl) ID() int {
 	return n.id
 }
 
-func (n *NodeOperator) EthClient() *ethclient.Client {
+func (n *NodeOperatorImpl) EthClient() *ethclient.Client {
 	return n.client
 }
 
-func (n *NodeOperator) FetchBlockHeaderByHeight(ctx context.Context, taskId int, height uint64) *BlockHeaderJson {
+func (n *NodeOperatorImpl) FetchBlockHeaderByHeight(ctx context.Context, taskId int, height uint64) *BlockHeaderJson {
 	if n == nil || n.client == nil {
 		return nil
 	}
@@ -75,7 +81,7 @@ func (n *NodeOperator) FetchBlockHeaderByHeight(ctx context.Context, taskId int,
 	return blkHeaderJson
 }
 
-func (n *NodeOperator) FetchBlockHeaderByHash(ctx context.Context, taskId int, hash string) *BlockHeaderJson {
+func (n *NodeOperatorImpl) FetchBlockHeaderByHash(ctx context.Context, taskId int, hash string) *BlockHeaderJson {
 	if n == nil || n.client == nil {
 		return nil
 	}
@@ -98,9 +104,9 @@ func (n *NodeOperator) FetchBlockHeaderByHash(ctx context.Context, taskId int, h
 	return blkHeaderJson
 }
 
-func (n *NodeOperator) FetchInternalTxTracesByBlockHash(ctx context.Context, taskId int, blockHash string, height uint64) ([]*TxInternalTraceResultJson, error) {
+func (n *NodeOperatorImpl) FetchInternalTxTracesByBlockHash(ctx context.Context, taskId int, blockHash string, height uint64) ([]*TxInternalTraceResultJson, error) {
 	if n == nil || n.client == nil {
-		return nil, fmt.Errorf("nil NodeOperator or client")
+		return nil, fmt.Errorf("nil NodeOperatorImpl or client")
 	}
 	rpcCtx, cancel := n.withNodeRPCTimeout(ctx)
 	defer cancel()
@@ -126,9 +132,9 @@ func (n *NodeOperator) FetchInternalTxTracesByBlockHash(ctx context.Context, tas
 	return txInternalJsonList, nil
 }
 
-func (n *NodeOperator) FetchTransactionsByHashBatch(ctx context.Context, txHashes []string, txs []*TxJson) error {
+func (n *NodeOperatorImpl) FetchTransactionsByHashBatch(ctx context.Context, txHashes []string, txs []*TxJson) error {
 	if n == nil || n.client == nil {
-		return fmt.Errorf("nil NodeOperator or client")
+		return fmt.Errorf("nil NodeOperatorImpl or client")
 	}
 	if len(txHashes) != len(txs) {
 		return fmt.Errorf("txHashes len %d != txs len %d", len(txHashes), len(txs))
@@ -145,7 +151,11 @@ func (n *NodeOperator) FetchTransactionsByHashBatch(ctx context.Context, txHashe
 		}
 		elems[i] = rpc.BatchElem{Method: "eth_getTransactionByHash", Args: []interface{}{txHashes[i]}, Result: txs[i]}
 	}
-	recordRPCBatchElems(n, "FetchTransactionsByHashBatch", elems)
+	return n.execRPCBatchElems(rpcCtx, "FetchTransactionsByHashBatch", elems)
+}
+
+func (n *NodeOperatorImpl) execRPCBatchElems(rpcCtx context.Context, opName string, elems []rpc.BatchElem) error {
+	recordRPCBatchElems(n, opName, elems)
 	if err := n.client.Client().BatchCallContext(rpcCtx, elems); err != nil {
 		return err
 	}
@@ -157,9 +167,9 @@ func (n *NodeOperator) FetchTransactionsByHashBatch(ctx context.Context, txHashe
 	return nil
 }
 
-func (n *NodeOperator) FetchReceiptsBatch(ctx context.Context, txHashes []string, receipts []*ethTypes.Receipt) error {
+func (n *NodeOperatorImpl) FetchReceiptsBatch(ctx context.Context, txHashes []string, receipts []*ethTypes.Receipt) error {
 	if n == nil || n.client == nil {
-		return fmt.Errorf("nil NodeOperator or client")
+		return fmt.Errorf("nil NodeOperatorImpl or client")
 	}
 	if len(txHashes) != len(receipts) {
 		return fmt.Errorf("txHashes len %d != receipts len %d", len(txHashes), len(receipts))
@@ -176,19 +186,10 @@ func (n *NodeOperator) FetchReceiptsBatch(ctx context.Context, txHashes []string
 		}
 		elems[i] = rpc.BatchElem{Method: "eth_getTransactionReceipt", Args: []interface{}{txHashes[i]}, Result: receipts[i]}
 	}
-	recordRPCBatchElems(n, "FetchReceiptsBatch", elems)
-	if err := n.client.Client().BatchCallContext(rpcCtx, elems); err != nil {
-		return err
-	}
-	for i, elem := range elems {
-		if elem.Error != nil {
-			return fmt.Errorf("elem(%v): %w", i, elem.Error)
-		}
-	}
-	return nil
+	return n.execRPCBatchElems(rpcCtx, "FetchReceiptsBatch", elems)
 }
 
-func (n *NodeOperator) FetchBalanceNative(ctx context.Context, balancesNative []*data.BalanceNative, height uint64) error {
+func (n *NodeOperatorImpl) FetchBalanceNative(ctx context.Context, balancesNative []*data.BalanceNative, height uint64) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -228,7 +229,7 @@ func (n *NodeOperator) FetchBalanceNative(ctx context.Context, balancesNative []
 	return err
 }
 
-func (n *NodeOperator) FetchErc20BalancesBatch(ctx context.Context, bs []*data.BalanceErc20, height uint64) error {
+func (n *NodeOperatorImpl) FetchErc20BalancesBatch(ctx context.Context, bs []*data.BalanceErc20, height uint64) error {
 	rpcCtx, cancel := n.withNodeRPCTimeout(ctx)
 	defer cancel()
 	hexBalances := make([]hexutil.Bytes, len(bs))
@@ -279,7 +280,7 @@ func (n *NodeOperator) FetchErc20BalancesBatch(ctx context.Context, bs []*data.B
 	return nil
 }
 
-func (n *NodeOperator) FetchErc1155BalancesBatch(ctx context.Context, bs []*data.BalanceErc1155, height uint64) error {
+func (n *NodeOperatorImpl) FetchErc1155BalancesBatch(ctx context.Context, bs []*data.BalanceErc1155, height uint64) error {
 	rpcCtx, cancel := n.withNodeRPCTimeout(ctx)
 	defer cancel()
 	hexBalances := make([]hexutil.Bytes, len(bs))
@@ -332,7 +333,7 @@ func (n *NodeOperator) FetchErc1155BalancesBatch(ctx context.Context, bs []*data
 	return nil
 }
 
-func (n *NodeOperator) ToCallArg(msg ethereum.CallMsg) interface{} {
+func (n *NodeOperatorImpl) ToCallArg(msg ethereum.CallMsg) interface{} {
 	arg := map[string]interface{}{"from": msg.From, "to": msg.To}
 	if len(msg.Data) > 0 {
 		arg["data"] = hexutil.Bytes(msg.Data)
@@ -349,7 +350,7 @@ func (n *NodeOperator) ToCallArg(msg ethereum.CallMsg) interface{} {
 	return arg
 }
 
-func (n *NodeOperator) FetchContractErc20(ctx context.Context, addr *common.Address, height uint64) (*data.ContractErc20, error) {
+func (n *NodeOperatorImpl) FetchContractErc20(ctx context.Context, addr *common.Address, height uint64) (*data.ContractErc20, error) {
 	rpcCtx, cancel := n.withNodeRPCTimeout(ctx)
 	defer cancel()
 	methods := []string{"name", "symbol", "decimals", "totalSupply"}
@@ -414,7 +415,7 @@ func (n *NodeOperator) FetchContractErc20(ctx context.Context, addr *common.Addr
 	return contractErc20, nil
 }
 
-func (n *NodeOperator) FetchContractErc721(ctx context.Context, addr *common.Address) (*data.ContractErc721, error) {
+func (n *NodeOperatorImpl) FetchContractErc721(ctx context.Context, addr *common.Address) (*data.ContractErc721, error) {
 	rpcCtx, cancel := n.withNodeRPCTimeout(ctx)
 	defer cancel()
 	methods := []string{"name", "symbol"}
@@ -462,7 +463,7 @@ func (n *NodeOperator) FetchContractErc721(ctx context.Context, addr *common.Add
 	return contractErc721, nil
 }
 
-func (n *NodeOperator) FetchTokenErc721(ctx context.Context, contractAddr *common.Address, tokenId *big.Int) (*data.TokenErc721, error) {
+func (n *NodeOperatorImpl) FetchTokenErc721(ctx context.Context, contractAddr *common.Address, tokenId *big.Int) (*data.TokenErc721, error) {
 	rpcCtx, cancel := n.withNodeRPCTimeout(ctx)
 	defer cancel()
 	methods := []string{"ownerOf", "tokenURI"}

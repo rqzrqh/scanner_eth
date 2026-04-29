@@ -7,12 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sirupsen/logrus"
-)
+	fetchtask "scanner_eth/fetch/task"
 
-const (
-	TaskPriorityHigh = iota + 1
-	TaskPriorityNormal
+	"github.com/sirupsen/logrus"
 )
 
 type TaskPool interface {
@@ -25,13 +22,6 @@ type TaskPool interface {
 	IsHeaderHashSyncing(string) bool
 	TryStartHeaderHashSync(string) bool
 	FinishHeaderHashSync(string)
-}
-
-type PayloadAccessor interface {
-	SetNodeBlockHeader(string, any) bool
-	SetNodeBlockBody(string, any) bool
-	GetNodeBlockHeader(string) any
-	GetNodeBlockBody(string) any
 }
 
 type StoreWorker interface {
@@ -48,11 +38,15 @@ type RuntimeDeps struct {
 	Irreversible      int
 	BlockTree         *blocktree.BlockTree
 	TaskPool          TaskPool
-	PayloadAccessor   PayloadAccessor
 	StoreWorker       StoreWorker
 	StoredBlocks      StoredBlocks
 	TriggerScan       func()
 	PruneStoredBlocks func(context.Context, int)
+
+	SetNodeBlockHeader func(string, any) bool
+	SetNodeBlockBody   func(string, any) bool
+	GetNodeBlockHeader func(string) any
+	GetNodeBlockBody   func(string) any
 
 	LatestRemoteHeight      func() uint64
 	BootstrapHeaderByHeight func(context.Context, uint64) any
@@ -113,11 +107,15 @@ type Flow struct {
 	irreversible      int
 	blockTree         *blocktree.BlockTree
 	taskPool          TaskPool
-	payloadAccessor   PayloadAccessor
 	storeWorker       StoreWorker
 	storedBlocks      StoredBlocks
 	triggerScan       func()
 	pruneStoredBlocks func(context.Context, int)
+
+	setNodeBlockHeader func(string, any) bool
+	setNodeBlockBody   func(string, any) bool
+	getNodeBlockHeader func(string) any
+	getNodeBlockBody   func(string) any
 
 	latestRemoteHeight      func() uint64
 	bootstrapHeaderByHeight func(context.Context, uint64) any
@@ -156,11 +154,14 @@ func (sf *Flow) BindRuntimeDeps() {
 	sf.irreversible = deps.Irreversible
 	sf.blockTree = deps.BlockTree
 	sf.taskPool = deps.TaskPool
-	sf.payloadAccessor = deps.PayloadAccessor
 	sf.storeWorker = deps.StoreWorker
 	sf.storedBlocks = deps.StoredBlocks
 	sf.triggerScan = deps.TriggerScan
 	sf.pruneStoredBlocks = deps.PruneStoredBlocks
+	sf.setNodeBlockHeader = deps.SetNodeBlockHeader
+	sf.setNodeBlockBody = deps.SetNodeBlockBody
+	sf.getNodeBlockHeader = deps.GetNodeBlockHeader
+	sf.getNodeBlockBody = deps.GetNodeBlockBody
 	sf.latestRemoteHeight = deps.LatestRemoteHeight
 	sf.bootstrapHeaderByHeight = deps.BootstrapHeaderByHeight
 	sf.fetchHeaderByHeight = deps.FetchHeaderByHeight
@@ -199,7 +200,7 @@ func (sf *Flow) TriggerScan() {
 	sf.triggerScan()
 }
 
-func (sf *Flow) ScanEvents(ctx context.Context) {
+func (sf *Flow) RunScanCycle(ctx context.Context) {
 	sf.BindRuntimeDeps()
 	if sf == nil || !sf.RunScanCoordinator(ctx) {
 		return
@@ -315,7 +316,7 @@ func (sf *Flow) GetHeaderByHashSyncTargets() []string {
 }
 
 func (sf *Flow) GetBodySyncTargets() []string {
-	if sf == nil || sf.blockTree == nil || sf.payloadAccessor == nil {
+	if sf == nil || sf.blockTree == nil || sf.getNodeBlockBody == nil {
 		return nil
 	}
 	targets := make([]string, 0)
@@ -330,7 +331,7 @@ func (sf *Flow) GetBodySyncTargets() []string {
 			if !ok {
 				continue
 			}
-			nodeData := sf.payloadAccessor.GetNodeBlockBody(node.Key)
+			nodeData := sf.getNodeBlockBody(node.Key)
 			if !sf.hasBody(nodeData) || sf.HasStorableNodeData(nodeData) {
 				if _, exists := seen[state.Hash]; !exists {
 					seen[state.Hash] = struct{}{}
@@ -368,7 +369,7 @@ func (sf *Flow) SyncBodyTarget(ctx context.Context, target string) (bool, string
 	if strings.TrimSpace(target) == "" {
 		return false, "invalid body target"
 	}
-	if sf == nil || sf.blockTree == nil || sf.payloadAccessor == nil {
+	if sf == nil || sf.blockTree == nil || sf.getNodeBlockBody == nil {
 		return false, "scan runtime or blocktree not available"
 	}
 	for _, raw := range strings.Split(target, ",") {
@@ -387,7 +388,7 @@ func (sf *Flow) SyncBodyTarget(ctx context.Context, target string) (bool, string
 		if !ok {
 			continue
 		}
-		nodeData := sf.payloadAccessor.GetNodeBlockBody(node.Key)
+		nodeData := sf.getNodeBlockBody(node.Key)
 		if !sf.hasBody(nodeData) {
 			sf.EnqueueNodeBodySync(state)
 			continue
@@ -401,7 +402,7 @@ func (sf *Flow) SyncBodyTarget(ctx context.Context, target string) (bool, string
 }
 
 func (sf *Flow) CountActionableBodyNodes() int {
-	if sf == nil || sf.blockTree == nil || sf.payloadAccessor == nil {
+	if sf == nil || sf.blockTree == nil || sf.getNodeBlockBody == nil {
 		return 0
 	}
 	count := 0
@@ -415,7 +416,7 @@ func (sf *Flow) CountActionableBodyNodes() int {
 			if !ok {
 				continue
 			}
-			nodeData := sf.payloadAccessor.GetNodeBlockBody(node.Key)
+			nodeData := sf.getNodeBlockBody(node.Key)
 			if !sf.hasBody(nodeData) {
 				count++
 				continue
@@ -597,14 +598,14 @@ func (sf *Flow) ProcessBranchesLowToHigh(ctx context.Context) {
 }
 
 func (sf *Flow) ProcessBranchNode(ctx context.Context, node *blocktree.LinkedNode) {
-	if node == nil || sf == nil || sf.payloadAccessor == nil {
+	if node == nil || sf == nil || sf.getNodeBlockBody == nil {
 		return
 	}
 	state, ok := sf.BuildBranchProcessState(node)
 	if !ok {
 		return
 	}
-	nodeData := sf.payloadAccessor.GetNodeBlockBody(node.Key)
+	nodeData := sf.getNodeBlockBody(node.Key)
 	if !sf.hasBody(nodeData) {
 		sf.EnqueueNodeBodySync(state)
 		return
@@ -632,9 +633,9 @@ func (sf *Flow) EnqueueNodeBodySync(state BranchProcessState) {
 	if sf == nil || sf.taskPool == nil {
 		return
 	}
-	priority := TaskPriorityNormal
+	priority := fetchtask.TaskPriorityNormal
 	if state.ParentReady {
-		priority = TaskPriorityHigh
+		priority = fetchtask.TaskPriorityHigh
 	}
 	sf.taskPool.EnqueueBodyTask(state.Hash, priority)
 }
@@ -668,7 +669,7 @@ func (sf *Flow) SyncNodeDataByHash(ctx context.Context, hash string) bool {
 	if hash == "" {
 		return true
 	}
-	if sf == nil || sf.blockTree == nil || sf.payloadAccessor == nil || sf.fetchHeaderByHash == nil || sf.fetchBodyByHash == nil {
+	if sf == nil || sf.blockTree == nil || sf.getNodeBlockHeader == nil || sf.setNodeBlockHeader == nil || sf.setNodeBlockBody == nil || sf.fetchHeaderByHash == nil || sf.fetchBodyByHash == nil {
 		return false
 	}
 	node := sf.blockTree.Get(hash)
@@ -676,13 +677,13 @@ func (sf *Flow) SyncNodeDataByHash(ctx context.Context, hash string) bool {
 		return true
 	}
 
-	header := sf.payloadAccessor.GetNodeBlockHeader(hash)
+	header := sf.getNodeBlockHeader(hash)
 	if !sf.hasHeader(header) {
 		header = sf.fetchHeaderByHash(ctx, hash)
 		if !sf.hasHeader(header) {
 			return false
 		}
-		sf.payloadAccessor.SetNodeBlockHeader(hash, header)
+		sf.setNodeBlockHeader(hash, header)
 	}
 
 	height, ok := sf.headerHeight(header)
@@ -698,7 +699,7 @@ func (sf *Flow) SyncNodeDataByHash(ctx context.Context, hash string) bool {
 		return false
 	}
 
-	sf.payloadAccessor.SetNodeBlockBody(hash, body)
+	sf.setNodeBlockBody(hash, body)
 	if sf.updateNodeState != nil && nodeID >= 0 {
 		sf.updateNodeState(nodeID, costMicros, true)
 	}
@@ -707,7 +708,7 @@ func (sf *Flow) SyncNodeDataByHash(ctx context.Context, hash string) bool {
 
 func (sf *Flow) InsertHeader(header any) {
 	sf.BindRuntimeDeps()
-	if sf == nil || sf.blockTree == nil || sf.payloadAccessor == nil || !sf.hasHeader(header) {
+	if sf == nil || sf.blockTree == nil || sf.setNodeBlockHeader == nil || !sf.hasHeader(header) {
 		return
 	}
 	height, ok := sf.headerHeight(header)
@@ -718,7 +719,7 @@ func (sf *Flow) InsertHeader(header any) {
 	parentKey := sf.normalize(sf.headerParentHash(header))
 	weight := sf.headerWeight(header)
 	sf.blockTree.Insert(height, key, parentKey, weight, nil)
-	sf.payloadAccessor.SetNodeBlockHeader(key, nil)
+	sf.setNodeBlockHeader(key, nil)
 }
 
 func (sf *Flow) logScanStageEvent(event ScanStageEvent) {

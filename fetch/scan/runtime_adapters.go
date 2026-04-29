@@ -57,53 +57,6 @@ func (a *TaskPoolAdapter) FinishHeaderHashSync(hash string) {
 	}
 }
 
-type PayloadStoreAccessor[H any, B any] struct {
-	nodeExists func(string) bool
-	store      *fetchstore.PayloadStore[H, B]
-}
-
-func NewPayloadStoreAccessor[H any, B any](nodeExists func(string) bool, store *fetchstore.PayloadStore[H, B]) *PayloadStoreAccessor[H, B] {
-	return &PayloadStoreAccessor[H, B]{nodeExists: nodeExists, store: store}
-}
-
-func (a *PayloadStoreAccessor[H, B]) SetNodeBlockHeader(hash string, header any) bool {
-	if a == nil || a.store == nil || a.nodeExists == nil {
-		return false
-	}
-	if !a.nodeExists(hash) {
-		return false
-	}
-	typed, _ := header.(H)
-	a.store.SetHeader(hash, typed)
-	return true
-}
-
-func (a *PayloadStoreAccessor[H, B]) SetNodeBlockBody(hash string, data any) bool {
-	if a == nil || a.store == nil || a.nodeExists == nil {
-		return false
-	}
-	if !a.nodeExists(hash) {
-		return false
-	}
-	typed, _ := data.(B)
-	a.store.SetBody(hash, typed)
-	return true
-}
-
-func (a *PayloadStoreAccessor[H, B]) GetNodeBlockHeader(hash string) any {
-	if a == nil || a.store == nil {
-		return nil
-	}
-	return a.store.GetHeader(hash)
-}
-
-func (a *PayloadStoreAccessor[H, B]) GetNodeBlockBody(hash string) any {
-	if a == nil || a.store == nil {
-		return nil
-	}
-	return a.store.GetBody(hash)
-}
-
 type StoreWorkerAdapter[T any] struct {
 	worker *fetchstore.SerialWorker[T]
 }

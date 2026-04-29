@@ -13,20 +13,7 @@ func (fm *FetchManager) capturePruneStateSnapshot() *pruneStateSnapshot {
 	if fm == nil {
 		return (&fetchstore.TreeRuntimeDeps{}).CapturePruneStateSnapshot()
 	}
-	payloadStore := fm.runtimePayloadStore()
-	blockTree := fm.runtimeBlockTree()
-	deps := fetchstore.TreeRuntimeDeps{
-		BlockTree: blockTree,
-		PayloadAccessor: &treePayloadAccessorAdapter{
-			nodeExists: func(hash string) bool { return blockTree != nil && blockTree.Get(hash) != nil },
-			store:      payloadStore,
-		},
-		StoredBlocks:  fm.runtimeStoredBlocks(),
-		TaskPool:      fm.runtimeTaskPool(),
-		NormalizeHash: normalizeHash,
-		ParseWeight:   parseStoredBlockWeight,
-	}
-	return deps.CapturePruneStateSnapshot()
+	return fm.buildTreeRuntimeDeps().CapturePruneStateSnapshot()
 }
 
 func (fm *FetchManager) logPruneSnapshot(stage string, snapshot *pruneStateSnapshot) {
@@ -38,38 +25,13 @@ func logPruneSnapshot(stage string, snapshot *pruneStateSnapshot) {
 }
 
 func (fm *FetchManager) storedHeightRangeOnTree() (uint64, uint64, bool) {
-	payloadStore := fm.runtimePayloadStore()
-	blockTree := fm.runtimeBlockTree()
-	deps := fetchstore.TreeRuntimeDeps{
-		BlockTree: blockTree,
-		PayloadAccessor: &treePayloadAccessorAdapter{
-			nodeExists: func(hash string) bool { return blockTree != nil && blockTree.Get(hash) != nil },
-			store:      payloadStore,
-		},
-		StoredBlocks:  fm.runtimeStoredBlocks(),
-		TaskPool:      fm.runtimeTaskPool(),
-		NormalizeHash: normalizeHash,
-		ParseWeight:   parseStoredBlockWeight,
-	}
-	return deps.StoredHeightRangeOnTree()
+	return fm.buildTreeRuntimeDeps().StoredHeightRangeOnTree()
 }
 
 func (fm *FetchManager) pruneStoredBlocks(ctx context.Context) {
 	if fm == nil {
 		return
 	}
-	payloadStore := fm.runtimePayloadStore()
-	blockTree := fm.runtimeBlockTree()
-	deps := fetchstore.TreeRuntimeDeps{
-		BlockTree: blockTree,
-		PayloadAccessor: &treePayloadAccessorAdapter{
-			nodeExists: func(hash string) bool { return blockTree != nil && blockTree.Get(hash) != nil },
-			store:      payloadStore,
-		},
-		StoredBlocks:  fm.runtimeStoredBlocks(),
-		TaskPool:      fm.runtimeTaskPool(),
-		NormalizeHash: normalizeHash,
-		ParseWeight:   parseStoredBlockWeight,
-	}
+	deps := fm.buildTreeRuntimeDeps()
 	deps.PruneStoredBlocks(ctx, fm.irreversibleBlocks)
 }

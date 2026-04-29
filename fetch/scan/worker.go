@@ -7,20 +7,8 @@ import (
 	"time"
 )
 
-type Runner interface {
-	Scan(context.Context)
-}
-
-type RunnerFunc func(context.Context)
-
-func (f RunnerFunc) Scan(ctx context.Context) {
-	if f != nil {
-		f(ctx)
-	}
-}
-
 type Worker struct {
-	runner Runner
+	flow *Flow
 
 	enabled   atomic.Bool
 	triggerCh chan struct{}
@@ -30,9 +18,9 @@ type Worker struct {
 	wg     sync.WaitGroup
 }
 
-func NewWorker(runner Runner) *Worker {
+func NewWorker(flow *Flow) *Worker {
 	return &Worker{
-		runner:    runner,
+		flow:      flow,
 		triggerCh: make(chan struct{}, 1),
 	}
 }
@@ -66,12 +54,12 @@ func (w *Worker) run(loopCtx context.Context) {
 		case <-loopCtx.Done():
 			return
 		case <-ticker.C:
-			if w.runner != nil {
-				w.runner.Scan(loopCtx)
+			if w.flow != nil {
+				w.flow.RunScanCycle(loopCtx)
 			}
 		case <-w.triggerCh:
-			if w.runner != nil {
-				w.runner.Scan(loopCtx)
+			if w.flow != nil {
+				w.flow.RunScanCycle(loopCtx)
 			}
 		}
 	}

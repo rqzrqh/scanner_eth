@@ -10,6 +10,11 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const (
+	statsLogIntervalSerialWorker = 30 * time.Second
+	reqChannelCapacity           = 64
+)
+
 type BlockStorer[T any] interface {
 	StoreBlockData(context.Context, T) error
 }
@@ -27,10 +32,11 @@ type SerialWorker[T any] struct {
 	storedBlocks StoredState
 	isZero       func(T) bool
 
-	reqCh    chan *StoreRequest[T]
-	inflight InflightState
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
+	reqCh       chan *StoreRequest[T]
+	inflight    InflightState
+	lifecycleMu sync.Mutex
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
 
 	submitted uint64
 	skipped   uint64
@@ -44,9 +50,15 @@ func NewSerialWorker[T any](dbOperator BlockStorer[T], storedBlocks StoredState,
 		dbOperator:   dbOperator,
 		storedBlocks: storedBlocks,
 		isZero:       isZero,
-		reqCh:        make(chan *StoreRequest[T], 64),
+		reqCh:        make(chan *StoreRequest[T], reqChannelCapacity),
 		inflight:     NewInflightState(),
 	}
+}
+
+func NewStartedSerialWorker[T any](dbOperator BlockStorer[T], storedBlocks StoredState, isZero func(T) bool) *SerialWorker[T] {
+	worker := NewSerialWorker(dbOperator, storedBlocks, isZero)
+	worker.Start()
+	return worker
 }
 
 func (w *SerialWorker[T]) SetDbOperator(dbOperator BlockStorer[T]) {
@@ -61,6 +73,12 @@ func (w *SerialWorker[T]) Start() {
 		return
 	}
 
+	w.lifecycleMu.Lock()
+	defer w.lifecycleMu.Unlock()
+	if w.cancel != nil {
+		return
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	w.cancel = cancel
 	w.wg.Add(1)
@@ -70,7 +88,7 @@ func (w *SerialWorker[T]) Start() {
 func (w *SerialWorker[T]) runLoop(ctx context.Context) {
 	defer w.wg.Done()
 
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(statsLogIntervalSerialWorker)
 	defer ticker.Stop()
 
 	for {
@@ -93,9 +111,13 @@ func (w *SerialWorker[T]) Stop() {
 	if w == nil {
 		return
 	}
-	if w.cancel != nil {
-		w.cancel()
-		w.cancel = nil
+
+	w.lifecycleMu.Lock()
+	cancel := w.cancel
+	w.cancel = nil
+	w.lifecycleMu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 	w.wg.Wait()
 }

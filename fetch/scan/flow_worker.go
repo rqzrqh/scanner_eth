@@ -1,21 +1,13 @@
 package scan
 
-import "context"
-
 type FlowWorker struct {
 	core *Worker
 	flow *Flow
 }
 
 func NewFlowWorker(flow *Flow) *FlowWorker {
-	var runner Runner
-	if flow != nil {
-		runner = RunnerFunc(func(ctx context.Context) {
-			flow.ScanEvents(ctx)
-		})
-	}
 	return &FlowWorker{
-		core: NewWorker(runner),
+		core: NewWorker(flow),
 		flow: flow,
 	}
 }

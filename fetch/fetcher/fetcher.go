@@ -2,11 +2,12 @@ package fetcher
 
 import (
 	"context"
-	"fmt"
+	"maps"
 	"math/big"
 	"scanner_eth/data"
 	"scanner_eth/filter"
 	"scanner_eth/util"
+	"strconv"
 	"strings"
 	"time"
 
@@ -85,11 +86,14 @@ func (bf *dbBlockFetcher) FetchFullBlock(ctx context.Context, nodeOp NodeOperato
 }
 
 func transTraceAddressToString(opcode string, traceAddress []uint64) string {
-	res := strings.ToLower(opcode)
+	var b strings.Builder
+	b.Grow(len(opcode) + len(traceAddress)*12)
+	b.WriteString(strings.ToLower(opcode))
 	for _, addr := range traceAddress {
-		res = fmt.Sprintf("%s_%d", res, addr)
+		b.WriteByte('_')
+		b.WriteString(strconv.FormatUint(addr, 10))
 	}
-	return res
+	return b.String()
 }
 
 type TxParseResult struct {
@@ -234,14 +238,12 @@ func FetchFullBlock(ctx context.Context, nodeOp NodeOperator, taskId int, db *go
 	txParseResult := parseTx(txList, receipts, height, baseFee)
 	internalTxParseResult := parseTxInternal(txInternalJsonList, height)
 
-	balanceNativeAddress := make(map[string]struct{})
-	balanceErc20Address := make(map[string]map[string]struct{})
-	for k := range txParseResult.BalanceNativeAddress {
-		balanceNativeAddress[k] = struct{}{}
-	}
+	balanceNativeAddress := maps.Clone(txParseResult.BalanceNativeAddress)
 	for k := range internalTxParseResult.InternalBalanceNativeAddress {
 		balanceNativeAddress[k] = struct{}{}
 	}
+
+	balanceErc20Address := make(map[string]map[string]struct{})
 	for k, v := range txParseResult.BalanceErc20Address {
 		for c := range v {
 			if _, ok := balanceErc20Address[k]; !ok {
@@ -453,23 +455,11 @@ func parseTx(jsonTxList []*TxJson, receipts map[string]*ethTypes.Receipt, height
 
 		fullEventList := make([]*data.FullEventLog, 0, len(receipt.Logs))
 		for _, txLog := range receipt.Logs {
-			var topic0, topic1, topic2, topic3 string
-			switch len(txLog.Topics) {
-			case 1:
-				topic0 = txLog.Topics[0].Hex()
-			case 2:
-				topic0 = txLog.Topics[0].Hex()
-				topic1 = txLog.Topics[1].Hex()
-			case 3:
-				topic0 = txLog.Topics[0].Hex()
-				topic1 = txLog.Topics[1].Hex()
-				topic2 = txLog.Topics[2].Hex()
-			case 4:
-				topic0 = txLog.Topics[0].Hex()
-				topic1 = txLog.Topics[1].Hex()
-				topic2 = txLog.Topics[2].Hex()
-				topic3 = txLog.Topics[3].Hex()
+			var topicHex [4]string
+			for i := 0; i < len(txLog.Topics) && i < 4; i++ {
+				topicHex[i] = txLog.Topics[i].Hex()
 			}
+			topic0, topic1, topic2, topic3 := topicHex[0], topicHex[1], topicHex[2], topicHex[3]
 			contractAddr := strings.ToLower(txLog.Address.Hex())
 			balanceNativeAddress[contractAddr] = struct{}{}
 			topicCount := len(txLog.Topics)

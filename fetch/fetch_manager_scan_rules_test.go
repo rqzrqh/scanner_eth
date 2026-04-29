@@ -13,7 +13,7 @@ import (
 	fetcherpkg "scanner_eth/fetch/fetcher"
 )
 
-func TestScanEventsRule1BootstrapOnEmptyTree(t *testing.T) {
+func TestRunScanCycleRule1BootstrapOnEmptyTree(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
 	setTestScanStartHeight(fm, 100)
 	var calls atomic.Int32
@@ -37,7 +37,7 @@ func TestScanEventsRule1BootstrapOnEmptyTree(t *testing.T) {
 	}
 }
 
-func TestScanEventsRule2WindowExpandsToDoubleIrreversible(t *testing.T) {
+func TestRunScanCycleRule2WindowExpandsToDoubleIrreversible(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
 	mustTestScanFlow(t, fm).InsertHeader(makeHeader(10, "0xa", ""))
 	setNodeLatestHeight(fm, 13)
@@ -78,7 +78,7 @@ func TestScanEventsRule2WindowExpandsToDoubleIrreversible(t *testing.T) {
 	}
 }
 
-func TestScanEventsRule3SyncOrphanParentsByHash(t *testing.T) {
+func TestRunScanCycleRule3SyncOrphanParentsByHash(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
 	mustTestScanFlow(t, fm).InsertHeader(makeHeader(10, "0xroot", ""))
 	fm.blockTree.Insert(12, "0xchild", "0xmissing", 1, nil)
@@ -99,7 +99,7 @@ func TestScanEventsRule3SyncOrphanParentsByHash(t *testing.T) {
 	}
 }
 
-func TestScanEventsRule4BranchWriteCondition(t *testing.T) {
+func TestRunScanCycleRule4BranchWriteCondition(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
 
 	fm.blockTree.Insert(1, "a", "", 1, nil)
@@ -148,7 +148,7 @@ func TestScanEventsRule4BranchWriteCondition(t *testing.T) {
 	}
 }
 
-func TestScanEventsRule5PruneRemovesStoredAndTasks(t *testing.T) {
+func TestRunScanCycleRule5PruneRemovesStoredAndTasks(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
 
 	parent := ""

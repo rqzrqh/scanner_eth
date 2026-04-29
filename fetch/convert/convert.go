@@ -32,19 +32,28 @@ func normalizeHash(hash string) string {
 }
 
 func SetOptionalFeatures(optionalFeature map[string]struct{}) {
-	_, optionalTx = optionalFeature[model.Tx.TableName(model.Tx{})]
-	_, optionalTxInternal = optionalFeature[model.TxInternal.TableName(model.TxInternal{})]
-	_, optionalEventLog = optionalFeature[model.EventLog.TableName(model.EventLog{})]
-	_, optionalBalanceNative = optionalFeature[model.BalanceNative.TableName(model.BalanceNative{})]
-	_, optionalBalanceErc20 = optionalFeature[model.BalanceErc20.TableName(model.BalanceErc20{})]
-	_, optionalBalanceErc1155 = optionalFeature[model.BalanceErc1155.TableName(model.BalanceErc1155{})]
-	_, optionalEventErc20Transfer = optionalFeature[model.EventErc20Transfer.TableName(model.EventErc20Transfer{})]
-	_, optionalEventErc721Transfer = optionalFeature[model.EventErc721Transfer.TableName(model.EventErc721Transfer{})]
-	_, optionalEventErc1155Transfer = optionalFeature[model.EventErc1155Transfer.TableName(model.EventErc1155Transfer{})]
-	_, optionalContract = optionalFeature[model.Contract.TableName(model.Contract{})]
-	_, optionalContractErc20 = optionalFeature[model.ContractErc20.TableName(model.ContractErc20{})]
-	_, optionalContractErc721 = optionalFeature[model.ContractErc721.TableName(model.ContractErc721{})]
-	_, optionalTokenErc721 = optionalFeature[model.TokenErc721.TableName(model.TokenErc721{})]
+	pairs := []struct {
+		name string
+		dst  *bool
+	}{
+		{model.Tx.TableName(model.Tx{}), &optionalTx},
+		{model.TxInternal.TableName(model.TxInternal{}), &optionalTxInternal},
+		{model.EventLog.TableName(model.EventLog{}), &optionalEventLog},
+		{model.BalanceNative.TableName(model.BalanceNative{}), &optionalBalanceNative},
+		{model.BalanceErc20.TableName(model.BalanceErc20{}), &optionalBalanceErc20},
+		{model.BalanceErc1155.TableName(model.BalanceErc1155{}), &optionalBalanceErc1155},
+		{model.EventErc20Transfer.TableName(model.EventErc20Transfer{}), &optionalEventErc20Transfer},
+		{model.EventErc721Transfer.TableName(model.EventErc721Transfer{}), &optionalEventErc721Transfer},
+		{model.EventErc1155Transfer.TableName(model.EventErc1155Transfer{}), &optionalEventErc1155Transfer},
+		{model.Contract.TableName(model.Contract{}), &optionalContract},
+		{model.ContractErc20.TableName(model.ContractErc20{}), &optionalContractErc20},
+		{model.ContractErc721.TableName(model.ContractErc721{}), &optionalContractErc721},
+		{model.TokenErc721.TableName(model.TokenErc721{}), &optionalTokenErc721},
+	}
+	for _, p := range pairs {
+		_, ok := optionalFeature[p.name]
+		*p.dst = ok
+	}
 }
 
 func ConvertStorageFullBlock(fullblock *data.FullBlock, irreversible blocktree.IrreversibleNode) *fetchstore.StorageFullBlock {

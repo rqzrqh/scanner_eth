@@ -527,26 +527,7 @@ func (tp *Pool) IsHeaderHashSyncing(hash string) bool {
 	return tp.HasTaskKey(key)
 }
 
-func (tp *Pool) TryStartHeaderHeightSync(height uint64) bool {
-	key := headerHeightTaskKey(height)
-	tp.mu.Lock()
-	defer tp.mu.Unlock()
-	if tp.Tracked == nil {
-		tp.Tracked = make(map[string]struct{})
-	}
-	if _, exists := tp.Tracked[key]; exists {
-		return false
-	}
-	tp.Tracked[key] = struct{}{}
-	return true
-}
-
-func (tp *Pool) FinishHeaderHeightSync(height uint64) {
-	tp.DelTaskKey(headerHeightTaskKey(height))
-}
-
-func (tp *Pool) TryStartHeaderHashSync(hash string) bool {
-	key := headerHashTaskKey(hash)
+func (tp *Pool) tryReserveTrackedKey(key string) bool {
 	if key == "" {
 		return false
 	}
@@ -560,6 +541,18 @@ func (tp *Pool) TryStartHeaderHashSync(hash string) bool {
 	}
 	tp.Tracked[key] = struct{}{}
 	return true
+}
+
+func (tp *Pool) TryStartHeaderHeightSync(height uint64) bool {
+	return tp.tryReserveTrackedKey(headerHeightTaskKey(height))
+}
+
+func (tp *Pool) FinishHeaderHeightSync(height uint64) {
+	tp.DelTaskKey(headerHeightTaskKey(height))
+}
+
+func (tp *Pool) TryStartHeaderHashSync(hash string) bool {
+	return tp.tryReserveTrackedKey(headerHashTaskKey(hash))
 }
 
 func (tp *Pool) FinishHeaderHashSync(hash string) {
@@ -571,18 +564,8 @@ func (tp *Pool) FinishHeaderHashSync(hash string) {
 }
 
 func (tp *Pool) HeaderSyncCounts() (heightCount int, hashCount int) {
-	tp.mu.Lock()
-	for k := range tp.Tracked {
-		if strings.HasPrefix(k, headerHeightTaskPrefix) {
-			heightCount++
-			continue
-		}
-		if strings.HasPrefix(k, headerHashTaskPrefix) {
-			hashCount++
-		}
-	}
-	tp.mu.Unlock()
-	return heightCount, hashCount
+	_, hh, hs := tp.trackedCountsByKind()
+	return hh, hs
 }
 
 func (tp *Pool) trackedCountsByKind() (bodyCount int, headerHeightCount int, headerHashCount int) {
@@ -628,8 +611,8 @@ func (tp *Pool) Stop() {
 }
 
 func (tp *Pool) Stats() TaskPoolStats {
-	tracked := tp.TrackedCount()
 	trackedBody, trackedHeaderH, trackedHeaderHash := tp.trackedCountsByKind()
+	tracked := trackedBody + trackedHeaderH + trackedHeaderHash
 
 	return TaskPoolStats{
 		Enqueued:            atomic.LoadUint64(&tp.enqueued),

@@ -1,45 +1,53 @@
 package store
 
-import "sync"
+import (
+	fetcherpkg "scanner_eth/fetch/fetcher"
+	"sync"
+)
 
-type Payload[H any, B any] struct {
-	Header H
-	Body   B
+// EventBlockData carries converted block payloads for storage and Redis export.
+type EventBlockData struct {
+	StorageFullBlock *StorageFullBlock
 }
 
-type PayloadStore[H any, B any] struct {
+type Payload struct {
+	Header *fetcherpkg.BlockHeaderJson
+	Body   *EventBlockData
+}
+
+type PayloadStore struct {
 	mu     sync.RWMutex
-	blocks map[string]*Payload[H, B]
+	blocks map[string]*Payload
 }
 
-func NewPayloadStore[H any, B any]() *PayloadStore[H, B] {
-	return &PayloadStore[H, B]{
-		blocks: make(map[string]*Payload[H, B]),
+func NewPayloadStore() *PayloadStore {
+	return &PayloadStore{
+		blocks: make(map[string]*Payload),
 	}
 }
 
-func (s *PayloadStore[H, B]) Reset() {
+func (s *PayloadStore) Reset() {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
-	s.blocks = make(map[string]*Payload[H, B])
+	s.blocks = make(map[string]*Payload)
 	s.mu.Unlock()
 }
 
-func (s *PayloadStore[H, B]) SetHeader(key string, header H) {
+func (s *PayloadStore) SetHeader(key string, header *fetcherpkg.BlockHeaderJson) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	blockPayload, ok := s.blocks[key]
 	if !ok || blockPayload == nil {
-		blockPayload = &Payload[H, B]{}
+		blockPayload = &Payload{}
 		s.blocks[key] = blockPayload
 	}
 	blockPayload.Header = header
 }
 
-func (s *PayloadStore[H, B]) SetBody(key string, body B) {
+func (s *PayloadStore) SetBody(key string, body *EventBlockData) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -50,31 +58,29 @@ func (s *PayloadStore[H, B]) SetBody(key string, body B) {
 	blockPayload.Body = body
 }
 
-func (s *PayloadStore[H, B]) GetHeader(key string) H {
+func (s *PayloadStore) GetHeader(key string) *fetcherpkg.BlockHeaderJson {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	blockPayload := s.blocks[key]
 	if blockPayload == nil {
-		var zero H
-		return zero
+		return nil
 	}
 	return blockPayload.Header
 }
 
-func (s *PayloadStore[H, B]) GetBody(key string) B {
+func (s *PayloadStore) GetBody(key string) *EventBlockData {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	blockPayload := s.blocks[key]
 	if blockPayload == nil {
-		var zero B
-		return zero
+		return nil
 	}
 	return blockPayload.Body
 }
 
-func (s *PayloadStore[H, B]) DeletePayload(key string) {
+func (s *PayloadStore) DeletePayload(key string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

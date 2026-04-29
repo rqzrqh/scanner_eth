@@ -1,3 +1,4 @@
+// StoredBlockState invariant I5 (FormalVerification.md §4): normalized non-empty keys in D.
 package store
 
 import "testing"

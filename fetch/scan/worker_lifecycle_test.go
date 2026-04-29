@@ -1,9 +1,6 @@
 package scan
 
-import (
-	"context"
-	"testing"
-)
+import "testing"
 
 func TestScanWorkerTriggerAndStop(t *testing.T) {
 	var nilWorker *Worker
@@ -13,7 +10,7 @@ func TestScanWorkerTriggerAndStop(t *testing.T) {
 	nilWorker.Trigger()
 	nilWorker.Stop()
 
-	worker := NewWorker(RunnerFunc(func(context.Context) {}))
+	worker := NewWorker(nil)
 	worker.SetEnabled(false)
 	worker.Trigger()
 	if len(worker.TriggerChan()) != 0 {

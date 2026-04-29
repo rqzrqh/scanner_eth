@@ -1,3 +1,4 @@
+// Formal verification tests: I3/C4 prune cleanup (FormalVerification §4).
 package fetch
 
 import (

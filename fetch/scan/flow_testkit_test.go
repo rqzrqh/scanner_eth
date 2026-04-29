@@ -225,11 +225,22 @@ func newTestFlowEnv(t *testing.T, irreversible int) *testFlowEnv {
 			Irreversible:      env.irreversible,
 			BlockTree:         env.blockTree,
 			TaskPool:          env.taskPool,
-			PayloadAccessor:   env.payloads,
 			StoreWorker:       env.store,
 			StoredBlocks:      env.stored,
 			TriggerScan:       func() {},
 			PruneStoredBlocks: func(context.Context, int) {},
+			SetNodeBlockHeader: func(hash string, header any) bool {
+				return env.payloads.SetNodeBlockHeader(hash, header)
+			},
+			SetNodeBlockBody: func(hash string, body any) bool {
+				return env.payloads.SetNodeBlockBody(hash, body)
+			},
+			GetNodeBlockHeader: func(hash string) any {
+				return env.payloads.GetNodeBlockHeader(hash)
+			},
+			GetNodeBlockBody: func(hash string) any {
+				return env.payloads.GetNodeBlockBody(hash)
+			},
 			LatestRemoteHeight: func() uint64 {
 				return env.latestRemote
 			},

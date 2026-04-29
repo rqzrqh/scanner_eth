@@ -18,7 +18,7 @@ func (fm *FetchManager) newScanWorker(flow *fetchscan.Flow) *fetchscan.Worker {
 		return nil
 	}
 	flow.BindRuntimeDeps()
-	return fetchscan.NewWorker(fetchscan.RunnerFunc(flow.ScanEvents))
+	return fetchscan.NewWorker(flow)
 }
 
 func (fm *FetchManager) newHeaderManager() *headernotify.Manager {
@@ -41,7 +41,7 @@ func (fm *FetchManager) newHeaderManager() *headernotify.Manager {
 }
 
 func (fm *FetchManager) newStoreWorker() *fetchstore.SerialWorker[*EventBlockData] {
-	worker := fetchstore.NewSerialWorker(fm.dbOperator, fm.runtimeStoredBlocks(), func(data *EventBlockData) bool {
+	worker := fetchstore.NewStartedSerialWorker(fm.dbOperator, fm.runtimeStoredBlocks(), func(data *EventBlockData) bool {
 		return data == nil || data.StorageFullBlock == nil
 	})
 	return worker
