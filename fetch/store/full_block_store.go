@@ -134,6 +134,8 @@ func (fullblock *StorageFullBlock) Finalize(ctx context.Context, db *gorm.DB, bl
 		return 0, gorm.ErrInvalidData
 	}
 	var scannerMsg *model.ScannerMessage
+	reusedScannerMsg := false
+	reusedCompletedBlock := false
 	if err := db.Transaction(func(tx *gorm.DB) error {
 		scannerMsg = &model.ScannerMessage{
 			Height:     fullblock.Block.Height,
@@ -141,9 +143,16 @@ func (fullblock *StorageFullBlock) Finalize(ctx context.Context, db *gorm.DB, bl
 			ParentHash: fullblock.Block.ParentHash,
 			Pushed:     false,
 		}
-		if err := tx.Create(scannerMsg).Error; err != nil {
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(scannerMsg).Error; err != nil {
 			logrus.Errorf("store scanner_message failed %v", err)
 			return err
+		}
+		if scannerMsg.Id == 0 {
+			if err := tx.Where("hash = ?", fullblock.Block.Hash).First(scannerMsg).Error; err != nil {
+				logrus.Errorf("query scanner_message by hash failed %v", err)
+				return err
+			}
+			reusedScannerMsg = true
 		}
 
 		updateResult := tx.Model(&model.Block{}).Where("id = ? AND complete = ?", blockID, false).Update("complete", true)
@@ -152,12 +161,27 @@ func (fullblock *StorageFullBlock) Finalize(ctx context.Context, db *gorm.DB, bl
 			return updateResult.Error
 		}
 		if updateResult.RowsAffected == 0 {
+			var storedBlock model.Block
+			if err := tx.Select("hash", "complete").Where("id = ?", blockID).First(&storedBlock).Error; err != nil {
+				logrus.Errorf("query block complete state failed. block_id:%v err:%v", blockID, err)
+				return err
+			}
+			if storedBlock.Complete && storedBlock.Hash == fullblock.Block.Hash {
+				reusedCompletedBlock = true
+				return nil
+			}
 			logrus.Errorf("mark block complete failed, no rows affected. block_id:%v height:%v", blockID, fullblock.Block.Height)
 			return xerrors.Errorf("mark block complete failed, no rows affected. block_id:%v", blockID)
 		}
 		return nil
 	}); err != nil {
 		return 0, err
+	}
+	if reusedScannerMsg {
+		logrus.Infof("reuse scanner_message by hash. height:%v hash:%v message_id:%v", fullblock.Block.Height, fullblock.Block.Hash, scannerMsg.Id)
+	}
+	if reusedCompletedBlock {
+		logrus.Infof("block already complete with same hash during finalize. height:%v hash:%v block_id:%v", fullblock.Block.Height, fullblock.Block.Hash, blockID)
 	}
 	return scannerMsg.Id, nil
 }

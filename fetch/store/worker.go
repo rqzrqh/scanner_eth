@@ -89,7 +89,7 @@ func (sw *Worker) Run() {
 					for _, v := range tsk.Data {
 						data = append(data, v.(model.TxInternal))
 					}
-					err = workDB.Create(data).Error
+					err = workDB.Clauses(clause.OnConflict{DoNothing: true}).Create(data).Error
 				case EventLog:
 					data := make([]model.EventLog, 0)
 					for _, v := range tsk.Data {

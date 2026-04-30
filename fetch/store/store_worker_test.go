@@ -137,6 +137,110 @@ func TestStoreFullBlockFailsWhenExistingBlockAlreadyComplete(t *testing.T) {
 
 }
 
+func TestScannerMessageSchemaUsesUniqueHashOnly(t *testing.T) {
+	db := newStoreWorkerTestDB(t)
+
+	first := model.ScannerMessage{Height: 100, Hash: "0x100", ParentHash: "0x099"}
+	if err := db.Create(&first).Error; err != nil {
+		t.Fatalf("seed scanner_message failed: %v", err)
+	}
+
+	sameHeightNewHash := model.ScannerMessage{Height: 100, Hash: "0x101", ParentHash: "0x100"}
+	if err := db.Create(&sameHeightNewHash).Error; err != nil {
+		t.Fatalf("expected duplicate scanner_message height with new hash to succeed, got: %v", err)
+	}
+
+	dupHash := model.ScannerMessage{Height: 101, Hash: "0x100", ParentHash: "0x099"}
+	if err := db.Create(&dupHash).Error; err == nil {
+		t.Fatal("expected duplicate scanner_message hash to fail")
+	}
+}
+
+func TestTxInternalSchemaUsesUniqueBlockIDTxHashAndIndex(t *testing.T) {
+	db := newStoreWorkerTestDB(t)
+	if err := db.AutoMigrate(&model.TxInternal{}); err != nil {
+		t.Fatalf("auto migrate tx_internal failed: %v", err)
+	}
+
+	first := model.TxInternal{BlockId: 1, Height: 100, TxHash: "0xtx", TraceAddress: "call", Index: 0}
+	if err := db.Create(&first).Error; err != nil {
+		t.Fatalf("seed tx_internal failed: %v", err)
+	}
+
+	sameTxNewIndex := model.TxInternal{BlockId: 1, Height: 100, TxHash: "0xtx", TraceAddress: "call_0", Index: 1}
+	if err := db.Create(&sameTxNewIndex).Error; err != nil {
+		t.Fatalf("expected duplicate block_id and tx_hash with new index to succeed, got: %v", err)
+	}
+
+	sameTxNewBlock := model.TxInternal{BlockId: 2, Height: 100, TxHash: "0xtx", TraceAddress: "call", Index: 0}
+	if err := db.Create(&sameTxNewBlock).Error; err != nil {
+		t.Fatalf("expected duplicate tx_hash and index in different block to succeed, got: %v", err)
+	}
+
+	dup := model.TxInternal{BlockId: 1, Height: 100, TxHash: "0xtx", TraceAddress: "call_1", Index: 0}
+	if err := db.Create(&dup).Error; err == nil {
+		t.Fatal("expected duplicate tx_internal (block_id, tx_hash, index) to fail")
+	}
+}
+
+func TestTxInternalSchemaRequiresNonNullUniqueKeyColumns(t *testing.T) {
+	db := newStoreWorkerTestDB(t)
+	if err := db.AutoMigrate(&model.TxInternal{}); err != nil {
+		t.Fatalf("auto migrate tx_internal failed: %v", err)
+	}
+
+	if err := db.Exec("INSERT INTO tx_internal (block_id, height, `index`) VALUES (?, ?, ?)", 1, 100, 0).Error; err == nil {
+		t.Fatal("expected tx_internal insert with null tx_hash to fail")
+	}
+
+	if err := db.Exec("INSERT INTO tx_internal (block_id, height, tx_hash) VALUES (?, ?, ?)", 1, 100, "0xtx").Error; err == nil {
+		t.Fatal("expected tx_internal insert with null index to fail")
+	}
+}
+
+func TestStoreFullBlockReusesExistingScannerMessageByHash(t *testing.T) {
+	db := newStoreWorkerTestDB(t)
+	prepareStoreWorkerGlobals()
+
+	seedBlock := model.Block{Height: 7, Hash: "0x07", ParentHash: "0x06", Complete: false}
+	if err := db.Create(&seedBlock).Error; err != nil {
+		t.Fatalf("seed block failed: %v", err)
+	}
+	if err := db.Create(&model.ScannerInfo{ChainId: 1, GenesisBlockHash: "0xgenesis-7"}).Error; err != nil {
+		t.Fatalf("seed scanner info failed: %v", err)
+	}
+	existingMsg := model.ScannerMessage{Height: 7, Hash: "0x07", ParentHash: "0x06", Pushed: false}
+	if err := db.Create(&existingMsg).Error; err != nil {
+		t.Fatalf("seed scanner_message failed: %v", err)
+	}
+
+	fullblock := makeStorageBlock(7, "0x07", "0x06")
+
+	storedID, err := StoreFullBlock(context.Background(), db, 1, DefaultRuntime(), fullblock)
+	if err != nil {
+		t.Fatalf("store full block failed: %v", err)
+	}
+	if storedID != existingMsg.Id {
+		t.Fatalf("expected existing scanner_message id %v, got %v", existingMsg.Id, storedID)
+	}
+
+	var msgCount int64
+	if err := db.Model(&model.ScannerMessage{}).Count(&msgCount).Error; err != nil {
+		t.Fatalf("count scanner_message failed: %v", err)
+	}
+	if msgCount != 1 {
+		t.Fatalf("expected one scanner_message row, got=%v", msgCount)
+	}
+
+	var storedBlock model.Block
+	if err := db.Where("id = ?", seedBlock.Id).First(&storedBlock).Error; err != nil {
+		t.Fatalf("query stored block failed: %v", err)
+	}
+	if !storedBlock.Complete {
+		t.Fatal("expected block to be marked complete when scanner_message already exists")
+	}
+}
+
 func TestStoreFullBlockReturnsEarlyWhenContextAlreadyCancelled(t *testing.T) {
 	db := newStoreWorkerTestDB(t)
 	prepareStoreWorkerGlobals()
