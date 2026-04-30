@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"reflect"
 	"scanner_eth/model"
 	"time"
 
@@ -204,10 +205,17 @@ func SplitTasks(taskType TaskType, modelList []interface{}, batchSize int, nextT
 	return tasks
 }
 
-func ToInterfaceSlice[T any](s []T) []interface{} {
-	r := make([]interface{}, len(s))
-	for i, v := range s {
-		r[i] = v
+func ToInterfaceSlice(slice interface{}) []interface{} {
+	if slice == nil {
+		return nil
+	}
+	v := reflect.ValueOf(slice)
+	if v.Kind() != reflect.Slice {
+		return nil
+	}
+	r := make([]interface{}, v.Len())
+	for i := 0; i < v.Len(); i++ {
+		r[i] = v.Index(i).Interface()
 	}
 	return r
 }

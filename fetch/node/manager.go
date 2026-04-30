@@ -54,18 +54,6 @@ func (nm *NodeManager) NodeCount() int {
 	return len(nm.nodes)
 }
 
-func (nm *NodeManager) Clients() []*ethclient.Client {
-	nm.mu.RLock()
-	defer nm.mu.RUnlock()
-	clients := make([]*ethclient.Client, len(nm.nodes))
-	for i, node := range nm.nodes {
-		if node != nil && node.operator != nil {
-			clients[i] = node.operator.EthClient()
-		}
-	}
-	return clients
-}
-
 func (nm *NodeManager) NodeOperators() []NodeOperator {
 	nm.mu.RLock()
 	defer nm.mu.RUnlock()

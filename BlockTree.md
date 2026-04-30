@@ -74,7 +74,7 @@ Pruning is only possible when the height gap between the **tallest leaf** and cu
 ## 4. Relationship to the scanner (`fetch`)
 
 - **`FetchManager`** owns `*blocktree.BlockTree`, inserts headers during scan, derives height/hash sync tasks from leaves and orphans, and prunes when appropriate.
-- **Block bodies and storage state** (`pendingPayloadStore`, `storedBlocks`, etc.) live in **`fetch`**, not inside `BlockTree`; the tree mainly encodes **header parent/child and fork structure**.
+- **Block bodies and storage state** (`pendingBlockStore`, `storedBlocks`, etc.) live in **`fetch`**, not inside `BlockTree`; the tree mainly encodes **header parent/child and fork structure**.
 
 Finer scan stages and task-pool logic: `fetch/scan_flow.go` and [doc/design.md](doc/design.md).
 
@@ -99,7 +99,7 @@ go test ./blocktree/ -count=1
 
 - [README.md](README.md): build, configuration, documentation index
 - [FormalVerification.md](FormalVerification.md): global state \(S=(T,P,D)\), invariants **T**, formal test commands (§14)
-- [doc/design.md](doc/design.md): how `FetchManager`, `BlockTree`, task pool, and payload store interact
+- [doc/design.md](doc/design.md): how `FetchManager`, `BlockTree`, task pool, and pending block store interact
 - [doc/README.md](doc/README.md): index under `doc/`
 - [doc/test_report_2026-04-23.md](doc/test_report_2026-04-23.md): latest coverage snapshot
 - [doc/test_report_2026-04-13.md](doc/test_report_2026-04-13.md): historical coverage snapshot

@@ -92,7 +92,7 @@ func (e *Election) TryBecomeLeader(ctx context.Context, businessName string) boo
 	return true
 }
 
-// IsStillLeader checks leadership via Redis (safe under concurrent Extend).
+// IsStillLeader checks whether the local lock lease is still valid.
 func (e *Election) IsStillLeader() bool {
 	if e.isStillLeaderFn != nil {
 		return e.isStillLeaderFn()
@@ -100,28 +100,7 @@ func (e *Election) IsStillLeader() bool {
 	if e.mutex == nil {
 		return false
 	}
-	// Must validate via Redis: Extend runs in another goroutine and updates redsync.Mutex.until;
-	// reading Until() concurrently can race and yield a bogus time, falsely reporting loss of leadership.
-	const (
-		validAttempts = 3
-		validTimeout  = 2 * time.Second
-		validBackoff  = 50 * time.Millisecond
-	)
-	var lastErr error
-	for attempt := 0; attempt < validAttempts; attempt++ {
-		checkCtx, cancel := context.WithTimeout(context.Background(), validTimeout)
-		ok, err := e.mutex.ValidContext(checkCtx)
-		cancel()
-		if err == nil {
-			return ok
-		}
-		lastErr = err
-		if attempt+1 < validAttempts {
-			time.Sleep(validBackoff)
-		}
-	}
-	logrus.Infof("[%s] leader validity check failed after %d attempts: %v", e.chainName, validAttempts, lastErr)
-	return false
+	return e.mutex.Until().After(time.Now())
 }
 
 // ReleaseLeader releases the leader lock.

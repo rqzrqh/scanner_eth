@@ -162,19 +162,19 @@ func main() {
 
 	logrus.Infof("get chain info success. chainId:%v genesisBlockHash:%v", chainId, genesisBlockHash)
 
-	s := newSyncer(conf, clients, db, rds, chainId, genesisBlockHash, optionalTables)
+	fm := newFetchManager(conf, clients, db, rds, chainId, genesisBlockHash, optionalTables)
 	metricsServer := startMetricsServer(conf.Metrics)
-	s.Run()
+	fm.Run()
 
 	logrus.Infof("start success")
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
 	<-sigCh
-	s.Stop()
+	fm.Stop()
 	if metricsServer != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		metricsServer.Shutdown(shutdownCtx)
+		shutdownMetricsServer(shutdownCtx, metricsServer)
 		cancel()
 	}
 	logrus.Infof("stop scanner eth")

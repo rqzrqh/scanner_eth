@@ -20,10 +20,10 @@ Block tree **T** fields and API: [BlockTree.md](BlockTree.md). This document foc
 The following behaviors are required:
 
 1. Header insert goes through the block tree first; if insert is rejected, tree state is unchanged.
-2. `BlockPayloadStore` holds pending header/body cache; it does **not** claim to be the complete set of “not yet persisted” work.
+2. `PendingBlockStore` holds pending header/body cache; it does **not** claim to be the complete set of “not yet persisted” work.
 3. `storedBlockState` records completed hashes from successful runtime stores **or** `Complete` rows during restore.
 4. In leader runtime, when a node is `parentReady` and body is storable, a successful `Store` leads to `storedBlockState`.
-5. Prune return set hashes must be cleared consistently from `BlockPayloadStore`, `storedBlockState`, and `taskPool`.
+5. Prune return set hashes must be cleared consistently from `PendingBlockStore`, `storedBlockState`, and `taskPool`.
 6. Prune also removes orphans with height \(\le\) root height; those hashes are included in the prune return set.
 7. **(Entry)** On `onBecameLeader`, prefer DB window to init the tree; empty window falls back to remote `startHeight` bootstrap (success ⇒ §1.1 main scope).
 8. **(Main)** Scan enumerates height/hash header sync targets from the current tree and runs the corresponding sync to convergence.
@@ -44,7 +44,7 @@ T = (L, O, r)
 $$
 \(L\): linked nodes; \(O\): orphans; \(r\): current root height.
 
-2. **BlockPayloadStore**  
+2. **PendingBlockStore**  
 $$
 P: Hash \to (Header, Body)
 $$
@@ -79,7 +79,7 @@ Transitions:
 
 Production and tests share the same **logical** \(S=(T,P,D)\); the **physical** layout is:
 
-1. **`FetchManager`** holds flattened pointers: `blockTree *BlockTree`, `pendingPayloadStore *PayloadStore`, `storedBlocks *StoredBlockState`, `taskPool *Pool` (since the mutex-copy fix, these are **pointers**, not values containing `sync.Mutex`).
+1. **`FetchManager`** holds flattened pointers: `blockTree *BlockTree`, `pendingBlockStore *PendingBlockStore`, `storedBlocks *StoredBlockState`, `taskPool *Pool` (since the mutex-copy fix, these are **pointers**, not values containing `sync.Mutex`).
 2. **`fetchRuntimeState`** (`fetch/runtime_state.go`) mirrors the active leader session: same pointers as the flattened fields after `createRuntimeState`.
 3. **`buildTreeRuntimeDeps()`** (`fetch/fetch_manager.go`) builds **`store.TreeRuntimeDeps`** once per call: `BlockTree`, `PayloadAccessor`, `StoredBlocks`, `taskPool` (as `TreeTaskPool`), `NormalizeHash`, `ParseWeight`. **`prune_state`** (`capturePruneStateSnapshot`, `pruneStoredBlocks`, `storedHeightRangeOnTree`) and **`scanFlowRuntimeDeps`** both use this helper so prune and scan see **identical** \(T,P,D\) wiring.
 4. **`deleteRuntimeState` / `syncRuntimeFields`** (no runtime): flattened `storedBlocks`/`taskPool` reset to **fresh** empty `StoredBlockState` and `Pool` on heap so helpers like `HeaderSyncCounts` stay callable without nil deref (see `fetch/runtime_state.go`).
@@ -93,7 +93,7 @@ Production and tests share the same **logical** \(S=(T,P,D)\); the **physical** 
 Input header \(h\), key \(k\).
 
 1. `BlockTree.Insert(height, k, parent, weight, irreversible)` — `Flow.InsertHeader` passes `irreversible == nil` (see `fetch/scan/flow.go`).
-2. `PayloadStore.SetHeader(k, nil)` — header insert never leaves a cached full header for body work; body path refetches via RPC.
+2. `PendingBlockStore.SetHeader(k, nil)` — header insert never leaves a cached full header for body work; body path refetches via RPC.
 3. New-head channel: `FetchAndInsertHeaderByHashImmediate(blockHash)` (full RPC header) updates the tree only; it does not use the slim `RemoteHeader` alone.
 
 Effects:
@@ -109,11 +109,11 @@ Input converted full block \(b\) for hash \(k\).
 
 1. Body sync path checks the node exists in the tree (scan `Flow` + tree deps).
 2. Build `EventBlockData`.
-3. `PayloadStore.SetBody` / header refresh through the payload accessor when allowed.
+3. `PendingBlockStore.SetBody` / header refresh through the pending block accessor when allowed.
 
 Constraint: `SetBody` does **not** create a new entry if \(k \notin dom(P)\).
 
-Code: `fetch/scan/flow.go`; `fetch/store/payload_store.go`.
+Code: `fetch/scan/flow.go`; `fetch/store/pending_block_store.go`.
 
 ### 3.3 Persist
 
@@ -165,7 +165,7 @@ Implementation: `fetch/fetch_manager.go` new-head channel handler only passes `B
 Regression: `TestStartHeaderNotifiersRemoteUpdateUsesBlockFetcherNotSlimHeader` (slim `ParentHash` disagrees with mock RPC; node parent must match RPC).
 
 **3.7.2 `Flow.InsertHeader` and body sync (all header paths).**
-Regardless of whether the header first arrived via new-head immediate fetch or height/hash scan, `Flow.InsertHeader` does `SetNodeBlockHeader(k, nil)` so the payload store never treats the insert path as a cache hit for a complete header. The body path then obtains a full header / full block via `BlockFetcher` + node operators (`fetch/fetcher`, `fetch/node`) as wired by `scanFlowRuntimeDeps`. So **no path** uses subscription-only or restore-only state to skip those RPCs for body work.
+Regardless of whether the header first arrived via new-head immediate fetch or height/hash scan, `Flow.InsertHeader` does `SetNodeBlockHeader(k, nil)` so the pending block store never treats the insert path as a cache hit for a complete header. The body path then obtains a full header / full block via `BlockFetcher` + node operators (`fetch/fetcher`, `fetch/node`) as wired by `scanFlowRuntimeDeps`. So **no path** uses subscription-only or restore-only state to skip those RPCs for body work.
 
 **3.7.3 DB restore (`restoreBlockTree`).**  
 Restore rebuilds the block tree and `D` (stored hashes) from DB rows. For each block: `BlockTree.Insert` with stored metadata; `SetBlockHeader(k, nil)` (same as §3.1—no cached header at startup). `Complete=true` in the row ⇒ `MarkStored(k)`; incomplete rows are not in `D` until a later successful `StoreBlockData` on the scan path. **Accuracy of already-persisted chain data** is an **operational assumption**: we trust the `Complete` bit as set by a prior successful store (I8), not re-validated by counting child table rows on restore. Corrupt DBs require external repair; C1 + §3.7.1–3.7.2 still guarantee **new** fetches and **new** stores go through `BlockFetcher` / `StoreBlockData`.
@@ -272,9 +272,9 @@ Legacy names in older docs (**`scan_flow.go`**, **`sync_block_data.go`** as mono
 
 | Item | Primary | Helpers | Note |
 |---|---|---|---|
-| C1 header happy path | `Flow.InsertHeader` | `BlockTree.Insert` / `PayloadStore.SetHeader(nil)` | node in T; no cached header row |
+| C1 header happy path | `Flow.InsertHeader` | `BlockTree.Insert` / `PendingBlockStore.SetHeader(nil)` | node in T; no cached header row |
 | C1b header reject | `Flow.InsertHeader` | same | T unchanged; no header row for rejected key |
-| C2 body no implicit row | `PayloadStore.SetBody` | `GetBody` | no silent create |
+| C2 body no implicit row | `PendingBlockStore.SetBody` | `GetBody` | no silent create |
 | C3 D only on success/Complete | `SerialWorker.runRequest` after DB ok / `restoreBlockTree` | `MarkStored` | runtime + restore |
 | C4 prune cleans P/D/tasks | `TreeRuntimeDeps.PruneStoredBlocks` | `buildTreeRuntimeDeps` | consistent |
 | C5 prune returns orphans | `BlockTree.Prune` | `Prune`/orphans | orphans in return |
@@ -290,12 +290,12 @@ Legacy names in older docs (**`scan_flow.go`**, **`sync_block_data.go`** as mono
 ### C1 Happy header insert
 
 Pre: valid header \(h\), key \(k\).  
-Post: `pendingPayloadStore.GetHeader(k)` is nil (`GetBlockHeader` / typed header accessors in tests)—`insertHeader` does not stash a serialized full header for reuse on the body path.
+Post: `pendingBlockStore.GetHeader(k)` is nil (`GetBlockHeader` / typed header accessors in tests)—`insertHeader` does not stash a serialized full header for reuse on the body path.
 
 ### C1b Rejected header insert
 
 Pre: tree has root; header rejected by `Insert` (e.g. height \(\le\) root).  
-Post: `blockTree.Get(k) == nil` and `pendingPayloadStore.GetBlockHeader(k) == nil`.
+Post: `blockTree.Get(k) == nil` and `pendingBlockStore.GetHeader(k) == nil`.
 
 ### C2 No implicit body row
 
@@ -347,7 +347,7 @@ Predicates as in §I7; successful parent fetch links children; failures remain r
 |---|---|---|---|---|
 | C1 | `TestInvariantHeaderInsertThenPending`; `TestInsertHeaderDoesNotCacheForBodySync` | `fetch/scan_flow_invariant_test.go` | `Get(k)!=nil`, no header row pending for body | done |
 | C1b | `TestInvariantHeaderInsertRejectedTreeUnchanged` | same | rejected key absent; no cached header row | done |
-| C2 | `TestInvariantSetBlockBodyNoImplicitCreate` | `fetch/store/payload_store_invariant_test.go` | `GetBody`=nil after `SetBody` when key absent | done |
+| C2 | `TestInvariantSetBlockBodyNoImplicitCreate` | `fetch/store/pending_block_store_invariant_test.go` | `GetBody`=nil after `SetBody` when key absent | done |
 | C3 | `TestInvariantStoredOnlyAfterSuccessfulStore` / `TestRestoreBlockTreeLoadsWindowAndCompleteState` | `fetch/scan_flow_invariant_test.go` / `fetch/fetch_manager_restore_bootstrap_test.go` | success/fail/restore | done |
 | C4 | `TestInvariantPruneDeletesPendingAndStored` / `TestScanEventsRule5PruneRemovesStoredAndTasks` | `fetch/prune_invariant_test.go`; `fetch_manager_scan_rules_test.go` | P/D/tasks clean | done |
 | C5 | `TestInvariantPruneReturnsRemovedOrphans` | `blocktree/invariant_formal_test.go` | orphans in return | done |
@@ -412,7 +412,7 @@ Run hints:
 
 ### 11.1 Modules touched
 
-`fetch/store/payload_store.go`, `fetch/store/stored_block_state.go`, `fetch/scan/*`, `fetch/prune_state.go`, `fetch/fetch_manager.go`, `fetch/runtime_state.go`, `blocktree/block_tree.go`.
+`fetch/store/pending_block_store.go`, `fetch/store/stored_block_state.go`, `fetch/scan/*`, `fetch/prune_state.go`, `fetch/fetch_manager.go`, `fetch/runtime_state.go`, `blocktree/block_tree.go`.
 
 ### 11.2 Risks mitigated
 
@@ -443,7 +443,7 @@ Notes: I6 uses max tip across nodes; `ResetRemoteChainTips` on each `createRunti
 4. **§11.5·4** Canonical tip regression deep reorg within one leader term without reset—monotonic tip + reset only on `createRuntimeState` may diverge I6 from chain truth until leadership/reset.
 5. **§11.5·5** I1 exhaustive proof—all branches not theorem-checked; rely on review + §14.1.
 6. **§11.5·6** Real chain/network vs mocks.
-7. **§11.5·7** Earlier optional design (set header only after successful `Insert`) is superseded: `Flow.InsertHeader` always ends with `SetHeader(k, nil)` on the payload store for that key.
+7. **§11.5·7** Earlier optional design (set header only after successful `Insert`) is superseded: `Flow.InsertHeader` always ends with `SetHeader(k, nil)` on the pending block store for that key.
 8. **§11.5·8** If the DB has `block.complete=true` but child rows (e.g. `tx`) are missing, restore still puts \(k \in D\) (I8). Repair is operational (dump/repair); not re-checked at startup. §3.7.1–3.7.2 still protect **new** fetches and stores.
 
 ### 11.6 Concurrency & lost leader (async body)
@@ -463,13 +463,13 @@ Notes: I6 uses max tip across nodes; `ResetRemoteChainTips` on each `createRunti
 
 Order (historical): P2→P3→P5→P4→P6. Merge: at least `go test ./...`; periodic `-race`.
 
-**P1 summary**: `BlockPayloadStore` RWLock; atomic/mutex in tests; `StoreFullBlock` interleaved select avoids deadlock; context on write path; test-only `storeFullBlockHookAfterFirstTaskSend`.
+**P1 summary**: `PendingBlockStore` RWLock; atomic/mutex in tests; `StoreFullBlock` interleaved select avoids deadlock; context on write path; test-only `storeFullBlockHookAfterFirstTaskSend`.
 
 ## 13. Design choices & optional change
 
 ### 13.1 Current behavior
 
-`Flow.InsertHeader`: **Insert then `SetNodeBlockHeader(key, nil)`** on the payload accessor so body sync refetches a full header by hash. New-head path uses `FetchAndInsertHeaderByHashImmediate`.
+`Flow.InsertHeader`: **Insert then `SetNodeBlockHeader(key, nil)`** on the pending block accessor so body sync refetches a full header by hash. New-head path uses `FetchAndInsertHeaderByHashImmediate`.
 
 ### 13.2 Optional
 
@@ -482,7 +482,7 @@ Caching a full `BlockHeaderJson` under `P[k]` after `insertHeader` could avoid d
 ### 14.1 Read these functions (order)
 
 1. `Flow.InsertHeader` — `BlockTree.Insert` + `SetNodeBlockHeader(key, nil)`; `FetchAndInsertHeaderByHashImmediate` on new heads.
-2. `PayloadStore.SetBody` — no create if key missing (`TestInvariantSetBlockBodyNoImplicitCreate`).
+2. `PendingBlockStore.SetBody` — no create if key missing (`TestInvariantSetBlockBodyNoImplicitCreate`).
 3. `Flow.ProcessBranchesLowToHigh` / `SerialWorker` — `MarkStored` only after successful `StoreBlockData`.
 4. `restoreBlockTree` — `Complete` → stored.
 5. `onBecameLeader` — DB restore vs `EnsureBootstrapHeader`.
@@ -571,7 +571,7 @@ flowchart LR
    subgraph STATE[State parts]
       direction TB
       T["T: BlockTree<br/>L linked, O orphans, r root"]
-      P["P: BlockPayloadStore"]
+      P["P: PendingBlockStore"]
       D["D: storedBlocks (StoredBlockState)"]
    end
 

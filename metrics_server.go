@@ -10,11 +10,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type metricsServer struct {
-	server *http.Server
-}
-
-func startMetricsServer(conf config.Metrics) *metricsServer {
+func startMetricsServer(conf config.Metrics) *http.Server {
 	if !conf.Enable {
 		return nil
 	}
@@ -44,14 +40,14 @@ func startMetricsServer(conf config.Metrics) *metricsServer {
 		}
 	}()
 
-	return &metricsServer{server: srv}
+	return srv
 }
 
-func (ms *metricsServer) Shutdown(ctx context.Context) {
-	if ms == nil || ms.server == nil {
+func shutdownMetricsServer(ctx context.Context, srv *http.Server) {
+	if srv == nil {
 		return
 	}
-	if err := ms.server.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(ctx); err != nil {
 		logrus.Warnf("metrics server shutdown failed: %v", err)
 	}
 }

@@ -9,17 +9,15 @@ import (
 	"gorm.io/gorm"
 )
 
-type StoreBlockFunc[T any] func(context.Context, *gorm.DB, int64, T) error
-
-type Operator[T any] struct {
+type Operator struct {
 	db                 *gorm.DB
 	chainID            int64
 	irreversibleBlocks int
-	storeBlock         StoreBlockFunc[T]
+	storeBlock         func(context.Context, *gorm.DB, int64, *EventBlockData) error
 }
 
-func NewDbOperator[T any](db *gorm.DB, chainID int64, irreversibleBlocks int, storeBlock StoreBlockFunc[T]) *Operator[T] {
-	return &Operator[T]{
+func NewDbOperator(db *gorm.DB, chainID int64, irreversibleBlocks int, storeBlock func(context.Context, *gorm.DB, int64, *EventBlockData) error) *Operator {
+	return &Operator{
 		db:                 db,
 		chainID:            chainID,
 		irreversibleBlocks: irreversibleBlocks,
@@ -27,7 +25,7 @@ func NewDbOperator[T any](db *gorm.DB, chainID int64, irreversibleBlocks int, st
 	}
 }
 
-func (op *Operator[T]) LoadBlockWindowFromDB(ctx context.Context) ([]model.Block, error) {
+func (op *Operator) LoadBlockWindowFromDB(ctx context.Context) ([]model.Block, error) {
 	if op.db == nil {
 		return nil, errors.New("db is nil")
 	}
@@ -61,7 +59,7 @@ func (op *Operator[T]) LoadBlockWindowFromDB(ctx context.Context) ([]model.Block
 	return blocks, nil
 }
 
-func (op *Operator[T]) StoreBlockData(ctx context.Context, blockData T) error {
+func (op *Operator) StoreBlockData(ctx context.Context, blockData *EventBlockData) error {
 	if op.db == nil {
 		return errors.New("db is nil")
 	}

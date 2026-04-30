@@ -3,6 +3,7 @@ package fetch
 import (
 	headernotify "scanner_eth/fetch/header_notify"
 	fetchscan "scanner_eth/fetch/scan"
+	fetchserialstore "scanner_eth/fetch/serial_store"
 	fetchstore "scanner_eth/fetch/store"
 )
 
@@ -40,8 +41,8 @@ func (fm *FetchManager) newHeaderManager() *headernotify.Manager {
 	})
 }
 
-func (fm *FetchManager) newStoreWorker() *fetchstore.SerialWorker[*EventBlockData] {
-	worker := fetchstore.NewStartedSerialWorker(fm.dbOperator, fm.runtimeStoredBlocks(), func(data *EventBlockData) bool {
+func (fm *FetchManager) newStoreWorker() *fetchserialstore.Worker {
+	worker := fetchserialstore.NewStartedWorker(fm.dbOperator, fm.runtimeStoredBlocks(), func(data *fetchstore.EventBlockData) bool {
 		return data == nil || data.StorageFullBlock == nil
 	})
 	return worker

@@ -1,6 +1,9 @@
-package store
+package serialstore
 
-import "testing"
+import (
+	fetchstore "scanner_eth/fetch/store"
+	"testing"
+)
 
 func TestStoreBlockInflightStateTryStartDedupes(t *testing.T) {
 	s := NewInflightState()
@@ -26,7 +29,7 @@ func TestStoreBlockInflightStateTryStartDedupes(t *testing.T) {
 
 func TestStoreBlockInflightStateRejectsStoredHash(t *testing.T) {
 	s := NewInflightState()
-	stored := NewStoredBlockState()
+	stored := fetchstore.NewStoredBlockState()
 	stored.MarkStored("0x02")
 
 	if s.TryStart("0x02", &stored) {

@@ -12,7 +12,7 @@ flowchart TD
     A --> E[NodeManager\nnode_manager.go]
     A --> F[TaskPool\ntask_pool.go]
     A --> G[BlockTree\nblocktree package]
-    A --> PBD[BlockPayloadStore\npayload_store.go]
+    A --> PBD[PendingBlockStore\npending_block_store.go]
     A --> H[DB Operator\ndb_operator.go]
     A --> I[BlockFetcher\nfetcher.go + eth_protocol.go]
 
@@ -55,7 +55,7 @@ sequenceDiagram
     participant SF as scan_flow
     participant BF as BlockFetcher
     participant BT as BlockTree
-    participant PBD as BlockPayloadStore
+    participant PBD as PendingBlockStore
     participant TP as TaskPool
     participant DB as DbOperator
 
@@ -125,13 +125,13 @@ sequenceDiagram
   - `convert.go` / `cache_erc20.go` / `cache_erc721.go`: conversion and caches
 - **Tree & state**
   - `blocktree` package: fork topology, orphan linking, prune, thread-safe API
-  - `payload_store.go`: `BlockPayloadStore`, headers/bodies by hash
+  - `pending_block_store.go`: `PendingBlockStore`, pending headers/bodies by hash
   - `restore_tree.go`: rebuild tree from DB window
   - `prune_state.go`: prune policy for already-stored blocks
   - `stored_block_state.go`: set of persisted block hashes
 - **Task execution**
   - `task_pool.go`: dedupe, priority queue, workers, retries, metrics
-  - `sync_block_data.go`: body fetch and write-back to `BlockPayloadStore`
+  - `sync_block_data.go`: body fetch and write-back to `PendingBlockStore`
 - **Storage**
   - `db_operator.go`: DB window read and block persistence
   - `store_worker.go`: batched write pipeline
@@ -139,7 +139,7 @@ sequenceDiagram
 ## 4. Concurrency model
 
 - `BlockTree` is internally locked; callers use its methods only.
-- `BlockPayloadStore` is owned by `FetchManager`; it maps hash → header/body.
+- `PendingBlockStore` is owned by `FetchManager`; it maps hash → pending header/body.
 - Header sync dedupes along two axes: `headerHeightsSyncing` (by height) and `headerHashesSyncing` (by hash).
 - Whether body sync runs is decided by target enumeration plus task-pool dedupe, not a single global boolean.
 - `BlockTree.Insert` rule: if `root` is set, headers with height ≤ `root.Height` are rejected.

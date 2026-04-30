@@ -31,27 +31,11 @@ type StorageFullBlock struct {
 	TokenErc721List    []model.TokenErc721
 }
 
-type FullBlockHandler interface {
-	Height() uint64
-	EnsureReady(context.Context, *gorm.DB, int64) error
-	InsertOrReuseBlock(context.Context, *gorm.DB) (uint64, error)
-	AssignBlockID(uint64)
-	BuildTasks(int, func() uint64) []*Task
-	Finalize(context.Context, *gorm.DB, uint64) (uint64, error)
-}
-
-func (fullblock *StorageFullBlock) Height() uint64 {
-	if fullblock == nil {
-		return 0
-	}
-	return fullblock.Block.Height
-}
-
-func (fullblock *StorageFullBlock) EnsureReady(ctx context.Context, db *gorm.DB, chainID int64) error {
+func (fullblock *StorageFullBlock) ensureReady(ctx context.Context, db *gorm.DB, chainID int64) error {
 	return db.Where("chain_id = ?", chainID).First(&model.ScannerInfo{}).Error
 }
 
-func (fullblock *StorageFullBlock) InsertOrReuseBlock(ctx context.Context, db *gorm.DB) (uint64, error) {
+func (fullblock *StorageFullBlock) insertOrReuseBlock(ctx context.Context, db *gorm.DB) (uint64, error) {
 	if fullblock == nil {
 		return 0, gorm.ErrInvalidData
 	}
@@ -79,7 +63,7 @@ func (fullblock *StorageFullBlock) InsertOrReuseBlock(ctx context.Context, db *g
 	return storedBlock.Id, nil
 }
 
-func (fullblock *StorageFullBlock) AssignBlockID(blockID uint64) {
+func (fullblock *StorageFullBlock) assignBlockID(blockID uint64) {
 	if fullblock == nil {
 		return
 	}
@@ -107,7 +91,7 @@ func (fullblock *StorageFullBlock) AssignBlockID(blockID uint64) {
 	}
 }
 
-func (fullblock *StorageFullBlock) BuildTasks(batchSize int, nextTaskID func() uint64) []*Task {
+func (fullblock *StorageFullBlock) buildTasks(batchSize int, nextTaskID func() uint64) []*Task {
 	if fullblock == nil {
 		return nil
 	}
@@ -129,7 +113,7 @@ func (fullblock *StorageFullBlock) BuildTasks(batchSize int, nextTaskID func() u
 	return allTasks
 }
 
-func (fullblock *StorageFullBlock) Finalize(ctx context.Context, db *gorm.DB, blockID uint64) (uint64, error) {
+func (fullblock *StorageFullBlock) finalize(ctx context.Context, db *gorm.DB, blockID uint64) (uint64, error) {
 	if fullblock == nil {
 		return 0, gorm.ErrInvalidData
 	}
@@ -186,7 +170,7 @@ func (fullblock *StorageFullBlock) Finalize(ctx context.Context, db *gorm.DB, bl
 	return scannerMsg.Id, nil
 }
 
-func StoreFullBlock(ctx context.Context, db *gorm.DB, chainID int64, runtime *Runtime, handler FullBlockHandler) (uint64, error) {
+func StoreFullBlock(ctx context.Context, db *gorm.DB, chainID int64, runtime *Runtime, handler *StorageFullBlock) (uint64, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -197,7 +181,7 @@ func StoreFullBlock(ctx context.Context, db *gorm.DB, chainID int64, runtime *Ru
 		return 0, gorm.ErrInvalidData
 	}
 
-	height := handler.Height()
+	height := handler.Block.Height
 
 	select {
 	case <-ctx.Done():
@@ -207,17 +191,17 @@ func StoreFullBlock(ctx context.Context, db *gorm.DB, chainID int64, runtime *Ru
 
 	dbc := db.WithContext(ctx)
 
-	if err := handler.EnsureReady(ctx, dbc, chainID); err != nil {
+	if err := handler.ensureReady(ctx, dbc, chainID); err != nil {
 		return 0, err
 	}
 
-	blockID, err := handler.InsertOrReuseBlock(ctx, dbc)
+	blockID, err := handler.insertOrReuseBlock(ctx, dbc)
 	if err != nil {
 		return 0, err
 	}
-	handler.AssignBlockID(blockID)
+	handler.assignBlockID(blockID)
 
-	allTasks := handler.BuildTasks(runtime.BatchSize(), runtime.NextTaskID)
+	allTasks := handler.buildTasks(runtime.BatchSize(), runtime.NextTaskID)
 	if err := runtime.RunTasks(ctx, allTasks); err != nil {
 		if err == ErrStoreFullBlockFailed {
 			logrus.Errorf("store fullblock failed %v", height)
@@ -230,7 +214,7 @@ func StoreFullBlock(ctx context.Context, db *gorm.DB, chainID int64, runtime *Ru
 	}
 
 	startTime := time.Now()
-	messageID, err := handler.Finalize(ctx, dbc, blockID)
+	messageID, err := handler.finalize(ctx, dbc, blockID)
 	if err != nil {
 		logrus.Errorf("finalize store fullblock failed %v", err)
 		return 0, err

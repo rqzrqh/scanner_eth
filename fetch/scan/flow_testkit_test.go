@@ -3,108 +3,36 @@ package scan
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"scanner_eth/blocktree"
-	"strconv"
+	fetcherpkg "scanner_eth/fetch/fetcher"
+	fetchserialstore "scanner_eth/fetch/serial_store"
+	fetchstore "scanner_eth/fetch/store"
+	fetchtask "scanner_eth/fetch/task"
+	"scanner_eth/model"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 
-type testHeader struct {
-	Number     string
-	Hash       string
-	ParentHash string
-	Difficulty string
-}
+type testHeader = BlockHeaderJson
 
-type testBody struct {
-	storable bool
-}
-
-type testTaskPool struct {
-	headerHeightSyncing map[uint64]struct{}
-	headerHashSyncing   map[string]struct{}
-	enqueuedHeights     []uint64
-	enqueuedHashes      []string
-	bodyTasks           []testBodyTask
-}
-
-type testBodyTask struct {
-	hash     string
-	priority int
-}
-
-func newTestTaskPool() *testTaskPool {
-	return &testTaskPool{
-		headerHeightSyncing: make(map[uint64]struct{}),
-		headerHashSyncing:   make(map[string]struct{}),
-	}
-}
-
-func (p *testTaskPool) EnqueueHeaderHeightTask(height uint64) bool {
-	p.enqueuedHeights = append(p.enqueuedHeights, height)
-	return true
-}
-
-func (p *testTaskPool) EnqueueHeaderHashTask(hash string) bool {
-	p.enqueuedHashes = append(p.enqueuedHashes, normalizeTestHash(hash))
-	return true
-}
-
-func (p *testTaskPool) EnqueueBodyTask(hash string, priority int) {
-	p.bodyTasks = append(p.bodyTasks, testBodyTask{hash: normalizeTestHash(hash), priority: priority})
-}
-
-func (p *testTaskPool) IsHeaderHeightSyncing(height uint64) bool {
-	_, ok := p.headerHeightSyncing[height]
-	return ok
-}
-
-func (p *testTaskPool) TryStartHeaderHeightSync(height uint64) bool {
-	if p.IsHeaderHeightSyncing(height) {
-		return false
-	}
-	p.headerHeightSyncing[height] = struct{}{}
-	return true
-}
-
-func (p *testTaskPool) FinishHeaderHeightSync(height uint64) {
-	delete(p.headerHeightSyncing, height)
-}
-
-func (p *testTaskPool) IsHeaderHashSyncing(hash string) bool {
-	_, ok := p.headerHashSyncing[normalizeTestHash(hash)]
-	return ok
-}
-
-func (p *testTaskPool) TryStartHeaderHashSync(hash string) bool {
-	hash = normalizeTestHash(hash)
-	if hash == "" || p.IsHeaderHashSyncing(hash) {
-		return false
-	}
-	p.headerHashSyncing[hash] = struct{}{}
-	return true
-}
-
-func (p *testTaskPool) FinishHeaderHashSync(hash string) {
-	delete(p.headerHashSyncing, normalizeTestHash(hash))
-}
-
-type testPayloadAccessor struct {
+type testPendingBlockStore struct {
 	nodeExists func(string) bool
-	headers    map[string]any
-	bodies     map[string]any
+	headers    map[string]*BlockHeaderJson
+	bodies     map[string]*fetchstore.EventBlockData
 }
 
-func newTestPayloadAccessor(nodeExists func(string) bool) *testPayloadAccessor {
-	return &testPayloadAccessor{
+func newTestPendingBlockStore(nodeExists func(string) bool) *testPendingBlockStore {
+	return &testPendingBlockStore{
 		nodeExists: nodeExists,
-		headers:    make(map[string]any),
-		bodies:     make(map[string]any),
+		headers:    make(map[string]*BlockHeaderJson),
+		bodies:     make(map[string]*fetchstore.EventBlockData),
 	}
 }
 
-func (a *testPayloadAccessor) SetNodeBlockHeader(hash string, header any) bool {
+func (a *testPendingBlockStore) SetNodeBlockHeader(hash string, header *BlockHeaderJson) bool {
 	hash = normalizeTestHash(hash)
 	if a == nil || a.nodeExists == nil || !a.nodeExists(hash) {
 		return false
@@ -113,7 +41,7 @@ func (a *testPayloadAccessor) SetNodeBlockHeader(hash string, header any) bool {
 	return true
 }
 
-func (a *testPayloadAccessor) SetNodeBlockBody(hash string, body any) bool {
+func (a *testPendingBlockStore) SetNodeBlockBody(hash string, body *fetchstore.EventBlockData) bool {
 	hash = normalizeTestHash(hash)
 	if a == nil || a.nodeExists == nil || !a.nodeExists(hash) {
 		return false
@@ -122,63 +50,21 @@ func (a *testPayloadAccessor) SetNodeBlockBody(hash string, body any) bool {
 	return true
 }
 
-func (a *testPayloadAccessor) GetNodeBlockHeader(hash string) any {
+func (a *testPendingBlockStore) GetNodeBlockHeader(hash string) *BlockHeaderJson {
 	return a.headers[normalizeTestHash(hash)]
 }
 
-func (a *testPayloadAccessor) GetNodeBlockBody(hash string) any {
+func (a *testPendingBlockStore) GetNodeBlockBody(hash string) *fetchstore.EventBlockData {
 	return a.bodies[normalizeTestHash(hash)]
 }
 
-type testStoreWorker struct {
-	inflight    map[string]struct{}
-	submissions []testStoreSubmission
-	submitFn    func(context.Context, string, uint64, any) error
-}
-
-type testStoreSubmission struct {
-	hash   string
-	height uint64
-	data   any
-}
-
-func newTestStoreWorker() *testStoreWorker {
-	return &testStoreWorker{inflight: make(map[string]struct{})}
-}
-
-func (w *testStoreWorker) IsInflight(hash string) bool {
-	_, ok := w.inflight[normalizeTestHash(hash)]
-	return ok
-}
-
-func (w *testStoreWorker) Submit(ctx context.Context, hash string, height uint64, data any) error {
+func (a *testPendingBlockStore) DeleteBlock(hash string) {
 	hash = normalizeTestHash(hash)
-	w.submissions = append(w.submissions, testStoreSubmission{hash: hash, height: height, data: data})
-	if w.submitFn != nil {
-		return w.submitFn(ctx, hash, height, data)
-	}
-	return nil
-}
-
-type testStoredBlocks struct {
-	hashes map[string]struct{}
-}
-
-func newTestStoredBlocks() *testStoredBlocks {
-	return &testStoredBlocks{hashes: make(map[string]struct{})}
-}
-
-func (s *testStoredBlocks) IsStored(hash string) bool {
-	_, ok := s.hashes[normalizeTestHash(hash)]
-	return ok
-}
-
-func (s *testStoredBlocks) markStored(hash string) {
-	hash = normalizeTestHash(hash)
-	if hash == "" {
+	if a == nil {
 		return
 	}
-	s.hashes[hash] = struct{}{}
+	delete(a.headers, hash)
+	delete(a.bodies, hash)
 }
 
 type testFlowEnv struct {
@@ -189,16 +75,17 @@ type testFlowEnv struct {
 	latestRemote uint64
 
 	blockTree *blocktree.BlockTree
-	taskPool  *testTaskPool
-	payloads  *testPayloadAccessor
-	store     *testStoreWorker
-	stored    *testStoredBlocks
+	taskPool  *fetchtask.Pool
+	pending   *testPendingBlockStore
+	store     *fetchserialstore.Worker
+	stored    *fetchstore.StoredBlockState
 
-	fetchHeaderByHeightFn     func(context.Context, uint64) any
-	fetchHeaderByHashFn       func(context.Context, string) any
-	bootstrapHeaderByHeightFn func(context.Context, uint64) any
-	fetchBodyByHashFn         func(context.Context, string, uint64, any) (any, int, int64, bool)
+	fetchHeaderByHeightFn     func(context.Context, uint64) *BlockHeaderJson
+	fetchHeaderByHashFn       func(context.Context, string) *BlockHeaderJson
+	bootstrapHeaderByHeightFn func(context.Context, uint64) *BlockHeaderJson
+	fetchBodyByHashFn         func(context.Context, string, uint64, *BlockHeaderJson) (*fetchstore.EventBlockData, int, int64, bool)
 	updateNodeStateFn         func(int, int64, bool)
+	triggerScanFn             func()
 
 	flow *Flow
 }
@@ -211,80 +98,88 @@ func newTestFlowEnv(t *testing.T, irreversible int) *testFlowEnv {
 		startHeight:  1,
 		irreversible: irreversible,
 		blockTree:    blocktree.NewBlockTree(irreversible),
-		taskPool:     newTestTaskPool(),
-		store:        newTestStoreWorker(),
-		stored:       newTestStoredBlocks(),
+		taskPool:     &fetchtask.Pool{},
+		store:        nil,
 	}
-	env.payloads = newTestPayloadAccessor(func(hash string) bool {
+	stored := fetchstore.NewStoredBlockState()
+	env.stored = &stored
+	t.Cleanup(func() {
+		env.taskPool.Stop()
+		if env.store != nil {
+			env.store.Stop()
+		}
+	})
+	env.pending = newTestPendingBlockStore(func(hash string) bool {
 		return env.blockTree.Get(normalizeTestHash(hash)) != nil
 	})
 
 	env.flow = NewFlow(func() RuntimeDeps {
 		return RuntimeDeps{
-			StartHeight:       env.startHeight,
-			Irreversible:      env.irreversible,
-			BlockTree:         env.blockTree,
-			TaskPool:          env.taskPool,
-			StoreWorker:       env.store,
-			StoredBlocks:      env.stored,
-			TriggerScan:       func() {},
-			PruneStoredBlocks: func(context.Context, int) {},
-			SetNodeBlockHeader: func(hash string, header any) bool {
-				return env.payloads.SetNodeBlockHeader(hash, header)
+			StartHeight:  env.startHeight,
+			Irreversible: env.irreversible,
+			BlockTree:    env.blockTree,
+			TaskPool:     env.taskPool,
+			StoreWorker:  env.store,
+			StoredBlocks: env.stored,
+			TriggerScan: func() {
+				if env.triggerScanFn != nil {
+					env.triggerScanFn()
+				}
 			},
-			SetNodeBlockBody: func(hash string, body any) bool {
-				return env.payloads.SetNodeBlockBody(hash, body)
+			PruneRuntime: PruneRuntimeDeps{
+				BlockTree:         env.blockTree,
+				PendingBlockStore: env.pending,
+				StoredBlocks:      env.stored,
+				TaskPool:          env.taskPool,
+				NormalizeHash:     normalizeTestHash,
 			},
-			GetNodeBlockHeader: func(hash string) any {
-				return env.payloads.GetNodeBlockHeader(hash)
+			SetNodeBlockHeader: func(hash string, header *BlockHeaderJson) bool {
+				return env.pending.SetNodeBlockHeader(hash, header)
 			},
-			GetNodeBlockBody: func(hash string) any {
-				return env.payloads.GetNodeBlockBody(hash)
+			SetNodeBlockBody: func(hash string, body *fetchstore.EventBlockData) bool {
+				return env.pending.SetNodeBlockBody(hash, body)
+			},
+			GetNodeBlockHeader: func(hash string) *BlockHeaderJson {
+				return env.pending.GetNodeBlockHeader(hash)
+			},
+			GetNodeBlockBody: func(hash string) *fetchstore.EventBlockData {
+				return env.pending.GetNodeBlockBody(hash)
 			},
 			LatestRemoteHeight: func() uint64 {
 				return env.latestRemote
 			},
-			BootstrapHeaderByHeight: func(ctx context.Context, height uint64) any {
+			BootstrapHeaderByHeight: func(ctx context.Context, height uint64) *BlockHeaderJson {
 				if env.bootstrapHeaderByHeightFn != nil {
 					return env.bootstrapHeaderByHeightFn(ctx, height)
 				}
 				return nil
 			},
-			FetchHeaderByHeight: func(ctx context.Context, height uint64) any {
+			FetchHeaderByHeight: func(ctx context.Context, height uint64) *BlockHeaderJson {
 				if env.fetchHeaderByHeightFn != nil {
 					return env.fetchHeaderByHeightFn(ctx, height)
 				}
 				return nil
 			},
-			FetchHeaderByHash: func(ctx context.Context, hash string) any {
+			FetchHeaderByHash: func(ctx context.Context, hash string) *BlockHeaderJson {
 				if env.fetchHeaderByHashFn != nil {
 					return env.fetchHeaderByHashFn(ctx, normalizeTestHash(hash))
 				}
 				return nil
 			},
-			FetchBodyByHash: func(ctx context.Context, hash string, height uint64, header any) (any, int, int64, bool) {
+			FetchBodyByHash: func(ctx context.Context, hash string, height uint64, header *BlockHeaderJson) (*fetchstore.EventBlockData, int, int64, bool) {
 				if env.fetchBodyByHashFn != nil {
 					return env.fetchBodyByHashFn(ctx, normalizeTestHash(hash), height, header)
 				}
 				return nil, -1, 0, false
 			},
-			UpdateNodeState: env.updateNodeStateFn,
-			NormalizeHash:   normalizeTestHash,
-			HeaderExists: func(v any) bool {
-				h, ok := v.(*testHeader)
-				return ok && h != nil
-			},
+			UpdateNodeState:  env.updateNodeStateFn,
+			NormalizeHash:    normalizeTestHash,
 			HeaderHeight:     testHeaderHeight,
 			HeaderHash:       testHeaderHash,
 			HeaderParentHash: testHeaderParentHash,
 			HeaderWeight:     testHeaderWeight,
-			BodyExists: func(v any) bool {
-				b, ok := v.(*testBody)
-				return ok && b != nil
-			},
-			BodyStorable: func(v any) bool {
-				b, ok := v.(*testBody)
-				return ok && b != nil && b.storable
+			BodyStorable: func(v *fetchstore.EventBlockData) bool {
+				return v != nil && v.StorageFullBlock != nil
 			},
 		}
 	}, Config{StartHeight: 1})
@@ -302,6 +197,116 @@ func (env *testFlowEnv) setIrreversible(irreversible int) {
 	env.flow.BindRuntimeDeps()
 }
 
+type testBlockStorer struct {
+	storeFn func(context.Context, *fetchstore.EventBlockData) error
+}
+
+func (s *testBlockStorer) StoreBlockData(ctx context.Context, data *fetchstore.EventBlockData) error {
+	if s != nil && s.storeFn != nil {
+		return s.storeFn(ctx, data)
+	}
+	return nil
+}
+
+func (env *testFlowEnv) attachStoreWorker(storeFn func(context.Context, *fetchstore.EventBlockData) error) {
+	env.t.Helper()
+	if env.store != nil {
+		env.store.Stop()
+	}
+	env.store = fetchserialstore.NewStartedWorker(&testBlockStorer{storeFn: storeFn}, env.stored, func(data *fetchstore.EventBlockData) bool {
+		return data == nil || data.StorageFullBlock == nil
+	})
+	env.flow.BindRuntimeDeps()
+}
+
+func (env *testFlowEnv) attachAsyncTaskPool() {
+	env.t.Helper()
+	if env.taskPool != nil {
+		env.taskPool.Stop()
+	}
+	pool := fetchtask.NewTaskPoolWithStop(
+		fetchtask.TaskPoolOptions{WorkerCount: 1, HighQueueSize: 64, NormalQueueSize: 64, MaxRetry: 2},
+		1,
+		func(task *fetchtask.SyncTask, stopCh <-chan struct{}) bool {
+			return HandleTaskPoolTask(env.flow, task, stopCh)
+		},
+	)
+	env.taskPool = &pool
+	env.flow.BindRuntimeDeps()
+}
+
+func (env *testFlowEnv) attachDefaultTaskDataFetchers() {
+	env.t.Helper()
+	if env.fetchHeaderByHashFn == nil {
+		env.fetchHeaderByHashFn = func(_ context.Context, hash string) *BlockHeaderJson {
+			node := env.blockTree.Get(normalizeTestHash(hash))
+			if node == nil {
+				return nil
+			}
+			return makeTestHeader(node.Height, node.Key, node.ParentKey)
+		}
+	}
+	if env.fetchBodyByHashFn == nil {
+		env.fetchBodyByHashFn = func(_ context.Context, hash string, height uint64, header *BlockHeaderJson) (*fetchstore.EventBlockData, int, int64, bool) {
+			parent := ""
+			if header != nil {
+				parent = normalizeTestHash(header.ParentHash)
+			}
+			return makeTestEventBlockData(height, normalizeTestHash(hash), parent), -1, 0, true
+		}
+	}
+	env.flow.BindRuntimeDeps()
+}
+
+func (env *testFlowEnv) runScanAndWait() {
+	env.t.Helper()
+	env.attachDefaultTaskDataFetchers()
+	if env.taskPool == nil || env.taskPool.QueueHigh == nil || env.taskPool.QueueNormal == nil {
+		env.attachAsyncTaskPool()
+	}
+	triggerCh := make(chan struct{}, 1)
+	env.triggerScanFn = func() {
+		select {
+		case triggerCh <- struct{}{}:
+		default:
+		}
+	}
+	env.flow.BindRuntimeDeps()
+	env.taskPool.Start()
+	env.flow.RunScanCycle(context.Background())
+
+	deadline := time.Now().Add(2 * time.Second)
+	quietSince := time.Time{}
+	for time.Now().Before(deadline) {
+		drainedTrigger := false
+		for {
+			select {
+			case <-triggerCh:
+				drainedTrigger = true
+				env.flow.RunScanCycle(context.Background())
+			default:
+				goto checkIdle
+			}
+		}
+
+	checkIdle:
+		heightCount, hashCount := env.taskPool.HeaderSyncCounts()
+		headerSyncing := heightCount > 0 || hashCount > 0
+		if !headerSyncing && !drainedTrigger {
+			if quietSince.IsZero() {
+				quietSince = time.Now()
+			} else if time.Since(quietSince) >= 100*time.Millisecond {
+				return
+			}
+		} else {
+			quietSince = time.Time{}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	env.t.Fatalf("scan stages did not finish before timeout")
+}
+
 func makeTestHeader(height uint64, hash string, parent string) *testHeader {
 	return &testHeader{
 		Number:     fmt.Sprintf("0x%x", height),
@@ -311,6 +316,33 @@ func makeTestHeader(height uint64, hash string, parent string) *testHeader {
 	}
 }
 
+func makeTestBody(storable bool) *fetchstore.EventBlockData {
+	body := &fetchstore.EventBlockData{}
+	if storable {
+		body.StorageFullBlock = &fetchstore.StorageFullBlock{}
+	}
+	return body
+}
+
+func makeTestEventBlockData(height uint64, hash string, parent string) *fetchstore.EventBlockData {
+	return &fetchstore.EventBlockData{
+		StorageFullBlock: &fetchstore.StorageFullBlock{
+			Block: model.Block{Height: height, Hash: hash, ParentHash: parent, Complete: true},
+		},
+	}
+}
+
+func snapshotTestStoredHashes(env *testFlowEnv) map[string]struct{} {
+	if env == nil {
+		return nil
+	}
+	env.t.Helper()
+	if env.stored == nil {
+		return nil
+	}
+	return env.stored.Snapshot()
+}
+
 func normalizeTestHash(hash string) string {
 	if hash == "" {
 		return ""
@@ -318,49 +350,28 @@ func normalizeTestHash(hash string) string {
 	return strings.ToLower(hash)
 }
 
-func testHeaderHeight(v any) (uint64, bool) {
-	h, ok := v.(*testHeader)
-	if !ok || h == nil {
+func testHeaderHeight(h *testHeader) (uint64, bool) {
+	if h == nil {
 		return 0, false
 	}
-	height, err := strconv.ParseUint(strings.TrimSpace(h.Number), 0, 64)
+	height, err := hexutil.DecodeUint64(strings.TrimSpace(h.Number))
 	return height, err == nil
 }
 
-func testHeaderHash(v any) string {
-	h, _ := v.(*testHeader)
+func testHeaderHash(h *testHeader) string {
 	if h == nil {
 		return ""
 	}
 	return h.Hash
 }
 
-func testHeaderParentHash(v any) string {
-	h, _ := v.(*testHeader)
+func testHeaderParentHash(h *testHeader) string {
 	if h == nil {
 		return ""
 	}
 	return h.ParentHash
 }
 
-func testHeaderWeight(v any) uint64 {
-	h, _ := v.(*testHeader)
-	if h == nil {
-		return 0
-	}
-	difficulty := strings.TrimSpace(h.Difficulty)
-	if difficulty == "" {
-		return 0
-	}
-
-	n := new(big.Int)
-	if _, ok := n.SetString(difficulty, 0); !ok || n.Sign() <= 0 {
-		return 0
-	}
-
-	max := new(big.Int).SetUint64(^uint64(0))
-	if n.Cmp(max) > 0 {
-		return ^uint64(0)
-	}
-	return n.Uint64()
+func testHeaderWeight(h *testHeader) uint64 {
+	return fetcherpkg.HeaderWeight(h)
 }

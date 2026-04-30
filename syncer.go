@@ -19,11 +19,7 @@ import (
 	"gorm.io/gorm"
 )
 
-type Syncer struct {
-	fm *fetch.FetchManager
-}
-
-func newSyncer(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, redisClient *redis.Client, chainId int64, genesisBlockHash string, optionalTables map[string]struct{}) *Syncer {
+func newFetchManager(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, redisClient *redis.Client, chainId int64, genesisBlockHash string, optionalTables map[string]struct{}) *fetch.FetchManager {
 
 	reversibleBlocks := conf.Chain.ReversibleBlocks
 	startHeight, endHeight, enableInternalTx := conf.Fetch.StartHeight, conf.Fetch.EndHeight, conf.Fetch.EnableInternalTx
@@ -62,12 +58,7 @@ func newSyncer(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, re
 		taskPoolOptions.StatsLogInterval,
 	)
 
-	dbOperator := fetchstore.NewFullBlockDbOperator[*fetch.EventBlockData](db, conf.Chain.ChainId, reversibleBlocks, func(blockData *fetch.EventBlockData) *fetchstore.StorageFullBlock {
-		if blockData == nil {
-			return nil
-		}
-		return blockData.StorageFullBlock
-	})
+	dbOperator := fetchstore.NewFullBlockDbOperator(db, conf.Chain.ChainId, reversibleBlocks)
 	blockFetcher := fetcherpkg.NewBlockFetcher(db)
 
 	fm := fetch.NewFetchManager(
@@ -88,22 +79,7 @@ func newSyncer(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, re
 		fm.EnableTaskPoolMetrics(fmt.Sprintf("fetch_task_pool_%s", conf.Chain.ChainName))
 	}
 
-	return &Syncer{
-		fm: fm,
-	}
-}
-
-func (s *Syncer) Run() {
-	s.fm.Run()
-}
-
-func (s *Syncer) Stop() {
-	if s == nil {
-		return
-	}
-	if s.fm != nil {
-		s.fm.Stop()
-	}
+	return fm
 }
 
 func checkNodeChainInfo(clients []*ethclient.Client, dbChainId int64, dbGenesisBlockHash string) {

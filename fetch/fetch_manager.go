@@ -9,7 +9,9 @@ import (
 	fetcherpkg "scanner_eth/fetch/fetcher"
 	headernotify "scanner_eth/fetch/header_notify"
 	nodepkg "scanner_eth/fetch/node"
+	fetchrestore "scanner_eth/fetch/restore"
 	fetchscan "scanner_eth/fetch/scan"
+	fetchserialstore "scanner_eth/fetch/serial_store"
 	fetchstore "scanner_eth/fetch/store"
 	fetchtask "scanner_eth/fetch/task"
 	"scanner_eth/leader"
@@ -37,7 +39,7 @@ type FetchManager struct {
 	chainId                int64
 	irreversibleBlocks     int
 	storedBlocks           *fetchstore.StoredBlockState
-	pendingPayloadStore    *fetchstore.PayloadStore
+	pendingBlockStore      *fetchstore.PendingBlockStore
 	taskPool               *fetchtask.Pool
 	hns                    []*headernotify.HeaderNotifier
 	taskPoolOptions        fetchtask.TaskPoolOptions
@@ -46,22 +48,9 @@ type FetchManager struct {
 	scanFlow               *fetchscan.Flow
 	headerManager          *headernotify.Manager
 	scanWorker             *fetchscan.Worker
-	storeWorker            *fetchstore.SerialWorker[*EventBlockData]
+	storeWorker            *fetchserialstore.Worker
 
 	dbOperator DbOperator
-}
-
-// buildTreeRuntimeDeps assembles store.TreeRuntimeDeps from the current runtime (block tree, payload store, stored flags, task queue).
-func (fm *FetchManager) buildTreeRuntimeDeps() fetchstore.TreeRuntimeDeps {
-	if fm == nil {
-		return fetchstore.TreeRuntimeDeps{}
-	}
-	return fetchstore.TreeRuntimeDeps{
-		BlockTree:    fm.runtimeBlockTree(),
-		PayloadStore: fm.runtimePayloadStore(),
-		StoredBlocks: fm.runtimeStoredBlocks(),
-		TaskPool:     fm.runtimeTaskPool(),
-	}
 }
 
 type DbOperator interface {
@@ -117,15 +106,27 @@ func NewFetchManager(
 	return fm
 }
 
+func (fm *FetchManager) restoreBlockTree(blocks []model.Block) (int, error) {
+	if fm == nil {
+		return 0, nil
+	}
+	return fetchrestore.RuntimeDeps{
+		BlockTree:         fm.runtimeBlockTree(),
+		PendingBlockStore: fm.runtimePendingBlockStore(),
+		StoredBlocks:      fm.runtimeStoredBlocks(),
+		NormalizeHash:     normalizeHash,
+	}.RestoreBlockTree(blocks)
+}
+
 func (fm *FetchManager) scanFlowRuntimeDeps() fetchscan.RuntimeDeps {
 	if fm == nil {
 		return fetchscan.RuntimeDeps{}
 	}
 	blockFetcher := fm.blockFetcher
 	nodeManager := fm.nodeManager
-	treeStoreDeps := fm.buildTreeRuntimeDeps()
-	blockTree := treeStoreDeps.BlockTree
-	payloadStore := fm.runtimePayloadStore()
+	blockTree := fm.runtimeBlockTree()
+	storedBlocks := fm.runtimeStoredBlocks()
+	pendingBlockStore := fm.runtimePendingBlockStore()
 	nodeExists := func(hash string) bool {
 		return blockTree != nil && blockTree.Get(hash) != nil
 	}
@@ -133,44 +134,46 @@ func (fm *FetchManager) scanFlowRuntimeDeps() fetchscan.RuntimeDeps {
 		StartHeight:  fm.scanConfig.StartHeight,
 		Irreversible: fm.irreversibleBlocks,
 		BlockTree:    blockTree,
-		TaskPool:     fetchscan.NewTaskPoolAdapter(fm.runtimeTaskPool()),
-		StoreWorker:  fetchscan.NewStoreWorkerAdapter(fm.runtimeStoreWorker()),
-		StoredBlocks: treeStoreDeps.StoredBlocks,
+		TaskPool:     fm.runtimeTaskPool(),
+		StoreWorker:  fm.runtimeStoreWorker(),
+		StoredBlocks: storedBlocks,
 		TriggerScan: func() {
 			if scanWorker := fm.runtimeScanWorker(); scanWorker != nil {
 				scanWorker.Trigger()
 			}
 		},
-		PruneStoredBlocks: func(ctx context.Context, irreversible int) {
-			treeStoreDeps.PruneStoredBlocks(ctx, irreversible)
+		PruneRuntime: fetchscan.PruneRuntimeDeps{
+			BlockTree:         fm.runtimeBlockTree(),
+			PendingBlockStore: pendingBlockStore,
+			StoredBlocks:      storedBlocks,
+			TaskPool:          fm.runtimeTaskPool(),
+			NormalizeHash:     normalizeHash,
 		},
-		SetNodeBlockHeader: func(hash string, header any) bool {
-			if payloadStore == nil || !nodeExists(hash) {
+		SetNodeBlockHeader: func(hash string, header *BlockHeaderJson) bool {
+			if pendingBlockStore == nil || !nodeExists(hash) {
 				return false
 			}
-			typed, _ := header.(*BlockHeaderJson)
-			payloadStore.SetHeader(hash, typed)
+			pendingBlockStore.SetHeader(hash, header)
 			return true
 		},
-		SetNodeBlockBody: func(hash string, body any) bool {
-			if payloadStore == nil || !nodeExists(hash) {
+		SetNodeBlockBody: func(hash string, body *fetchstore.EventBlockData) bool {
+			if pendingBlockStore == nil || !nodeExists(hash) {
 				return false
 			}
-			typed, _ := body.(*EventBlockData)
-			payloadStore.SetBody(hash, typed)
+			pendingBlockStore.SetBody(hash, body)
 			return true
 		},
-		GetNodeBlockHeader: func(hash string) any {
-			if payloadStore == nil {
+		GetNodeBlockHeader: func(hash string) *BlockHeaderJson {
+			if pendingBlockStore == nil {
 				return nil
 			}
-			return payloadStore.GetHeader(hash)
+			return pendingBlockStore.GetHeader(hash)
 		},
-		GetNodeBlockBody: func(hash string) any {
-			if payloadStore == nil {
+		GetNodeBlockBody: func(hash string) *fetchstore.EventBlockData {
+			if pendingBlockStore == nil {
 				return nil
 			}
-			return payloadStore.GetBody(hash)
+			return pendingBlockStore.GetBody(hash)
 		},
 		LatestRemoteHeight: func() uint64 {
 			if nodeManager == nil {
@@ -178,7 +181,7 @@ func (fm *FetchManager) scanFlowRuntimeDeps() fetchscan.RuntimeDeps {
 			}
 			return nodeManager.GetLatestHeight()
 		},
-		BootstrapHeaderByHeight: func(ctx context.Context, height uint64) any {
+		BootstrapHeaderByHeight: func(ctx context.Context, height uint64) *BlockHeaderJson {
 			if nodeManager == nil || blockFetcher == nil {
 				return nil
 			}
@@ -193,7 +196,7 @@ func (fm *FetchManager) scanFlowRuntimeDeps() fetchscan.RuntimeDeps {
 			}
 			return nil
 		},
-		FetchHeaderByHeight: func(ctx context.Context, height uint64) any {
+		FetchHeaderByHeight: func(ctx context.Context, height uint64) *BlockHeaderJson {
 			if nodeManager == nil || blockFetcher == nil {
 				return nil
 			}
@@ -203,7 +206,7 @@ func (fm *FetchManager) scanFlowRuntimeDeps() fetchscan.RuntimeDeps {
 			}
 			return blockFetcher.FetchBlockHeaderByHeight(ctx, nodeOp, 0, height)
 		},
-		FetchHeaderByHash: func(ctx context.Context, hash string) any {
+		FetchHeaderByHash: func(ctx context.Context, hash string) *BlockHeaderJson {
 			if nodeManager == nil || blockFetcher == nil {
 				return nil
 			}
@@ -213,17 +216,16 @@ func (fm *FetchManager) scanFlowRuntimeDeps() fetchscan.RuntimeDeps {
 			}
 			return blockFetcher.FetchBlockHeaderByHash(ctx, nodeOp, 0, normalizeHash(hash))
 		},
-		FetchBodyByHash: func(ctx context.Context, hash string, height uint64, header any) (body any, nodeID int, costMicros int64, ok bool) {
+		FetchBodyByHash: func(ctx context.Context, hash string, height uint64, header *BlockHeaderJson) (body *fetchstore.EventBlockData, nodeID int, costMicros int64, ok bool) {
 			if nodeManager == nil || blockFetcher == nil {
 				return nil, -1, 0, false
 			}
-			h, _ := header.(*BlockHeaderJson)
 			_, nodeOp, err := nodeManager.GetBestNode(height)
 			if err != nil {
 				return nil, -1, 0, false
 			}
 			startTime := time.Now()
-			fullBlock := blockFetcher.FetchFullBlock(ctx, nodeOp, int(height), h)
+			fullBlock := blockFetcher.FetchFullBlock(ctx, nodeOp, int(height), header)
 			cost := time.Since(startTime).Microseconds()
 			if fullBlock == nil {
 				return nil, nodeOp.ID(), cost, false
@@ -244,42 +246,29 @@ func (fm *FetchManager) scanFlowRuntimeDeps() fetchscan.RuntimeDeps {
 			}
 		},
 		NormalizeHash: normalizeHash,
-		HeaderExists: func(v any) bool {
-			h, ok := v.(*BlockHeaderJson)
-			return ok && h != nil
-		},
-		HeaderHeight: func(v any) (uint64, bool) {
-			h, _ := v.(*BlockHeaderJson)
+		HeaderHeight: func(h *BlockHeaderJson) (uint64, bool) {
 			if h == nil {
 				return 0, false
 			}
 			height, err := hexutil.DecodeUint64(h.Number)
 			return height, err == nil
 		},
-		HeaderHash: func(v any) string {
-			h, _ := v.(*BlockHeaderJson)
+		HeaderHash: func(h *BlockHeaderJson) string {
 			if h == nil {
 				return ""
 			}
 			return h.Hash
 		},
-		HeaderParentHash: func(v any) string {
-			h, _ := v.(*BlockHeaderJson)
+		HeaderParentHash: func(h *BlockHeaderJson) string {
 			if h == nil {
 				return ""
 			}
 			return h.ParentHash
 		},
-		HeaderWeight: func(v any) uint64 {
-			h, _ := v.(*BlockHeaderJson)
+		HeaderWeight: func(h *BlockHeaderJson) uint64 {
 			return fetcherpkg.HeaderWeight(h)
 		},
-		BodyExists: func(v any) bool {
-			data, ok := v.(*EventBlockData)
-			return ok && data != nil
-		},
-		BodyStorable: func(v any) bool {
-			data, _ := v.(*EventBlockData)
+		BodyStorable: func(data *fetchstore.EventBlockData) bool {
 			return data != nil && data.StorageFullBlock != nil
 		},
 	}

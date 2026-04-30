@@ -28,16 +28,12 @@ type Runtime struct {
 	afterFirstTaskSend   func()
 }
 
-var defaultRuntime = NewRuntime()
+var defaultRuntime = &Runtime{
+	batchSize: DefaultBatchSize,
+}
 
 func DefaultRuntime() *Runtime {
 	return defaultRuntime
-}
-
-func NewRuntime() *Runtime {
-	return &Runtime{
-		batchSize: DefaultBatchSize,
-	}
 }
 
 func (rt *Runtime) Init(db *gorm.DB, batchSize int, workerCount int) {

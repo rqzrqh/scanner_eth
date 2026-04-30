@@ -3,6 +3,9 @@ package scan
 import (
 	"context"
 	"scanner_eth/blocktree"
+	fetcherpkg "scanner_eth/fetch/fetcher"
+	fetchserialstore "scanner_eth/fetch/serial_store"
+	fetchstore "scanner_eth/fetch/store"
 	"strconv"
 	"strings"
 	"time"
@@ -12,58 +15,37 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type TaskPool interface {
-	EnqueueHeaderHeightTask(uint64) bool
-	EnqueueHeaderHashTask(string) bool
-	EnqueueBodyTask(string, int)
-	IsHeaderHeightSyncing(uint64) bool
-	TryStartHeaderHeightSync(uint64) bool
-	FinishHeaderHeightSync(uint64)
-	IsHeaderHashSyncing(string) bool
-	TryStartHeaderHashSync(string) bool
-	FinishHeaderHashSync(string)
-}
-
-type StoreWorker interface {
-	IsInflight(string) bool
-	Submit(context.Context, string, uint64, any) error
-}
-
-type StoredBlocks interface {
-	IsStored(string) bool
-}
+type BlockHeaderJson = fetcherpkg.BlockHeaderJson
 
 type RuntimeDeps struct {
-	StartHeight       uint64
-	Irreversible      int
-	BlockTree         *blocktree.BlockTree
-	TaskPool          TaskPool
-	StoreWorker       StoreWorker
-	StoredBlocks      StoredBlocks
-	TriggerScan       func()
-	PruneStoredBlocks func(context.Context, int)
+	StartHeight  uint64
+	Irreversible int
+	BlockTree    *blocktree.BlockTree
+	TaskPool     *fetchtask.Pool
+	StoreWorker  *fetchserialstore.Worker
+	StoredBlocks *fetchstore.StoredBlockState
+	TriggerScan  func()
+	PruneRuntime PruneRuntimeDeps
 
-	SetNodeBlockHeader func(string, any) bool
-	SetNodeBlockBody   func(string, any) bool
-	GetNodeBlockHeader func(string) any
-	GetNodeBlockBody   func(string) any
+	SetNodeBlockHeader func(string, *BlockHeaderJson) bool
+	SetNodeBlockBody   func(string, *fetchstore.EventBlockData) bool
+	GetNodeBlockHeader func(string) *BlockHeaderJson
+	GetNodeBlockBody   func(string) *fetchstore.EventBlockData
 
 	LatestRemoteHeight      func() uint64
-	BootstrapHeaderByHeight func(context.Context, uint64) any
-	FetchHeaderByHeight     func(context.Context, uint64) any
-	FetchHeaderByHash       func(context.Context, string) any
-	FetchBodyByHash         func(context.Context, string, uint64, any) (body any, nodeID int, costMicros int64, ok bool)
+	BootstrapHeaderByHeight func(context.Context, uint64) *BlockHeaderJson
+	FetchHeaderByHeight     func(context.Context, uint64) *BlockHeaderJson
+	FetchHeaderByHash       func(context.Context, string) *BlockHeaderJson
+	FetchBodyByHash         func(context.Context, string, uint64, *BlockHeaderJson) (body *fetchstore.EventBlockData, nodeID int, costMicros int64, ok bool)
 	UpdateNodeState         func(int, int64, bool)
 
 	NormalizeHash    func(string) string
-	HeaderExists     func(any) bool
-	HeaderHeight     func(any) (uint64, bool)
-	HeaderHash       func(any) string
-	HeaderParentHash func(any) string
-	HeaderWeight     func(any) uint64
+	HeaderHeight     func(*BlockHeaderJson) (uint64, bool)
+	HeaderHash       func(*BlockHeaderJson) string
+	HeaderParentHash func(*BlockHeaderJson) string
+	HeaderWeight     func(*BlockHeaderJson) uint64
 
-	BodyExists   func(any) bool
-	BodyStorable func(any) bool
+	BodyStorable func(*fetchstore.EventBlockData) bool
 }
 
 type scanStage int
@@ -74,7 +56,7 @@ const (
 	scanStageBodyDone
 )
 
-type ScanStageEvent struct {
+type scanStageEvent struct {
 	stage    scanStage
 	target   string
 	success  bool
@@ -95,7 +77,7 @@ func scanStageName(stage scanStage) string {
 	}
 }
 
-type BranchProcessState struct {
+type branchProcessState struct {
 	Hash        string
 	ParentReady bool
 }
@@ -103,35 +85,33 @@ type BranchProcessState struct {
 type Flow struct {
 	runtimeDepsFn func() RuntimeDeps
 
-	startHeight       uint64
-	irreversible      int
-	blockTree         *blocktree.BlockTree
-	taskPool          TaskPool
-	storeWorker       StoreWorker
-	storedBlocks      StoredBlocks
-	triggerScan       func()
-	pruneStoredBlocks func(context.Context, int)
+	startHeight  uint64
+	irreversible int
+	blockTree    *blocktree.BlockTree
+	taskPool     *fetchtask.Pool
+	storeWorker  *fetchserialstore.Worker
+	storedBlocks *fetchstore.StoredBlockState
+	triggerScan  func()
+	pruneRuntime PruneRuntimeDeps
 
-	setNodeBlockHeader func(string, any) bool
-	setNodeBlockBody   func(string, any) bool
-	getNodeBlockHeader func(string) any
-	getNodeBlockBody   func(string) any
+	setNodeBlockHeader func(string, *BlockHeaderJson) bool
+	setNodeBlockBody   func(string, *fetchstore.EventBlockData) bool
+	getNodeBlockHeader func(string) *BlockHeaderJson
+	getNodeBlockBody   func(string) *fetchstore.EventBlockData
 
 	latestRemoteHeight      func() uint64
-	bootstrapHeaderByHeight func(context.Context, uint64) any
-	fetchHeaderByHeight     func(context.Context, uint64) any
-	fetchHeaderByHash       func(context.Context, string) any
-	fetchBodyByHash         func(context.Context, string, uint64, any) (body any, nodeID int, costMicros int64, ok bool)
+	bootstrapHeaderByHeight func(context.Context, uint64) *BlockHeaderJson
+	fetchHeaderByHeight     func(context.Context, uint64) *BlockHeaderJson
+	fetchHeaderByHash       func(context.Context, string) *BlockHeaderJson
+	fetchBodyByHash         func(context.Context, string, uint64, *BlockHeaderJson) (body *fetchstore.EventBlockData, nodeID int, costMicros int64, ok bool)
 	updateNodeState         func(int, int64, bool)
 
 	normalizeHash    func(string) string
-	headerExists     func(any) bool
-	headerHeight     func(any) (uint64, bool)
-	headerHash       func(any) string
-	headerParentHash func(any) string
-	headerWeight     func(any) uint64
-	bodyExists       func(any) bool
-	bodyStorable     func(any) bool
+	headerHeight     func(*BlockHeaderJson) (uint64, bool)
+	headerHash       func(*BlockHeaderJson) string
+	headerParentHash func(*BlockHeaderJson) string
+	headerWeight     func(*BlockHeaderJson) uint64
+	bodyStorable     func(*fetchstore.EventBlockData) bool
 }
 
 func NewFlow(runtimeDepsFn func() RuntimeDeps, config Config) *Flow {
@@ -157,7 +137,7 @@ func (sf *Flow) BindRuntimeDeps() {
 	sf.storeWorker = deps.StoreWorker
 	sf.storedBlocks = deps.StoredBlocks
 	sf.triggerScan = deps.TriggerScan
-	sf.pruneStoredBlocks = deps.PruneStoredBlocks
+	sf.pruneRuntime = deps.PruneRuntime
 	sf.setNodeBlockHeader = deps.SetNodeBlockHeader
 	sf.setNodeBlockBody = deps.SetNodeBlockBody
 	sf.getNodeBlockHeader = deps.GetNodeBlockHeader
@@ -169,12 +149,10 @@ func (sf *Flow) BindRuntimeDeps() {
 	sf.fetchBodyByHash = deps.FetchBodyByHash
 	sf.updateNodeState = deps.UpdateNodeState
 	sf.normalizeHash = deps.NormalizeHash
-	sf.headerExists = deps.HeaderExists
 	sf.headerHeight = deps.HeaderHeight
 	sf.headerHash = deps.HeaderHash
 	sf.headerParentHash = deps.HeaderParentHash
 	sf.headerWeight = deps.HeaderWeight
-	sf.bodyExists = deps.BodyExists
 	sf.bodyStorable = deps.BodyStorable
 }
 
@@ -183,14 +161,6 @@ func (sf *Flow) normalize(v string) string {
 		return strings.TrimSpace(v)
 	}
 	return sf.normalizeHash(v)
-}
-
-func (sf *Flow) hasHeader(v any) bool {
-	return sf != nil && sf.headerExists != nil && sf.headerExists(v)
-}
-
-func (sf *Flow) hasBody(v any) bool {
-	return sf != nil && sf.bodyExists != nil && sf.bodyExists(v)
 }
 
 func (sf *Flow) TriggerScan() {
@@ -205,8 +175,8 @@ func (sf *Flow) RunScanCycle(ctx context.Context) {
 	if sf == nil || !sf.RunScanCoordinator(ctx) {
 		return
 	}
-	if sf.irreversible > 0 && sf.pruneStoredBlocks != nil {
-		sf.pruneStoredBlocks(ctx, sf.irreversible)
+	if sf.irreversible > 0 {
+		sf.pruneRuntime.PruneStoredBlocks(ctx, sf.irreversible)
 	}
 }
 
@@ -232,7 +202,7 @@ func (sf *Flow) RunScanCoordinator(ctx context.Context) bool {
 
 	bodyTargets := sf.GetBodySyncTargets()
 	if len(bodyTargets) > 0 {
-		sf.runScanStageAsync(ctx, scanStageBodyDone, strings.Join(bodyTargets, ","), sf.SyncBodyTarget, func(event ScanStageEvent) {
+		sf.runScanStageAsync(ctx, scanStageBodyDone, strings.Join(bodyTargets, ","), sf.SyncBodyTarget, func(event scanStageEvent) {
 			sf.logScanStageEvent(event)
 			if event.success && (ctx == nil || ctx.Err() == nil) {
 				sf.inspectBlockTreeState("after_body_sync")
@@ -242,18 +212,18 @@ func (sf *Flow) RunScanCoordinator(ctx context.Context) bool {
 	return true
 }
 
-func (sf *Flow) runScanStageAsync(ctx context.Context, stage scanStage, target string, fn func(context.Context, string) (bool, string), after func(ScanStageEvent)) bool {
+func (sf *Flow) runScanStageAsync(ctx context.Context, stage scanStage, target string, fn func(context.Context, string) (bool, string), after func(scanStageEvent)) bool {
 	go func() {
 		startedAt := time.Now()
 		if ctx != nil && ctx.Err() != nil {
 			if after != nil {
-				after(ScanStageEvent{stage: stage, target: target, duration: time.Since(startedAt), errMsg: "scan context cancelled"})
+				after(scanStageEvent{stage: stage, target: target, duration: time.Since(startedAt), errMsg: "scan context cancelled"})
 			}
 			return
 		}
 		success, errMsg := fn(ctx, target)
 		if after != nil {
-			after(ScanStageEvent{stage: stage, target: target, success: success, duration: time.Since(startedAt), errMsg: errMsg})
+			after(scanStageEvent{stage: stage, target: target, success: success, duration: time.Since(startedAt), errMsg: errMsg})
 		}
 	}()
 	return true
@@ -332,7 +302,7 @@ func (sf *Flow) GetBodySyncTargets() []string {
 				continue
 			}
 			nodeData := sf.getNodeBlockBody(node.Key)
-			if !sf.hasBody(nodeData) || sf.HasStorableNodeData(nodeData) {
+			if nodeData == nil || sf.HasStorableNodeData(nodeData) {
 				if _, exists := seen[state.Hash]; !exists {
 					seen[state.Hash] = struct{}{}
 					targets = append(targets, state.Hash)
@@ -348,7 +318,7 @@ func (sf *Flow) SyncHeaderByHeightTarget(_ context.Context, target string) (bool
 	if err != nil {
 		return false, "invalid header-by-height target"
 	}
-	if !sf.hasHeader(sf.FetchAndInsertHeaderByHeight(height)) {
+	if sf.FetchAndInsertHeaderByHeight(height) == nil {
 		return false, "header-by-height fetch failed"
 	}
 	return true, ""
@@ -389,7 +359,7 @@ func (sf *Flow) SyncBodyTarget(ctx context.Context, target string) (bool, string
 			continue
 		}
 		nodeData := sf.getNodeBlockBody(node.Key)
-		if !sf.hasBody(nodeData) {
+		if nodeData == nil {
 			sf.EnqueueNodeBodySync(state)
 			continue
 		}
@@ -417,7 +387,7 @@ func (sf *Flow) CountActionableBodyNodes() int {
 				continue
 			}
 			nodeData := sf.getNodeBlockBody(node.Key)
-			if !sf.hasBody(nodeData) {
+			if nodeData == nil {
 				count++
 				continue
 			}
@@ -455,7 +425,7 @@ func (sf *Flow) EnsureBootstrapHeader() bool {
 	}
 	height := sf.startHeight
 	header := sf.bootstrapHeaderByHeight(context.Background(), height)
-	if !sf.hasHeader(header) {
+	if header == nil {
 		logrus.Warnf("bootstrap get header failed from all nodes. height:%v", height)
 		return false
 	}
@@ -478,7 +448,7 @@ func (sf *Flow) SyncHeaderWindow() {
 		if !hasRange {
 			height := sf.startHeight
 			header := sf.FetchAndInsertHeaderByHeight(height)
-			if !sf.hasHeader(header) {
+			if header == nil {
 				return
 			}
 			logrus.Infof("sync header window bootstrap by startHeight success. height:%v hash:%v", height, sf.normalize(sf.headerHash(header)))
@@ -487,7 +457,7 @@ func (sf *Flow) SyncHeaderWindow() {
 		if sf.ShouldStopHeaderWindowSync(start, end, targetSize) {
 			return
 		}
-		if !sf.hasHeader(sf.FetchAndInsertHeaderByHeight(end + 1)) {
+		if sf.FetchAndInsertHeaderByHeight(end+1) == nil {
 			return
 		}
 	}
@@ -514,7 +484,7 @@ func (sf *Flow) ShouldStopHeaderWindowSync(start, end, targetSize uint64) bool {
 	return latestRemote == 0 || end >= latestRemote
 }
 
-func (sf *Flow) FetchAndInsertHeaderByHeight(height uint64) any {
+func (sf *Flow) FetchAndInsertHeaderByHeight(height uint64) *BlockHeaderJson {
 	sf.BindRuntimeDeps()
 	if sf == nil || sf.taskPool == nil {
 		return nil
@@ -526,12 +496,12 @@ func (sf *Flow) FetchAndInsertHeaderByHeight(height uint64) any {
 	return sf.FetchAndInsertHeaderByHeightCore(height)
 }
 
-func (sf *Flow) FetchAndInsertHeaderByHeightCore(height uint64) any {
+func (sf *Flow) FetchAndInsertHeaderByHeightCore(height uint64) *BlockHeaderJson {
 	if sf == nil || sf.fetchHeaderByHeight == nil {
 		return nil
 	}
 	header := sf.fetchHeaderByHeight(context.Background(), height)
-	if !sf.hasHeader(header) {
+	if header == nil {
 		return nil
 	}
 	sf.InsertHeader(header)
@@ -574,7 +544,7 @@ func (sf *Flow) FetchAndInsertHeaderByHashImmediate(hash string) bool {
 		return false
 	}
 	header := sf.fetchHeaderByHash(context.Background(), hash)
-	if !sf.hasHeader(header) {
+	if header == nil {
 		return false
 	}
 	sf.InsertHeader(header)
@@ -606,30 +576,30 @@ func (sf *Flow) ProcessBranchNode(ctx context.Context, node *blocktree.LinkedNod
 		return
 	}
 	nodeData := sf.getNodeBlockBody(node.Key)
-	if !sf.hasBody(nodeData) {
+	if nodeData == nil {
 		sf.EnqueueNodeBodySync(state)
 		return
 	}
 	sf.StoreNodeBodyData(ctx, node, nodeData, state)
 }
 
-func (sf *Flow) BuildBranchProcessState(node *blocktree.LinkedNode) (BranchProcessState, bool) {
+func (sf *Flow) BuildBranchProcessState(node *blocktree.LinkedNode) (branchProcessState, bool) {
 	if sf == nil || sf.blockTree == nil || sf.storedBlocks == nil {
-		return BranchProcessState{}, false
+		return branchProcessState{}, false
 	}
 	hash := sf.normalize(node.Key)
 	if hash == "" || sf.storedBlocks.IsStored(hash) || (sf.storeWorker != nil && sf.storeWorker.IsInflight(hash)) {
-		return BranchProcessState{}, false
+		return branchProcessState{}, false
 	}
 	parentHash := sf.normalize(node.ParentKey)
 	parentNode := sf.blockTree.Get(parentHash)
-	return BranchProcessState{
+	return branchProcessState{
 		Hash:        hash,
 		ParentReady: parentHash == "" || parentNode == nil || sf.storedBlocks.IsStored(parentHash),
 	}, true
 }
 
-func (sf *Flow) EnqueueNodeBodySync(state BranchProcessState) {
+func (sf *Flow) EnqueueNodeBodySync(state branchProcessState) {
 	if sf == nil || sf.taskPool == nil {
 		return
 	}
@@ -637,10 +607,10 @@ func (sf *Flow) EnqueueNodeBodySync(state BranchProcessState) {
 	if state.ParentReady {
 		priority = fetchtask.TaskPriorityHigh
 	}
-	sf.taskPool.EnqueueBodyTask(state.Hash, priority)
+	sf.taskPool.EnqueueTaskWithPriority(state.Hash, priority)
 }
 
-func (sf *Flow) StoreNodeBodyData(ctx context.Context, node *blocktree.LinkedNode, nodeData any, state BranchProcessState) {
+func (sf *Flow) StoreNodeBodyData(ctx context.Context, node *blocktree.LinkedNode, nodeData *fetchstore.EventBlockData, state branchProcessState) {
 	if ctx != nil && ctx.Err() != nil {
 		return
 	}
@@ -656,7 +626,7 @@ func (sf *Flow) StoreNodeBodyData(ctx context.Context, node *blocktree.LinkedNod
 	}
 }
 
-func (sf *Flow) HasStorableNodeData(nodeData any) bool {
+func (sf *Flow) HasStorableNodeData(nodeData *fetchstore.EventBlockData) bool {
 	return sf != nil && sf.bodyStorable != nil && sf.bodyStorable(nodeData)
 }
 
@@ -678,9 +648,9 @@ func (sf *Flow) SyncNodeDataByHash(ctx context.Context, hash string) bool {
 	}
 
 	header := sf.getNodeBlockHeader(hash)
-	if !sf.hasHeader(header) {
+	if header == nil {
 		header = sf.fetchHeaderByHash(ctx, hash)
-		if !sf.hasHeader(header) {
+		if header == nil {
 			return false
 		}
 		sf.setNodeBlockHeader(hash, header)
@@ -706,9 +676,9 @@ func (sf *Flow) SyncNodeDataByHash(ctx context.Context, hash string) bool {
 	return true
 }
 
-func (sf *Flow) InsertHeader(header any) {
+func (sf *Flow) InsertHeader(header *BlockHeaderJson) {
 	sf.BindRuntimeDeps()
-	if sf == nil || sf.blockTree == nil || sf.setNodeBlockHeader == nil || !sf.hasHeader(header) {
+	if sf == nil || sf.blockTree == nil || sf.setNodeBlockHeader == nil || header == nil {
 		return
 	}
 	height, ok := sf.headerHeight(header)
@@ -722,7 +692,7 @@ func (sf *Flow) InsertHeader(header any) {
 	sf.setNodeBlockHeader(key, nil)
 }
 
-func (sf *Flow) logScanStageEvent(event ScanStageEvent) {
+func (sf *Flow) logScanStageEvent(event scanStageEvent) {
 	stage := scanStageName(event.stage)
 	if event.success {
 		logrus.Infof("scan stage event stage:%s target:%v success:%v duration:%v", stage, event.target, event.success, event.duration)

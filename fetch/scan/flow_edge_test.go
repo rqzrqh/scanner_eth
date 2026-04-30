@@ -2,6 +2,7 @@ package scan
 
 import (
 	"context"
+	fetchstore "scanner_eth/fetch/store"
 	"testing"
 )
 
@@ -20,7 +21,7 @@ func TestSyncNodeDataByHashEarlyReturnAndFailures(t *testing.T) {
 		t.Fatal("expected false when header fetch is unavailable")
 	}
 
-	env.fetchHeaderByHashFn = func(_ context.Context, hash string) any {
+	env.fetchHeaderByHashFn = func(_ context.Context, hash string) *BlockHeaderJson {
 		return nil
 	}
 	if env.flow.SyncNodeDataByHash(context.Background(), "0x10") {
@@ -32,8 +33,8 @@ func TestSyncNodeDataByHashDecodeFallbackAndFullBlockFail(t *testing.T) {
 	env := newTestFlowEnv(t, 2)
 
 	env.blockTree.Insert(12, "0x12", "", 1, nil)
-	env.payloads.SetNodeBlockHeader("0x12", &testHeader{Number: "bad", Hash: "0x12", ParentHash: "", Difficulty: "0x1"})
-	env.fetchBodyByHashFn = func(_ context.Context, hash string, height uint64, header any) (any, int, int64, bool) {
+	env.pending.SetNodeBlockHeader("0x12", &testHeader{Number: "bad", Hash: "0x12", ParentHash: "", Difficulty: "0x1"})
+	env.fetchBodyByHashFn = func(_ context.Context, hash string, height uint64, header *BlockHeaderJson) (*fetchstore.EventBlockData, int, int64, bool) {
 		if hash != "0x12" || height != 12 {
 			t.Fatalf("expected decode fallback to node height=12, got hash=%q height=%d", hash, height)
 		}

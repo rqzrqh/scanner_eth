@@ -1,8 +1,9 @@
-package store
+package serialstore
 
 import (
 	"context"
 	"fmt"
+	fetchstore "scanner_eth/fetch/store"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -11,28 +12,28 @@ import (
 )
 
 const (
-	statsLogIntervalSerialWorker = 30 * time.Second
-	reqChannelCapacity           = 64
+	statsLogIntervalWorker = 30 * time.Second
+	reqChannelCapacity     = 64
 )
 
-type BlockStorer[T any] interface {
-	StoreBlockData(context.Context, T) error
+type blockStorer interface {
+	StoreBlockData(context.Context, *fetchstore.EventBlockData) error
 }
 
-type StoreRequest[T any] struct {
+type storeRequest struct {
 	Ctx       context.Context
 	Hash      string
 	Height    uint64
-	BlockData T
+	BlockData *fetchstore.EventBlockData
 	ResultCh  chan error
 }
 
-type SerialWorker[T any] struct {
-	dbOperator   BlockStorer[T]
+type Worker struct {
+	dbOperator   blockStorer
 	storedBlocks StoredState
-	isZero       func(T) bool
+	isZero       func(*fetchstore.EventBlockData) bool
 
-	reqCh       chan *StoreRequest[T]
+	reqCh       chan *storeRequest
 	inflight    InflightState
 	lifecycleMu sync.Mutex
 	cancel      context.CancelFunc
@@ -45,30 +46,30 @@ type SerialWorker[T any] struct {
 	canceled  uint64
 }
 
-func NewSerialWorker[T any](dbOperator BlockStorer[T], storedBlocks StoredState, isZero func(T) bool) *SerialWorker[T] {
-	return &SerialWorker[T]{
+func NewWorker(dbOperator blockStorer, storedBlocks StoredState, isZero func(*fetchstore.EventBlockData) bool) *Worker {
+	return &Worker{
 		dbOperator:   dbOperator,
 		storedBlocks: storedBlocks,
 		isZero:       isZero,
-		reqCh:        make(chan *StoreRequest[T], reqChannelCapacity),
+		reqCh:        make(chan *storeRequest, reqChannelCapacity),
 		inflight:     NewInflightState(),
 	}
 }
 
-func NewStartedSerialWorker[T any](dbOperator BlockStorer[T], storedBlocks StoredState, isZero func(T) bool) *SerialWorker[T] {
-	worker := NewSerialWorker(dbOperator, storedBlocks, isZero)
+func NewStartedWorker(dbOperator blockStorer, storedBlocks StoredState, isZero func(*fetchstore.EventBlockData) bool) *Worker {
+	worker := NewWorker(dbOperator, storedBlocks, isZero)
 	worker.Start()
 	return worker
 }
 
-func (w *SerialWorker[T]) SetDbOperator(dbOperator BlockStorer[T]) {
+func (w *Worker) SetDbOperator(dbOperator blockStorer) {
 	if w == nil {
 		return
 	}
 	w.dbOperator = dbOperator
 }
 
-func (w *SerialWorker[T]) Start() {
+func (w *Worker) Start() {
 	if w == nil {
 		return
 	}
@@ -85,10 +86,10 @@ func (w *SerialWorker[T]) Start() {
 	go w.runLoop(ctx)
 }
 
-func (w *SerialWorker[T]) runLoop(ctx context.Context) {
+func (w *Worker) runLoop(ctx context.Context) {
 	defer w.wg.Done()
 
-	ticker := time.NewTicker(statsLogIntervalSerialWorker)
+	ticker := time.NewTicker(statsLogIntervalWorker)
 	defer ticker.Stop()
 
 	for {
@@ -107,7 +108,7 @@ func (w *SerialWorker[T]) runLoop(ctx context.Context) {
 	}
 }
 
-func (w *SerialWorker[T]) Stop() {
+func (w *Worker) Stop() {
 	if w == nil {
 		return
 	}
@@ -122,7 +123,7 @@ func (w *SerialWorker[T]) Stop() {
 	w.wg.Wait()
 }
 
-func (w *SerialWorker[T]) Submit(ctx context.Context, hash string, height uint64, blockData T) error {
+func (w *Worker) Submit(ctx context.Context, hash string, height uint64, blockData *fetchstore.EventBlockData) error {
 	if w == nil {
 		return fmt.Errorf("store block worker is nil")
 	}
@@ -144,7 +145,7 @@ func (w *SerialWorker[T]) Submit(ctx context.Context, hash string, height uint64
 		ctx = context.Background()
 	}
 
-	req := &StoreRequest[T]{
+	req := &storeRequest{
 		Ctx:       ctx,
 		Hash:      hash,
 		Height:    height,
@@ -171,14 +172,14 @@ func (w *SerialWorker[T]) Submit(ctx context.Context, hash string, height uint64
 	}
 }
 
-func (w *SerialWorker[T]) IsInflight(hash string) bool {
+func (w *Worker) IsInflight(hash string) bool {
 	if w == nil {
 		return false
 	}
 	return w.inflight.Has(hash)
 }
 
-func (w *SerialWorker[T]) MetricsPayload() map[string]any {
+func (w *Worker) MetricsPayload() map[string]any {
 	if w == nil {
 		return map[string]any{}
 	}
@@ -208,7 +209,7 @@ func (w *SerialWorker[T]) MetricsPayload() map[string]any {
 	}
 }
 
-func (w *SerialWorker[T]) logStats() {
+func (w *Worker) logStats() {
 	if w == nil || w.reqCh == nil {
 		return
 	}
@@ -224,7 +225,7 @@ func (w *SerialWorker[T]) logStats() {
 	)
 }
 
-func (w *SerialWorker[T]) runRequest(req *StoreRequest[T]) error {
+func (w *Worker) runRequest(req *storeRequest) error {
 	if w == nil || req == nil {
 		return fmt.Errorf("store request is nil")
 	}

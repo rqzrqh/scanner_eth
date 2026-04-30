@@ -9,7 +9,7 @@ func TestSyncHeaderWindowAndSyncOrphanParents(t *testing.T) {
 	env := newTestFlowEnv(t, 2)
 	env.setStartHeight(5)
 	env.latestRemote = 7
-	env.fetchHeaderByHeightFn = func(_ context.Context, height uint64) any {
+	env.fetchHeaderByHeightFn = func(_ context.Context, height uint64) *BlockHeaderJson {
 		switch height {
 		case 5:
 			return makeTestHeader(5, "0x05", "")
@@ -21,7 +21,7 @@ func TestSyncHeaderWindowAndSyncOrphanParents(t *testing.T) {
 			return nil
 		}
 	}
-	env.fetchHeaderByHashFn = func(_ context.Context, hash string) any {
+	env.fetchHeaderByHashFn = func(_ context.Context, hash string) *BlockHeaderJson {
 		if normalizeTestHash(hash) == "0x10" {
 			return makeTestHeader(16, "0x10", "0x07")
 		}
@@ -134,7 +134,7 @@ func TestHeightSyncAdvancesExactlyByDerivedTargets(t *testing.T) {
 	env.flow.InsertHeader(makeTestHeader(5, "0x05", ""))
 	env.flow.InsertHeader(makeTestHeader(6, "0x06", "0x05"))
 	env.latestRemote = 10
-	env.fetchHeaderByHeightFn = func(_ context.Context, height uint64) any {
+	env.fetchHeaderByHeightFn = func(_ context.Context, height uint64) *BlockHeaderJson {
 		switch height {
 		case 7:
 			return makeTestHeader(7, "0x07", "0x06")
@@ -172,7 +172,7 @@ func TestHeaderHashSyncFailureLeavesTargetRetryable(t *testing.T) {
 
 	env.flow.InsertHeader(makeTestHeader(10, "0x0a", ""))
 	env.blockTree.Insert(11, "0x0b", "0x0f", 1, nil)
-	env.fetchHeaderByHashFn = func(context.Context, string) any { return nil }
+	env.fetchHeaderByHashFn = func(context.Context, string) *BlockHeaderJson { return nil }
 
 	if env.flow.FetchAndInsertHeaderByHash("0x0f") {
 		t.Fatal("expected hash sync failure when fetcher returns nil")
@@ -195,13 +195,13 @@ func TestCountActionableAndStoredLinkedNodes(t *testing.T) {
 
 	env.blockTree.Insert(10, "0xaa", "", 1, nil)
 	env.blockTree.Insert(11, "0xbb", "0xaa", 1, nil)
-	env.payloads.SetNodeBlockBody("0xaa", &testBody{storable: true})
+	env.pending.SetNodeBlockBody("0xaa", makeTestBody(true))
 
 	if got := env.flow.CountActionableBodyNodes(); got != 2 {
 		t.Fatalf("expected 2 actionable nodes (root storable + child nil data), got=%d", got)
 	}
 
-	env.stored.markStored("0xaa")
+	env.stored.MarkStored("0xaa")
 	if got := env.flow.CountStoredLinkedNodes(); got != 1 {
 		t.Fatalf("expected 1 stored linked node, got=%d", got)
 	}

@@ -16,7 +16,7 @@ func TestStoreWorkerHelpers(t *testing.T) {
 		EventErc1155TransferList: []model.EventErc1155Transfer{{}},
 		ContractList:             []model.Contract{{}},
 	}
-	full.AssignBlockID(42)
+	full.assignBlockID(42)
 	if full.TxList[0].BlockId != 42 || full.TxList[1].BlockId != 42 {
 		t.Fatal("assignStorageBlockID should set tx block ids")
 	}

@@ -4,29 +4,30 @@ import (
 	"scanner_eth/blocktree"
 	headernotify "scanner_eth/fetch/header_notify"
 	fetchscan "scanner_eth/fetch/scan"
+	fetchserialstore "scanner_eth/fetch/serial_store"
 	fetchstore "scanner_eth/fetch/store"
 	fetchtask "scanner_eth/fetch/task"
 )
 
 type fetchRuntimeState struct {
-	blockTree           *blocktree.BlockTree
-	storedBlocks        *fetchstore.StoredBlockState
-	pendingPayloadStore *fetchstore.PayloadStore
-	taskPool            *fetchtask.Pool
-	scanFlow            *fetchscan.Flow
-	headerManager       *headernotify.Manager
-	scanWorker          *fetchscan.Worker
-	storeWorker         *fetchstore.SerialWorker[*EventBlockData]
+	blockTree         *blocktree.BlockTree
+	storedBlocks      *fetchstore.StoredBlockState
+	pendingBlockStore *fetchstore.PendingBlockStore
+	taskPool          *fetchtask.Pool
+	scanFlow          *fetchscan.Flow
+	headerManager     *headernotify.Manager
+	scanWorker        *fetchscan.Worker
+	storeWorker       *fetchserialstore.Worker
 }
 
 func newFetchRuntimeState(irreversibleBlocks int) *fetchRuntimeState {
 	stored := fetchstore.NewStoredBlockState()
 	taskPoolState := fetchtask.Pool{}
 	return &fetchRuntimeState{
-		blockTree:           blocktree.NewBlockTree(irreversibleBlocks),
-		storedBlocks:        &stored,
-		pendingPayloadStore: fetchstore.NewPayloadStore(),
-		taskPool:            &taskPoolState,
+		blockTree:         blocktree.NewBlockTree(irreversibleBlocks),
+		storedBlocks:      &stored,
+		pendingBlockStore: fetchstore.NewPendingBlockStore(),
+		taskPool:          &taskPoolState,
 	}
 }
 
@@ -36,14 +37,14 @@ func (fm *FetchManager) currentRuntime() *fetchRuntimeState {
 	}
 	if fm.runtime == nil {
 		return &fetchRuntimeState{
-			blockTree:           fm.blockTree,
-			storedBlocks:        fm.storedBlocks,
-			pendingPayloadStore: fm.pendingPayloadStore,
-			taskPool:            fm.taskPool,
-			scanFlow:            fm.scanFlow,
-			headerManager:       fm.headerManager,
-			scanWorker:          fm.scanWorker,
-			storeWorker:         fm.storeWorker,
+			blockTree:         fm.blockTree,
+			storedBlocks:      fm.storedBlocks,
+			pendingBlockStore: fm.pendingBlockStore,
+			taskPool:          fm.taskPool,
+			scanFlow:          fm.scanFlow,
+			headerManager:     fm.headerManager,
+			scanWorker:        fm.scanWorker,
+			storeWorker:       fm.storeWorker,
 		}
 	}
 	return fm.runtime
@@ -57,7 +58,7 @@ func (fm *FetchManager) syncRuntimeFields() {
 		fm.blockTree = nil
 		sb := fetchstore.NewStoredBlockState()
 		fm.storedBlocks = &sb
-		fm.pendingPayloadStore = nil
+		fm.pendingBlockStore = nil
 		tp := fetchtask.Pool{}
 		fm.taskPool = &tp
 		fm.scanFlow = nil
@@ -69,7 +70,7 @@ func (fm *FetchManager) syncRuntimeFields() {
 	rt := fm.runtime
 	fm.blockTree = rt.blockTree
 	fm.storedBlocks = rt.storedBlocks
-	fm.pendingPayloadStore = rt.pendingPayloadStore
+	fm.pendingBlockStore = rt.pendingBlockStore
 	fm.taskPool = rt.taskPool
 	fm.scanFlow = rt.scanFlow
 	fm.headerManager = rt.headerManager
@@ -101,12 +102,12 @@ func (fm *FetchManager) runtimeBlockTree() *blocktree.BlockTree {
 	return rt.blockTree
 }
 
-func (fm *FetchManager) runtimePayloadStore() *fetchstore.PayloadStore {
+func (fm *FetchManager) runtimePendingBlockStore() *fetchstore.PendingBlockStore {
 	rt := fm.currentRuntime()
 	if rt == nil {
 		return nil
 	}
-	return rt.pendingPayloadStore
+	return rt.pendingBlockStore
 }
 
 func (fm *FetchManager) runtimeHeaderManager() *headernotify.Manager {
@@ -133,7 +134,7 @@ func (fm *FetchManager) runtimeScanFlow() *fetchscan.Flow {
 	return nil
 }
 
-func (fm *FetchManager) runtimeStoreWorker() *fetchstore.SerialWorker[*EventBlockData] {
+func (fm *FetchManager) runtimeStoreWorker() *fetchserialstore.Worker {
 	rt := fm.currentRuntime()
 	if rt == nil {
 		return nil
