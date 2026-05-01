@@ -274,14 +274,17 @@ func (fm *FetchManager) scanFlowRuntimeDeps() fetchscan.RuntimeDeps {
 	}
 }
 
-func (fm *FetchManager) Run() {
+func (fm *FetchManager) Run(ctx context.Context) {
 	if fm == nil {
 		return
 	}
 	if fm.election == nil {
 		return
 	}
-	go fm.election.DoWithLeaderElection(context.Background(), "scanEvents", time.Second, fm.onBecameLeader, fm.onLostLeader)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	go fm.election.DoWithLeaderElection(ctx, "scanEvents", time.Second, fm.onBecameLeader, fm.onLostLeader)
 }
 
 func (fm *FetchManager) Stop() {

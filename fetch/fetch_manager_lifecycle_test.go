@@ -7,13 +7,13 @@ import (
 
 func TestFetchManagerRunStopNilSafe(t *testing.T) {
 	var nilFM *FetchManager
-	nilFM.Run()
+	nilFM.Run(context.Background())
 
 	fm := newTestFetchManager(t, 2)
 	t.Cleanup(func() { fm.taskPool.Stop() })
 
 	// No election set: Run should still be safe and return.
-	fm.Run()
+	fm.Run(context.Background())
 	fm.Stop()
 }
 

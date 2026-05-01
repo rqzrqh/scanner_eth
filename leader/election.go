@@ -146,7 +146,11 @@ func (e *Election) DoWithLeaderElection(
 		}
 
 		if !e.TryBecomeLeader(ctx, businessName) {
-			time.Sleep(500 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(500 * time.Millisecond):
+			}
 			continue
 		}
 
@@ -154,7 +158,11 @@ func (e *Election) DoWithLeaderElection(
 			if err := onBecameLeader(ctx); err != nil {
 				logrus.Errorf("[%s][%s] leader bootstrap failed (releasing lock): %v", e.chainName, businessName, err)
 				e.ReleaseLeader()
-				time.Sleep(time.Second)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Second):
+				}
 				continue
 			}
 		}

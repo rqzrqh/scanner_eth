@@ -3,6 +3,9 @@ package headernotify
 import (
 	"context"
 	"sync"
+	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 type Manager struct {
@@ -17,6 +20,8 @@ type Manager struct {
 	notifierWg sync.WaitGroup
 	consumerWg sync.WaitGroup
 }
+
+const consumerWaitTimeout = 30 * time.Second
 
 func NewManager(notifiers []*HeaderNotifier, handleUpdate func(*RemoteChainUpdate)) *Manager {
 	return &Manager{
@@ -86,5 +91,14 @@ func (m *Manager) stopLocked() {
 		close(m.updateCh)
 		m.updateCh = nil
 	}
-	m.consumerWg.Wait()
+	done := make(chan struct{})
+	go func() {
+		m.consumerWg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(consumerWaitTimeout):
+		logrus.Warnf("header notify consumer stop timeout after %v", consumerWaitTimeout)
+	}
 }

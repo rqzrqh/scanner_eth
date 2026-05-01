@@ -162,15 +162,29 @@ func main() {
 
 	logrus.Infof("get chain info success. chainId:%v genesisBlockHash:%v", chainId, genesisBlockHash)
 
+	ctx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
+	defer stopSignals()
+
+	go func() {
+		<-ctx.Done()
+
+		forceExitCh := make(chan os.Signal, 1)
+		signal.Notify(forceExitCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
+		defer signal.Stop(forceExitCh)
+
+		<-forceExitCh
+		logrus.Warnf("shutdown still in progress, second signal forcing exit")
+		os.Exit(1)
+	}()
+
 	fm := newFetchManager(conf, clients, db, rds, chainId, genesisBlockHash, optionalTables)
 	metricsServer := startMetricsServer(conf.Metrics)
-	fm.Run()
+	fm.Run(ctx)
 
 	logrus.Infof("start success")
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
-	<-sigCh
+	<-ctx.Done()
+	logrus.Infof("shutdown signal received, stopping scanner")
 	fm.Stop()
 	if metricsServer != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
