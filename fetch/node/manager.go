@@ -17,7 +17,7 @@ type NodeState struct {
 }
 
 func (n *NodeState) GetChainInfo() uint64 {
-	if n == nil || n.remote == nil {
+	if n == nil {
 		return 0
 	}
 	height, _ := n.remote.GetChainInfo()
@@ -45,7 +45,7 @@ func NewNodeManager(clients []*ethclient.Client, rpcTimeout time.Duration) *Node
 // validNodeLocked reports whether id is in range and nm.nodes[id] is non-nil.
 // Caller must hold nm.mu.
 func (nm *NodeManager) validNodeLocked(id int) bool {
-	return nm != nil && id >= 0 && id < len(nm.nodes) && nm.nodes[id] != nil
+	return nm != nil && id >= 0 && id < len(nm.nodes)
 }
 
 func (nm *NodeManager) NodeCount() int {
@@ -59,11 +59,19 @@ func (nm *NodeManager) NodeOperators() []NodeOperator {
 	defer nm.mu.RUnlock()
 	ops := make([]NodeOperator, len(nm.nodes))
 	for i, node := range nm.nodes {
-		if node != nil {
-			ops[i] = node.operator
-		}
+		ops[i] = node.operator
 	}
 	return ops
+}
+
+func (nm *NodeManager) EthClients() []*ethclient.Client {
+	nm.mu.RLock()
+	defer nm.mu.RUnlock()
+	clients := make([]*ethclient.Client, len(nm.nodes))
+	for i, node := range nm.nodes {
+		clients[i] = node.operator.EthClient()
+	}
+	return clients
 }
 
 func (nm *NodeManager) Node(id int) *NodeState {
@@ -104,31 +112,10 @@ func (nm *NodeManager) UpdateNodeState(id int, delay int64, success bool) {
 	nm.nodes[id].ready = success
 }
 
-func (nm *NodeManager) SetNodeNotReady(id int) {
-	nm.mu.Lock()
-	defer nm.mu.Unlock()
-	if !nm.validNodeLocked(id) {
-		return
-	}
-	nm.nodes[id].ready = false
-}
-
-func (nm *NodeManager) SetNodeReady(id int) {
-	nm.mu.Lock()
-	defer nm.mu.Unlock()
-	if !nm.validNodeLocked(id) {
-		return
-	}
-	nm.nodes[id].ready = true
-}
-
 func (nm *NodeManager) SetAllNodesIdle() {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
 	for _, node := range nm.nodes {
-		if node == nil {
-			continue
-		}
 		node.delay = 0
 		node.ready = true
 	}
@@ -138,9 +125,7 @@ func (nm *NodeManager) ResetRemoteChainTips() {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
 	for _, node := range nm.nodes {
-		if node != nil {
-			node.remote = headernotify.NewRemoteChain()
-		}
+		node.remote = headernotify.NewRemoteChain()
 	}
 }
 
@@ -149,9 +134,6 @@ func (nm *NodeManager) GetLatestHeight() uint64 {
 	defer nm.mu.RUnlock()
 	var latest uint64
 	for _, node := range nm.nodes {
-		if node == nil || node.remote == nil {
-			continue
-		}
 		if h, _ := node.remote.GetChainInfo(); h > latest {
 			latest = h
 		}
@@ -165,7 +147,7 @@ func (nm *NodeManager) GetBestNode(height uint64) (int, NodeOperator, error) {
 	nodeId := -1
 	bestDelay := int64(0)
 	for i, node := range nm.nodes {
-		if node == nil || !node.ready || node.remote == nil {
+		if !node.ready {
 			continue
 		}
 		remoteHeight, _ := node.remote.GetChainInfo()

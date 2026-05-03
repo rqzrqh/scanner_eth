@@ -3,30 +3,18 @@ package scan
 import (
 	"context"
 	"scanner_eth/blocktree"
-	"strings"
+	fetchstore "scanner_eth/fetch/store"
+	fetchtask "scanner_eth/fetch/taskpool"
+	"scanner_eth/util"
 
 	"github.com/sirupsen/logrus"
 )
 
-type PendingBlockStore interface {
-	DeleteBlock(string)
-}
-
-type pruneStoredBlockState interface {
-	IsStored(string) bool
-	UnmarkStored(string)
-}
-
-type pruneTaskPool interface {
-	DelTask(string)
-}
-
 type PruneRuntimeDeps struct {
-	BlockTree         *blocktree.BlockTree
-	PendingBlockStore PendingBlockStore
-	StoredBlocks      pruneStoredBlockState
-	TaskPool          pruneTaskPool
-	NormalizeHash     func(string) string
+	BlockTree    *blocktree.BlockTree
+	StagingStore *fetchstore.StagingStore
+	StoredBlocks *fetchstore.StoredBlockState
+	TaskPool     *fetchtask.Pool
 }
 
 type pruneNodeSnapshot struct {
@@ -45,11 +33,15 @@ type pruneStateSnapshot struct {
 	Branches []pruneBranchSnapshot `json:"branches"`
 }
 
-func (deps PruneRuntimeDeps) normalizeHash(hash string) string {
-	if deps.NormalizeHash == nil {
-		return strings.TrimSpace(hash)
+func (sf *Flow) RunPruneStage(ctx context.Context) {
+	if sf == nil || sf.irreversible <= 0 {
+		return
 	}
-	return deps.NormalizeHash(hash)
+	// Prune must observe the post-store state from the same scan cycle. Scan
+	// therefore waits for body persistence to finish before pruning. This keeps
+	// serial_store on the simpler contract of consuming scan-time low-to-high
+	// full branch snapshots without prune interleaving during the same cycle.
+	sf.pruneRuntime.PruneStoredBlocks(ctx, sf.irreversible)
 }
 
 func (deps PruneRuntimeDeps) CaptureStateSnapshot() *pruneStateSnapshot {
@@ -64,7 +56,7 @@ func (deps PruneRuntimeDeps) CaptureStateSnapshot() *pruneStateSnapshot {
 	if root != nil {
 		state.Root = &pruneNodeSnapshot{
 			Height: root.Height,
-			Hash:   deps.normalizeHash(root.Key),
+			Hash:   util.NormalizeHash(root.Key),
 			Weight: root.Weight,
 		}
 	}
@@ -73,7 +65,7 @@ func (deps PruneRuntimeDeps) CaptureStateSnapshot() *pruneStateSnapshot {
 		state.Branches = append(state.Branches, pruneBranchSnapshot{
 			Header: pruneNodeSnapshot{
 				Height: branch.Header.Height,
-				Hash:   deps.normalizeHash(branch.Header.Key),
+				Hash:   util.NormalizeHash(branch.Header.Key),
 				Weight: branch.Header.Weight,
 			},
 			NodeCount: len(branch.Nodes),
@@ -92,7 +84,7 @@ func (deps PruneRuntimeDeps) StoredHeightRangeOnTree() (uint64, uint64, bool) {
 	var maxHeight uint64
 	hasStored := false
 	for _, nv := range linkedNodes {
-		hash := deps.normalizeHash(nv.Key)
+		hash := util.NormalizeHash(nv.Key)
 		if !deps.StoredBlocks.IsStored(hash) {
 			continue
 		}
@@ -145,9 +137,9 @@ func (deps PruneRuntimeDeps) PruneStoredBlocks(ctx context.Context, irreversible
 	afterState := deps.CaptureStateSnapshot()
 
 	for _, nv := range prunedNodes {
-		hash := deps.normalizeHash(nv.Key)
-		if deps.PendingBlockStore != nil {
-			deps.PendingBlockStore.DeleteBlock(hash)
+		hash := util.NormalizeHash(nv.Key)
+		if deps.StagingStore != nil {
+			deps.StagingStore.DeleteBlock(hash)
 		}
 		if deps.StoredBlocks != nil {
 			deps.StoredBlocks.UnmarkStored(hash)

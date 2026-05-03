@@ -1,14 +1,10 @@
 package serialstore
 
 import (
-	"strings"
+	fetchstore "scanner_eth/fetch/store"
+	"scanner_eth/util"
 	"sync"
 )
-
-type StoredState interface {
-	IsStored(string) bool
-	MarkStored(string)
-}
 
 type InflightState struct {
 	mu     sync.Mutex
@@ -22,7 +18,7 @@ func NewInflightState() InflightState {
 }
 
 func (s *InflightState) Has(hash string) bool {
-	hash = normalizeHash(hash)
+	hash = util.NormalizeHash(hash)
 	if hash == "" {
 		return false
 	}
@@ -33,17 +29,14 @@ func (s *InflightState) Has(hash string) bool {
 	return exists
 }
 
-func (s *InflightState) TryStart(hash string, storedState StoredState) bool {
-	hash = normalizeHash(hash)
+func (s *InflightState) TryStart(hash string, storedState *fetchstore.StoredBlockState) bool {
+	hash = util.NormalizeHash(hash)
 	if hash == "" {
 		return false
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.hashes == nil {
-		s.hashes = make(map[string]struct{})
-	}
 	if _, exists := s.hashes[hash]; exists {
 		return false
 	}
@@ -55,7 +48,7 @@ func (s *InflightState) TryStart(hash string, storedState StoredState) bool {
 }
 
 func (s *InflightState) Finish(hash string) {
-	hash = normalizeHash(hash)
+	hash = util.NormalizeHash(hash)
 	if hash == "" {
 		return
 	}
@@ -70,11 +63,4 @@ func (s *InflightState) Count() int {
 	n := len(s.hashes)
 	s.mu.Unlock()
 	return n
-}
-
-func normalizeHash(hash string) string {
-	if hash == "" {
-		return ""
-	}
-	return strings.ToLower(hash)
 }

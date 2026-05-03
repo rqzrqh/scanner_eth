@@ -12,8 +12,8 @@ import (
 	"gorm.io/gorm"
 )
 
-func newRuntimeDbOperator(db *gorm.DB, chainId int64, irreversibleBlocks int) DbOperator {
-	return fetchstore.NewFullBlockDbOperator(db, chainId, irreversibleBlocks)
+func newRuntimeDbOperator(db *gorm.DB, chainId int64, irreversibleBlocks int) *fetchstore.Operator {
+	return fetchstore.NewDbOperator(db, chainId, irreversibleBlocks)
 }
 
 func loadTestBlockWindowMaybeError(t *testing.T, fm *FetchManager, ctx context.Context) ([]model.Block, error) {

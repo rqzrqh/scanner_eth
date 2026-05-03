@@ -94,7 +94,7 @@ func NewBlockTree(irreversibleCount int) *BlockTree {
 // Returns the list of LinkedNodes inserted during this call (the block itself
 // plus any cascadingly resolved orphans). Returns nil if the block already
 // existed or was buffered as an orphan.
-func (t *BlockTree) Insert(height uint64, key, parentKey Key, weight uint64, irreversible *IrreversibleNode) []*LinkedNode {
+func (t *BlockTree) Insert(height uint64, key, parentKey Key, weight uint64) []*LinkedNode {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -114,7 +114,7 @@ func (t *BlockTree) Insert(height uint64, key, parentKey Key, weight uint64, irr
 		if t.root == nil {
 			t.root = &Node{Height: height, Key: key, ParentKey: parentKey, Weight: weight}
 		}
-		inserted := t.internalInsert(height, key, parentKey, weight, irreversible)
+		inserted := t.internalInsert(height, key, parentKey, weight)
 		result := make([]*LinkedNode, 0, len(inserted))
 		for _, nv := range inserted {
 			result = append(result, cloneLinkedNode(nv))
@@ -133,8 +133,8 @@ func (t *BlockTree) Insert(height uint64, key, parentKey Key, weight uint64, irr
 
 // internalInsert links the block into the tree and resolves orphans waiting
 // on this block. Does NOT call prune.
-func (t *BlockTree) internalInsert(height uint64, key, parentKey Key, weight uint64, irreversible *IrreversibleNode) []*LinkedNode {
-	perfectIrr := t.computeIrreversible(parentKey, irreversible)
+func (t *BlockTree) internalInsert(height uint64, key, parentKey Key, weight uint64) []*LinkedNode {
+	perfectIrr := t.computeIrreversible(parentKey)
 
 	nv := &LinkedNode{
 		Node:         Node{Height: height, Key: key, ParentKey: parentKey, Weight: weight},
@@ -165,13 +165,10 @@ func (t *BlockTree) internalInsert(height uint64, key, parentKey Key, weight uin
 //
 // If the required ancestor depth is not available, returns the first
 // (oldest reachable) node on this path.
-func (t *BlockTree) computeIrreversible(parentKey Key, irreversible *IrreversibleNode) IrreversibleNode {
+func (t *BlockTree) computeIrreversible(parentKey Key) IrreversibleNode {
 	if parentKey == "" {
 		if t.root != nil {
 			return IrreversibleNode{Height: t.root.Height, Key: t.root.Key}
-		}
-		if irreversible != nil {
-			return IrreversibleNode{Height: irreversible.Height, Key: irreversible.Key}
 		}
 		return IrreversibleNode{}
 	}
@@ -193,10 +190,6 @@ func (t *BlockTree) computeIrreversible(parentKey Key, irreversible *Irreversibl
 		return IrreversibleNode{Height: first.Height, Key: first.Key}
 	}
 
-	if irreversible != nil {
-		return IrreversibleNode{Height: irreversible.Height, Key: irreversible.Key}
-	}
-
 	if t.root != nil {
 		return IrreversibleNode{Height: t.root.Height, Key: t.root.Key}
 	}
@@ -216,7 +209,7 @@ func (t *BlockTree) checkOrphan(key Key) []*LinkedNode {
 	var result []*LinkedNode
 	for _, v := range siblings {
 		delete(t.orphanKeySet, v.Key)
-		result = append(result, t.internalInsert(v.Height, v.Key, v.ParentKey, v.Weight, nil)...)
+		result = append(result, t.internalInsert(v.Height, v.Key, v.ParentKey, v.Weight)...)
 	}
 	return result
 }
@@ -266,53 +259,22 @@ func (t *BlockTree) Prune(count uint64) []*LinkedNode {
 		return nil
 	}
 
-	// Choose the maximum possible new root height (to preserve as much as possible while pruning).
-	targetHeight := maxNewRootHeight
-
-	var prunedNodes []*LinkedNode
-
-	// Determine the main chain path from best leaf back to root.
-	mainChainPath := make(map[Key]bool)
-	current := bestNV
-	for current != nil {
-		mainChainPath[current.Key] = true
-		if current.ParentKey == "" {
-			break
-		}
-		if parent, ok := t.keyValue[current.ParentKey]; ok {
-			current = parent
-		} else {
-			break
-		}
+	newRoot := t.selectPruneRoot(bestNV, minNewRootHeight, maxNewRootHeight)
+	if newRoot == nil {
+		return nil
 	}
 
-	// Collect nodes to delete:
-	// 1. All nodes with height < targetHeight
-	// 2. Nodes off the main chain whose ancestors were deleted (branch nodes)
-	toDelete := make(map[Key]bool)
+	retained := make(map[Key]struct{})
+	t.collectDescendants(newRoot.Key, retained)
 
-	// First pass: mark all nodes with height < target height.
-	for k, nv := range t.keyValue {
-		if nv != nil && nv.Height < targetHeight {
+	var prunedNodes []*LinkedNode
+	toDelete := make(map[Key]bool)
+	for k := range t.keyValue {
+		if _, keep := retained[k]; !keep {
 			toDelete[k] = true
 		}
 	}
 
-	// Second pass: mark branch nodes (off main chain) whose parent is deleted.
-	changed := true
-	for changed {
-		changed = false
-		for k, nv := range t.keyValue {
-			if !toDelete[k] && nv != nil && nv.ParentKey != "" {
-				if toDelete[nv.ParentKey] && !mainChainPath[k] {
-					toDelete[k] = true
-					changed = true
-				}
-			}
-		}
-	}
-
-	// Collect and delete marked nodes.
 	for k := range toDelete {
 		if nv, ok := t.keyValue[k]; ok && nv != nil {
 			prunedNodes = append(prunedNodes, cloneLinkedNode(nv))
@@ -329,23 +291,50 @@ func (t *BlockTree) Prune(count uint64) []*LinkedNode {
 				delete(t.parentToChild[parentKey], childKey)
 			}
 		}
-	}
-
-	// Find the new root: the lowest remaining linked node.
-	var newRoot *LinkedNode
-	for _, nv := range t.keyValue {
-		if nv != nil && (newRoot == nil || nv.Height < newRoot.Height) {
-			newRoot = nv
+		if len(t.parentToChild[parentKey]) == 0 {
+			delete(t.parentToChild, parentKey)
 		}
 	}
 
-	if newRoot != nil {
-		newRootValue := newRoot.Node
-		t.root = &newRootValue
-		prunedNodes = append(prunedNodes, t.pruneOrphansAtOrBelow(t.root.Height)...)
-	}
+	newRootValue := newRoot.Node
+	t.root = &newRootValue
+	prunedNodes = append(prunedNodes, t.pruneOrphansAtOrBelow(t.root.Height)...)
 
 	return prunedNodes
+}
+
+func (t *BlockTree) selectPruneRoot(bestNV *LinkedNode, minHeight, maxHeight uint64) *LinkedNode {
+	for current := bestNV; current != nil; {
+		if current.Height <= maxHeight {
+			if current.Height < minHeight {
+				return nil
+			}
+			return current
+		}
+		if current.ParentKey == "" {
+			return nil
+		}
+		parent, ok := t.keyValue[current.ParentKey]
+		if !ok {
+			return nil
+		}
+		current = parent
+	}
+	return nil
+}
+
+func (t *BlockTree) collectDescendants(key Key, retained map[Key]struct{}) {
+	if _, seen := retained[key]; seen {
+		return
+	}
+	if t.keyValue[key] == nil {
+		return
+	}
+
+	retained[key] = struct{}{}
+	for childKey := range t.parentToChild[key] {
+		t.collectDescendants(childKey, retained)
+	}
 }
 
 // pruneOrphansAtOrBelow removes orphan nodes whose height is less than or

@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	defaultScannerMessageRedisBatch  = 64
+	defaultScannerMessageRedisBatch = 64
 	redisMessageFlushTickerInterval = 200 * time.Millisecond
 )
 

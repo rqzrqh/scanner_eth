@@ -2,6 +2,7 @@ package fetch
 
 import (
 	"scanner_eth/blocktree"
+	fetcherpkg "scanner_eth/fetch/fetcher"
 	headernotify "scanner_eth/fetch/header_notify"
 	fetchstore "scanner_eth/fetch/store"
 	"testing"
@@ -10,39 +11,54 @@ import (
 
 	nodepkg "scanner_eth/fetch/node"
 	fetchscan "scanner_eth/fetch/scan"
-	fetchtask "scanner_eth/fetch/task"
+	fetchtaskprocess "scanner_eth/fetch/task_process"
+	fetchtask "scanner_eth/fetch/taskpool"
 )
 
 func newTestFetchManager(t *testing.T, irreversible int) *FetchManager {
 	t.Helper()
-	stored := fetchstore.NewStoredBlockState()
 	fm := &FetchManager{
-		blockTree:          blocktree.NewBlockTree(irreversible),
-		pendingBlockStore:  fetchstore.NewPendingBlockStore(),
-		storedBlocks:       &stored,
+		runtime:            newFetchRuntimeState(irreversible),
 		irreversibleBlocks: irreversible,
 		scanConfig: fetchscan.Config{
 			StartHeight: 1,
 		},
-		blockFetcher: &mockBlockFetcher{},
-		dbOperator:   &mockDbOperator{},
+		dbOperator: &mockDbOperator{},
+		fetcher:    fetcherpkg.NewMockFetcher(nil, nil, nil),
 	}
 	fm.nodeManager = nodepkg.NewNodeManager([]*ethclient.Client{nil}, 0)
+	rt := fm.currentRuntime()
 	flow := fetchscan.NewFlow(fm.scanFlowRuntimeDeps, fetchscan.Config{StartHeight: fm.scanConfig.StartHeight})
-	fm.scanFlow = flow
-	fm.scanWorker = fm.newScanWorker(flow)
-	attachTestRuntime(fm)
+	rt.scanFlow = flow
+	rt.scanWorker = fm.newScanWorker(flow)
 	pool := fetchtask.NewTaskPoolWithStop(
 		fetchtask.TaskPoolOptions{WorkerCount: 1, HighQueueSize: 64, NormalQueueSize: 64, MaxRetry: 2},
 		1,
 		func(task *fetchtask.SyncTask, stopCh <-chan struct{}) bool {
-			return fetchscan.HandleTaskPoolTask(flow, task, stopCh)
+			taskRuntime := newTaskProcessRuntimeDeps(
+				rt.blockTree,
+				rt.stagingStore,
+				rt.taskPool,
+				fm.nodeManager,
+				fm.fetcher,
+			)
+			return fetchtask.DispatchSyncTask(
+				task,
+				stopCh,
+				func(hash string, stopCh <-chan struct{}) bool {
+					return fetchtaskprocess.HandleBodyTask(taskRuntime, hash, stopCh)
+				},
+				func(hash string) bool {
+					return fetchtaskprocess.HandleHeaderHashTask(taskRuntime, hash)
+				},
+				func(height uint64) bool {
+					return fetchtaskprocess.HandleHeaderHeightTask(taskRuntime, height)
+				},
+			)
 		},
 	)
-	fm.taskPool = &pool
-	attachTestRuntime(fm)
-	fm.storeWorker = fm.newStoreWorker()
-	attachTestRuntime(fm)
+	rt.taskPool = &pool
+	rt.storeWorker = fm.newStoreWorker()
 	flow.BindRuntimeDeps()
 	t.Cleanup(func() {
 		if scanWorker := fm.runtimeScanWorker(); scanWorker != nil {
@@ -61,24 +77,16 @@ func newTestFetchManager(t *testing.T, irreversible int) *FetchManager {
 	return fm
 }
 
-func attachTestRuntime(fm *FetchManager) {
+func mustTestRuntime(t *testing.T, fm *FetchManager) *fetchRuntimeState {
+	t.Helper()
 	if fm == nil {
-		return
+		t.Fatal("fetch manager is nil")
 	}
 	rt := fm.runtime
 	if rt == nil {
-		rt = &fetchRuntimeState{}
-		fm.runtime = rt
+		t.Fatal("runtime is nil")
 	}
-	rt.blockTree = fm.blockTree
-	rt.storedBlocks = fm.storedBlocks
-	rt.pendingBlockStore = fm.pendingBlockStore
-	rt.taskPool = fm.taskPool
-	rt.headerManager = fm.headerManager
-	rt.scanFlow = fm.scanFlow
-	rt.scanWorker = fm.scanWorker
-	rt.storeWorker = fm.storeWorker
-	fm.syncRuntimeFields()
+	return rt
 }
 
 func mustTestScanFlow(t *testing.T, fm *FetchManager) *fetchscan.Flow {
@@ -117,29 +125,68 @@ func mustTestHeaderManager(t *testing.T, fm *FetchManager) *headernotify.Manager
 	return headerManager
 }
 
-func mustTestPendingBlockStore(t *testing.T, fm *FetchManager) *fetchstore.PendingBlockStore {
+func mustTestStagingStore(t *testing.T, fm *FetchManager) *fetchstore.StagingStore {
 	t.Helper()
 	if fm == nil {
 		t.Fatal("fetch manager is nil")
 	}
-	pendingStore := fm.runtimePendingBlockStore()
-	if pendingStore == nil {
-		t.Fatal("pendingBlockStore is nil")
+	stagingStore := fm.runtimeStagingStore()
+	if stagingStore == nil {
+		t.Fatal("stagingStore is nil")
 	}
-	return pendingStore
+	return stagingStore
 }
 
-func getTestNodeBlockHeader(t *testing.T, fm *FetchManager, hash string) *BlockHeaderJson {
+func mustTestTaskPool(t *testing.T, fm *FetchManager) *fetchtask.Pool {
 	t.Helper()
-	return mustTestPendingBlockStore(t, fm).GetHeader(hash)
+	if fm == nil {
+		t.Fatal("fetch manager is nil")
+	}
+	taskPool := fm.runtimeTaskPool()
+	if taskPool == nil {
+		t.Fatal("taskPool is nil")
+	}
+	return taskPool
 }
 
-func setTestDbOperator(fm *FetchManager, op DbOperator) {
+func mustTestStoredBlocks(t *testing.T, fm *FetchManager) *fetchstore.StoredBlockState {
+	t.Helper()
+	if fm == nil {
+		t.Fatal("fetch manager is nil")
+	}
+	storedBlocks := fm.runtimeStoredBlocks()
+	if storedBlocks == nil {
+		t.Fatal("storedBlocks is nil")
+	}
+	return storedBlocks
+}
+
+func mustTestBlockTree(t *testing.T, fm *FetchManager) *blocktree.BlockTree {
+	t.Helper()
+	if fm == nil {
+		t.Fatal("fetch manager is nil")
+	}
+	blockTree := fm.runtimeBlockTree()
+	if blockTree == nil {
+		t.Fatal("blockTree is nil")
+	}
+	return blockTree
+}
+
+func getTestNodeBlockHeader(t *testing.T, fm *FetchManager, hash string) *fetcherpkg.BlockHeaderJson {
+	t.Helper()
+	return mustTestStagingStore(t, fm).GetPendingHeader(hash)
+}
+
+func setTestDbOperator(
+	fm *FetchManager,
+	dbOperator fetchstore.DBOperator,
+) {
 	if fm == nil {
 		return
 	}
-	fm.dbOperator = op
+	fm.dbOperator = dbOperator
 	if storeWorker := fm.runtimeStoreWorker(); storeWorker != nil {
-		storeWorker.SetDbOperator(op)
+		storeWorker.SetDBOperator(dbOperator)
 	}
 }

@@ -20,14 +20,12 @@ const (
 type HeaderNotifier struct {
 	id     int
 	client *ethclient.Client
-	remote *RemoteChain
 }
 
 func NewHeaderNotifier(id int, client *ethclient.Client) *HeaderNotifier {
 	return &HeaderNotifier{
 		id:     id,
 		client: client,
-		remote: NewRemoteChain(),
 	}
 }
 
@@ -101,16 +99,12 @@ RECONNECT:
 
 			height := header.Number.Uint64()
 			blockHash := header.Hash().Hex()
-			weight := uint64(0)
-
 			logrus.Debugf("header notifier new header. id:%d height:%v hash:%v", ds.id, height, blockHash)
 
-			ds.remote.Update(height, blockHash)
 			update := &RemoteChainUpdate{
 				NodeId:    ds.id,
 				Height:    height,
 				BlockHash: blockHash,
-				Weight:    weight,
 				Header:    toRemoteHeader(header),
 			}
 			select {
@@ -150,15 +144,10 @@ func (ds *HeaderNotifier) useHttp(ctx context.Context, out chan<- *RemoteChainUp
 
 		height := header.Number.Uint64()
 		blockHash := header.Hash().Hex()
-		weight := uint64(0)
-
-		ds.remote.Update(height, blockHash)
-
 		update := &RemoteChainUpdate{
 			NodeId:    ds.id,
 			Height:    height,
 			BlockHash: blockHash,
-			Weight:    weight,
 			Header:    toRemoteHeader(header),
 		}
 		select {

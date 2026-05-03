@@ -10,24 +10,28 @@ func TestFetchManagerRunStopNilSafe(t *testing.T) {
 	nilFM.Run(context.Background())
 
 	fm := newTestFetchManager(t, 2)
-	t.Cleanup(func() { fm.taskPool.Stop() })
+	taskPool := mustTestTaskPool(t, fm)
+	t.Cleanup(func() { taskPool.Stop() })
 
 	// No election set: Run should still be safe and return.
 	fm.Run(context.Background())
 	fm.Stop()
+	if fm.currentRuntime() != nil {
+		t.Fatal("Stop should release runtime state")
+	}
 }
 
 func TestFetchManagerOnLostLeaderAndHelpers(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
-	t.Cleanup(func() { fm.taskPool.Stop() })
+	taskPool := mustTestTaskPool(t, fm)
+	t.Cleanup(func() { taskPool.Stop() })
 
-	fm.scanWorker = fm.newScanWorker(mustTestScanFlow(t, fm))
-	attachTestRuntime(fm)
+	mustTestRuntime(t, fm).scanWorker = fm.newScanWorker(mustTestScanFlow(t, fm))
 	mustTestScanWorker(t, fm).SetEnabled(true)
-	if !fm.taskPool.TryStartHeaderHeightSync(10) {
+	if !taskPool.TryStartHeaderHeightSync(10) {
 		t.Fatal("failed to seed height syncing state")
 	}
-	if !fm.taskPool.TryStartHeaderHashSync("0x10") {
+	if !taskPool.TryStartHeaderHashSync("0x10") {
 		t.Fatal("failed to seed hash syncing state")
 	}
 
@@ -43,8 +47,24 @@ func TestFetchManagerOnLostLeaderAndHelpers(t *testing.T) {
 		t.Fatal("scan worker should be cleared after onLostLeader")
 	}
 
-	heightCount, hashCount := fm.taskPool.HeaderSyncCounts()
-	if heightCount != 0 || hashCount != 0 {
-		t.Fatalf("header syncing state should be reset, got heights=%d hashes=%d", heightCount, hashCount)
+	if fm.runtimeTaskPool() != nil {
+		t.Fatal("task pool should be cleared after onLostLeader")
+	}
+}
+
+func TestFetchManagerOnBecameLeaderReleasesRuntimeOnFailure(t *testing.T) {
+	fm := newTestFetchManager(t, 2)
+	taskPool := mustTestTaskPool(t, fm)
+	t.Cleanup(func() { taskPool.Stop() })
+
+	mustTestStoredBlocks(t, fm).MarkStored("stale")
+	taskPool.AddTask("stale")
+	setTestDbOperator(fm, nil)
+
+	if err := fm.onBecameLeader(context.Background()); err == nil {
+		t.Fatal("expected onBecameLeader to fail when db operator is nil")
+	}
+	if fm.currentRuntime() != nil {
+		t.Fatal("runtime should be released when onBecameLeader fails")
 	}
 }

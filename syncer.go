@@ -10,7 +10,7 @@ import (
 	fetchconvert "scanner_eth/fetch/convert"
 	fetcherpkg "scanner_eth/fetch/fetcher"
 	fetchstore "scanner_eth/fetch/store"
-	fetchtask "scanner_eth/fetch/task"
+	fetchtask "scanner_eth/fetch/taskpool"
 	"scanner_eth/filter"
 
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -58,8 +58,8 @@ func newFetchManager(conf *config.Config, clients []*ethclient.Client, db *gorm.
 		taskPoolOptions.StatsLogInterval,
 	)
 
-	dbOperator := fetchstore.NewFullBlockDbOperator(db, conf.Chain.ChainId, reversibleBlocks)
-	blockFetcher := fetcherpkg.NewBlockFetcher(db)
+	dbOperator := fetchstore.NewDbOperator(db, conf.Chain.ChainId, reversibleBlocks)
+	fetcherImpl := fetcherpkg.NewFetcherImpl(db)
 
 	fm := fetch.NewFetchManager(
 		conf.Chain.ChainName,
@@ -73,7 +73,7 @@ func newFetchManager(conf *config.Config, clients []*ethclient.Client, db *gorm.
 		db,
 		conf.Chain.ChainId,
 		dbOperator,
-		blockFetcher,
+		fetcherImpl,
 	)
 	if conf.Metrics.Enable {
 		fm.EnableTaskPoolMetrics(fmt.Sprintf("fetch_task_pool_%s", conf.Chain.ChainName))

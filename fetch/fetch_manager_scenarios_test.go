@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"scanner_eth/data"
 	fetcherpkg "scanner_eth/fetch/fetcher"
+	nodepkg "scanner_eth/fetch/node"
+	fetchstore "scanner_eth/fetch/store"
+	"scanner_eth/util"
 	"sync"
 	"testing"
 	"time"
@@ -14,11 +17,13 @@ func TestContinuousGeneratedScenarios(t *testing.T) {
 	fm := newTestFetchManager(t, 6)
 	setTestScanStartHeight(fm, 1)
 	setNodeLatestHeight(fm, 1)
-	t.Cleanup(func() { fm.taskPool.Stop() })
+	taskPool := mustTestTaskPool(t, fm)
+	blockTree := mustTestBlockTree(t, fm)
+	t.Cleanup(func() { taskPool.Stop() })
 
 	var mu sync.RWMutex
-	headersByHeight := make(map[uint64]*BlockHeaderJson)
-	headersByHash := make(map[string]*BlockHeaderJson)
+	headersByHeight := make(map[uint64]*fetcherpkg.BlockHeaderJson)
+	headersByHash := make(map[string]*fetcherpkg.BlockHeaderJson)
 	fullByHash := make(map[string]*data.FullBlock)
 	bodyFailRemain := make(map[string]int)
 	storedHashes := make(map[string]struct{})
@@ -34,8 +39,8 @@ func TestContinuousGeneratedScenarios(t *testing.T) {
 		mu.Unlock()
 	}
 
-	setTestBlockFetcher(fm, &mockBlockFetcher{
-		fetchByHeightFn: func(_ context.Context, nodeOp fetcherpkg.NodeOperator, taskID int, height uint64) *BlockHeaderJson {
+	setTestFetcher(fm, fetcherpkg.NewMockFetcher(
+		func(_ context.Context, _ nodepkg.NodeOperator, _ int, height uint64) *fetcherpkg.BlockHeaderJson {
 			mu.RLock()
 			defer mu.RUnlock()
 			if h, ok := headersByHeight[height]; ok {
@@ -43,7 +48,7 @@ func TestContinuousGeneratedScenarios(t *testing.T) {
 			}
 			return nil
 		},
-		fetchByHashFn: func(_ context.Context, nodeOp fetcherpkg.NodeOperator, taskID int, hash string) *BlockHeaderJson {
+		func(_ context.Context, _ nodepkg.NodeOperator, _ int, hash string) *fetcherpkg.BlockHeaderJson {
 			mu.RLock()
 			defer mu.RUnlock()
 			if h, ok := headersByHash[hash]; ok {
@@ -51,11 +56,11 @@ func TestContinuousGeneratedScenarios(t *testing.T) {
 			}
 			return nil
 		},
-		fetchFullFn: func(_ context.Context, nodeOp fetcherpkg.NodeOperator, taskID int, header *BlockHeaderJson) *data.FullBlock {
+		func(_ context.Context, _ nodepkg.NodeOperator, _ int, header *fetcherpkg.BlockHeaderJson) *data.FullBlock {
 			if header == nil {
 				return nil
 			}
-			hash := normalizeHash(header.Hash)
+			hash := util.NormalizeHash(header.Hash)
 			mu.Lock()
 			defer mu.Unlock()
 			if remain, ok := bodyFailRemain[hash]; ok && remain > 0 {
@@ -64,20 +69,21 @@ func TestContinuousGeneratedScenarios(t *testing.T) {
 			}
 			return fullByHash[hash]
 		},
-	})
+	))
 
-	setTestDbOperator(fm, &mockDbOperator{
-		storeFn: func(_ context.Context, blockData *EventBlockData) error {
+	dbOp := &mockDbOperator{
+		storeFn: func(_ context.Context, blockData *fetchstore.EventBlockData) error {
 			if blockData == nil || blockData.StorageFullBlock == nil {
 				return nil
 			}
-			hash := normalizeHash(blockData.StorageFullBlock.Block.Hash)
+			hash := util.NormalizeHash(blockData.StorageFullBlock.Block.Hash)
 			mu.Lock()
 			storedHashes[hash] = struct{}{}
 			mu.Unlock()
 			return nil
 		},
-	})
+	}
+	setTestDbOperator(fm, dbOp)
 
 	// Phase 1: linear chain growth.
 	prev := ""
@@ -95,14 +101,14 @@ func TestContinuousGeneratedScenarios(t *testing.T) {
 	mustTestScanWorker(t, fm).SetEnabled(true)
 	mustTestScanFlow(t, fm).RunScanCycle(context.Background())
 	time.Sleep(50 * time.Millisecond)
-	if fm.blockTree.Get("0x10") != nil {
+	if blockTree.Get("0x10") != nil {
 		t.Fatalf("expected missing parent to be absent before parent header arrives")
 	}
 
 	addBlock(16, "0x10", prev, true)
 	setNodeLatestHeight(fm, 17)
 	runScanAndWait(t, fm)
-	if fm.blockTree.Get("0x10") == nil || fm.blockTree.Get("0x11") == nil {
+	if blockTree.Get("0x10") == nil || blockTree.Get("0x11") == nil {
 		t.Fatalf("expected orphan parent/child to be linked after parent arrives")
 	}
 	prev = "0x11"
@@ -124,7 +130,7 @@ func TestContinuousGeneratedScenarios(t *testing.T) {
 	deadline := time.Now().Add(4 * time.Second)
 	for time.Now().Before(deadline) {
 		runScanAndWait(t, fm)
-		_, end, ok := fm.blockTree.HeightRange()
+		_, end, ok := blockTree.HeightRange()
 		mu.RLock()
 		storedCount := len(storedHashes)
 		mu.RUnlock()
@@ -133,7 +139,7 @@ func TestContinuousGeneratedScenarios(t *testing.T) {
 		}
 	}
 
-	_, end, ok := fm.blockTree.HeightRange()
+	_, end, ok := blockTree.HeightRange()
 	mu.RLock()
 	storedCount := len(storedHashes)
 	mu.RUnlock()

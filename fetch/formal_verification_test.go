@@ -7,22 +7,23 @@ import (
 	"testing"
 )
 
-// TestFormalRuntimePointerIdentity verifies §2.2: runtime accessors return the same *StoredBlockState /
-// *pool / pending block store / block tree pointers as flattened FetchManager fields (test harness + leader runtime wiring).
+// TestFormalRuntimePointerIdentity verifies §2.2: runtime accessors must return the same pointers
+// stored in the active runtime state.
 func TestFormalRuntimePointerIdentity(t *testing.T) {
 	t.Parallel()
 	fm := newTestFetchManager(t, 2)
-	if got, want := fm.runtimeStoredBlocks(), fm.storedBlocks; got != want {
-		t.Fatalf("runtimeStoredBlocks %p != fm.storedBlocks %p", got, want)
+	rt := mustTestRuntime(t, fm)
+	if got, want := fm.runtimeStoredBlocks(), rt.storedBlocks; got != want {
+		t.Fatalf("runtimeStoredBlocks %p != runtime.storedBlocks %p", got, want)
 	}
-	if got, want := fm.runtimeTaskPool(), fm.taskPool; got != want {
-		t.Fatalf("runtimeTaskPool %p != fm.taskPool %p", got, want)
+	if got, want := fm.runtimeTaskPool(), rt.taskPool; got != want {
+		t.Fatalf("runtimeTaskPool %p != runtime.taskPool %p", got, want)
 	}
-	if got, want := fm.runtimePendingBlockStore(), fm.pendingBlockStore; got != want {
-		t.Fatalf("runtimePendingBlockStore %p != fm.pendingBlockStore %p", got, want)
+	if got, want := fm.runtimeStagingStore(), rt.stagingStore; got != want {
+		t.Fatalf("runtimeStagingStore %p != runtime.stagingStore %p", got, want)
 	}
-	if got, want := fm.runtimeBlockTree(), fm.blockTree; got != want {
-		t.Fatalf("runtimeBlockTree %p != fm.blockTree %p", got, want)
+	if got, want := fm.runtimeBlockTree(), rt.blockTree; got != want {
+		t.Fatalf("runtimeBlockTree %p != runtime.blockTree %p", got, want)
 	}
 }
 
@@ -30,17 +31,18 @@ func TestFormalRuntimePointerIdentity(t *testing.T) {
 func TestFormalCapturePruneSnapshot(t *testing.T) {
 	t.Parallel()
 	fm := newTestFetchManager(t, 2)
-	fm.blockTree.Insert(1, "a", "", 1, nil)
-	fm.blockTree.Insert(2, "b", "a", 1, nil)
-	fm.storedBlocks.MarkStored("a")
+	blockTree := mustTestBlockTree(t, fm)
+	storedBlocks := mustTestStoredBlocks(t, fm)
+	blockTree.Insert(1, "a", "", 1)
+	blockTree.Insert(2, "b", "a", 1)
+	storedBlocks.MarkStored("a")
 
 	pruneDeps := fm.scanFlowRuntimeDeps().PruneRuntime
 	directDeps := fetchscan.PruneRuntimeDeps{
-		BlockTree:         fm.runtimeBlockTree(),
-		PendingBlockStore: fm.runtimePendingBlockStore(),
-		StoredBlocks:      fm.runtimeStoredBlocks(),
-		TaskPool:          fm.runtimeTaskPool(),
-		NormalizeHash:     normalizeHash,
+		BlockTree:    fm.runtimeBlockTree(),
+		StagingStore: fm.runtimeStagingStore(),
+		StoredBlocks: fm.runtimeStoredBlocks(),
+		TaskPool:     fm.runtimeTaskPool(),
 	}
 	snapViaFM := pruneDeps.CaptureStateSnapshot()
 	snapViaDeps := directDeps.CaptureStateSnapshot()
@@ -69,11 +71,10 @@ func TestFormalScanFlowPruneRuntimeIdentity(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
 	scanDeps := fm.scanFlowRuntimeDeps()
 	pruneDeps := fetchscan.PruneRuntimeDeps{
-		BlockTree:         fm.runtimeBlockTree(),
-		PendingBlockStore: fm.runtimePendingBlockStore(),
-		StoredBlocks:      fm.runtimeStoredBlocks(),
-		TaskPool:          fm.runtimeTaskPool(),
-		NormalizeHash:     normalizeHash,
+		BlockTree:    fm.runtimeBlockTree(),
+		StagingStore: fm.runtimeStagingStore(),
+		StoredBlocks: fm.runtimeStoredBlocks(),
+		TaskPool:     fm.runtimeTaskPool(),
 	}
 
 	if scanDeps.PruneRuntime.BlockTree != pruneDeps.BlockTree {
@@ -85,7 +86,7 @@ func TestFormalScanFlowPruneRuntimeIdentity(t *testing.T) {
 	if scanDeps.PruneRuntime.TaskPool != pruneDeps.TaskPool {
 		t.Fatal("scan flow prune runtime must share taskPool pointer with runtime deps")
 	}
-	if scanDeps.PruneRuntime.PendingBlockStore != pruneDeps.PendingBlockStore {
-		t.Fatal("scan flow prune runtime must share pendingBlockStore pointer with runtime deps")
+	if scanDeps.PruneRuntime.StagingStore != pruneDeps.StagingStore {
+		t.Fatal("scan flow prune runtime must share stagingStore pointer with runtime deps")
 	}
 }

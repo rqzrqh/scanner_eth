@@ -9,4 +9,24 @@ go build ./...
 go test ./... -count=1
 ```
 
-Documentation: [FormalVerification.md](FormalVerification.md) (invariants & test commands), [BlockTree.md](BlockTree.md) (block tree API), [doc/design.md](doc/design.md) (`fetch/` package design), [doc/README.md](doc/README.md) (index). Latest coverage: [doc/test_report_2026-04-23.md](doc/test_report_2026-04-23.md); older snapshot: [doc/test_report_2026-04-13.md](doc/test_report_2026-04-13.md).
+## Documentation
+
+Core design and verification docs now live under `doc/`:
+
+| Document | Description |
+|----------|-------------|
+| [doc/FormalVerification.md](doc/FormalVerification.md) | Global state model \(S=(T,P,D)\), invariants, audit checklist, and formal/regression test commands |
+| [doc/BlockTree.md](doc/BlockTree.md) | `blocktree` package structure, API, branch/prune behavior, and scanner integration |
+| [doc/design.md](doc/design.md) | `fetch/` package design, runtime wiring, sequence diagrams, and concurrency model |
+
+Quick ownership shortcut:
+
+- `scan`: derives sync targets from `BlockTree`, backfills missing-body fetch work, builds low-to-high branches, and submits them for persistence
+- `task_process`: fetches headers/full blocks, updates `StagingStore`, and can trigger body-fetch work after header insertion
+- `serial_store`: serializes branch traversal and DB persistence only; it does not own task-pool orchestration
+
+## Branch Persistence Contract
+
+- `blocktree.Branches()` exposes each branch in leaf-to-root order; `scan` reverses that into low-to-high branch payloads.
+- `scan` is responsible for branch materialization and missing-body task backfill on the fetch side; it then hands complete branch payloads to `fetch/serial_store`.
+- `fetch/serial_store` is only responsible for serialized branch traversal and DB persistence. It does not own task-pool orchestration.

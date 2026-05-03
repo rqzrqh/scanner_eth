@@ -1,0 +1,26 @@
+---
+description: Enforce module ownership and dependency boundaries across the repository
+alwaysApply: true
+---
+
+# Module Ownership And Boundaries
+
+For any module in this repository:
+
+- Define interfaces, protocol types, and shared contracts in the module that owns that capability.
+- Do not define a consumer-local wrapper type or interface just to re-express an existing dependency boundary.
+- Keep orchestration/runtime modules focused on coordination, not on redesigning contracts owned by other modules.
+- Reuse concrete implementations or exported interfaces from the owning module instead of redeclaring them elsewhere.
+
+Preferred direction:
+
+- If an abstraction belongs to a shared capability, add or extend it in the owning module.
+- If an interface belongs to another module, move it to that module instead of defining it in a consumer package.
+- Do not redeclare the same boundary in feature modules such as runtime, scan, task, manager, or test helper packages.
+
+Examples:
+
+- Bad: add a package-local `Fetcher` type or local fetcher interface in a feature module when the shared boundary already belongs to `fetch/fetcher/`.
+- Bad: define `NodeOperator` in a consumer package when it is owned by `fetch/node/`.
+- Good: accept `fetcherpkg.RuntimeFetcher` from `fetch/fetcher/` when the fetch capability belongs there.
+- Good: keep node-owned contracts such as `NodeOperator` under `fetch/node/`.

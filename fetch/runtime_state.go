@@ -2,32 +2,70 @@ package fetch
 
 import (
 	"scanner_eth/blocktree"
+	fetcherpkg "scanner_eth/fetch/fetcher"
 	headernotify "scanner_eth/fetch/header_notify"
+	nodepkg "scanner_eth/fetch/node"
 	fetchscan "scanner_eth/fetch/scan"
 	fetchserialstore "scanner_eth/fetch/serial_store"
 	fetchstore "scanner_eth/fetch/store"
-	fetchtask "scanner_eth/fetch/task"
+	fetchtaskprocess "scanner_eth/fetch/task_process"
+	fetchtask "scanner_eth/fetch/taskpool"
 )
 
 type fetchRuntimeState struct {
-	blockTree         *blocktree.BlockTree
-	storedBlocks      *fetchstore.StoredBlockState
-	pendingBlockStore *fetchstore.PendingBlockStore
-	taskPool          *fetchtask.Pool
-	scanFlow          *fetchscan.Flow
-	headerManager     *headernotify.Manager
-	scanWorker        *fetchscan.Worker
-	storeWorker       *fetchserialstore.Worker
+	blockTree     *blocktree.BlockTree
+	storedBlocks  *fetchstore.StoredBlockState
+	stagingStore  *fetchstore.StagingStore
+	taskPool      *fetchtask.Pool
+	scanFlow      *fetchscan.Flow
+	headerManager *headernotify.Manager
+	scanWorker    *fetchscan.Worker
+	storeWorker   *fetchserialstore.Worker
+}
+
+func newTaskProcessRuntimeDeps(
+	blockTree *blocktree.BlockTree,
+	stagingStore *fetchstore.StagingStore,
+	taskPool *fetchtask.Pool,
+	nodeManager *nodepkg.NodeManager,
+	fetcher fetcherpkg.Fetcher,
+) fetchtaskprocess.RuntimeDeps {
+	var tryClaimHeaderHeight func(uint64) bool
+	var releaseHeaderHeight func(uint64)
+	var tryClaimHeaderHash func(string) bool
+	var releaseHeaderHash func(string)
+	if taskPool != nil {
+		tryClaimHeaderHeight = taskPool.TryStartHeaderHeightSync
+		releaseHeaderHeight = taskPool.FinishHeaderHeightSync
+		tryClaimHeaderHash = taskPool.TryStartHeaderHashSync
+		releaseHeaderHash = taskPool.FinishHeaderHashSync
+	}
+	return fetchtaskprocess.NewRuntimeDeps(
+		blockTree,
+		stagingStore,
+		nodeManager,
+		fetcher,
+		func(hash string) {
+			if taskPool == nil {
+				return
+			}
+			taskPool.EnqueueTaskWithPriority(hash, fetchtask.TaskPriorityHigh)
+		},
+		tryClaimHeaderHeight,
+		releaseHeaderHeight,
+		tryClaimHeaderHash,
+		releaseHeaderHash,
+	)
 }
 
 func newFetchRuntimeState(irreversibleBlocks int) *fetchRuntimeState {
 	stored := fetchstore.NewStoredBlockState()
 	taskPoolState := fetchtask.Pool{}
 	return &fetchRuntimeState{
-		blockTree:         blocktree.NewBlockTree(irreversibleBlocks),
-		storedBlocks:      &stored,
-		pendingBlockStore: fetchstore.NewPendingBlockStore(),
-		taskPool:          &taskPoolState,
+		blockTree:    blocktree.NewBlockTree(irreversibleBlocks),
+		storedBlocks: &stored,
+		stagingStore: fetchstore.NewStagingStore(),
+		taskPool:     &taskPoolState,
 	}
 }
 
@@ -35,47 +73,7 @@ func (fm *FetchManager) currentRuntime() *fetchRuntimeState {
 	if fm == nil {
 		return nil
 	}
-	if fm.runtime == nil {
-		return &fetchRuntimeState{
-			blockTree:         fm.blockTree,
-			storedBlocks:      fm.storedBlocks,
-			pendingBlockStore: fm.pendingBlockStore,
-			taskPool:          fm.taskPool,
-			scanFlow:          fm.scanFlow,
-			headerManager:     fm.headerManager,
-			scanWorker:        fm.scanWorker,
-			storeWorker:       fm.storeWorker,
-		}
-	}
 	return fm.runtime
-}
-
-func (fm *FetchManager) syncRuntimeFields() {
-	if fm == nil {
-		return
-	}
-	if fm.runtime == nil {
-		fm.blockTree = nil
-		sb := fetchstore.NewStoredBlockState()
-		fm.storedBlocks = &sb
-		fm.pendingBlockStore = nil
-		tp := fetchtask.Pool{}
-		fm.taskPool = &tp
-		fm.scanFlow = nil
-		fm.headerManager = nil
-		fm.scanWorker = nil
-		fm.storeWorker = nil
-		return
-	}
-	rt := fm.runtime
-	fm.blockTree = rt.blockTree
-	fm.storedBlocks = rt.storedBlocks
-	fm.pendingBlockStore = rt.pendingBlockStore
-	fm.taskPool = rt.taskPool
-	fm.scanFlow = rt.scanFlow
-	fm.headerManager = rt.headerManager
-	fm.scanWorker = rt.scanWorker
-	fm.storeWorker = rt.storeWorker
 }
 
 func (fm *FetchManager) runtimeTaskPool() *fetchtask.Pool {
@@ -102,12 +100,12 @@ func (fm *FetchManager) runtimeBlockTree() *blocktree.BlockTree {
 	return rt.blockTree
 }
 
-func (fm *FetchManager) runtimePendingBlockStore() *fetchstore.PendingBlockStore {
+func (fm *FetchManager) runtimeStagingStore() *fetchstore.StagingStore {
 	rt := fm.currentRuntime()
 	if rt == nil {
 		return nil
 	}
-	return rt.pendingBlockStore
+	return rt.stagingStore
 }
 
 func (fm *FetchManager) runtimeHeaderManager() *headernotify.Manager {
@@ -143,31 +141,40 @@ func (fm *FetchManager) runtimeStoreWorker() *fetchserialstore.Worker {
 }
 
 func (fm *FetchManager) createRuntimeState() {
-	fm.stopRuntimeWorkers()
+	fm.releaseLeaderRuntime(true)
 	fm.nodeManager.SetAllNodesIdle()
 	fm.nodeManager.ResetRemoteChainTips()
 	rt := newFetchRuntimeState(fm.irreversibleBlocks)
 	fm.runtime = rt
-	fm.syncRuntimeFields()
 	rt.scanFlow = fm.newScanFlow()
 	rt.scanWorker = fm.newScanWorker(rt.scanFlow)
-	fm.syncRuntimeFields()
 	rt.storeWorker = fm.newStoreWorker()
-	fm.syncRuntimeFields()
 	*rt.taskPool = fetchtask.NewTaskPoolWithStop(fm.taskPoolOptions, fm.nodeManager.NodeCount(), func(task *fetchtask.SyncTask, stopCh <-chan struct{}) bool {
-		return fetchscan.HandleTaskPoolTask(rt.scanFlow, task, stopCh)
+		taskRuntime := newTaskProcessRuntimeDeps(
+			rt.blockTree,
+			rt.stagingStore,
+			rt.taskPool,
+			fm.nodeManager,
+			fm.fetcher,
+		)
+		return fetchtask.DispatchSyncTask(
+			task,
+			stopCh,
+			func(hash string, stopCh <-chan struct{}) bool {
+				return fetchtaskprocess.HandleBodyTask(taskRuntime, hash, stopCh)
+			},
+			func(hash string) bool {
+				return fetchtaskprocess.HandleHeaderHashTask(taskRuntime, hash)
+			},
+			func(height uint64) bool {
+				return fetchtaskprocess.HandleHeaderHeightTask(taskRuntime, height)
+			},
+		)
 	})
-	fm.syncRuntimeFields()
-	if rt.scanFlow != nil {
-		rt.scanFlow.BindRuntimeDeps()
-	}
+	rt.scanFlow.BindRuntimeDeps()
 	rt.headerManager = fm.newHeaderManager()
-	fm.syncRuntimeFields()
-	fm.syncRuntimeFields()
 }
 
 func (fm *FetchManager) deleteRuntimeState() {
-	fm.stopRuntimeWorkers()
 	fm.runtime = nil
-	fm.syncRuntimeFields()
 }

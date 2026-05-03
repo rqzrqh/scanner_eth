@@ -21,6 +21,20 @@ func TestToBlockNumArg(t *testing.T) {
 	}
 }
 
+func TestNormalizeHash(t *testing.T) {
+	if got := NormalizeHash(""); got != "" {
+		t.Fatalf("expected empty string for empty hash, got %q", got)
+	}
+
+	if got := NormalizeHash("   "); got != "" {
+		t.Fatalf("expected empty string for blank hash, got %q", got)
+	}
+
+	if got := NormalizeHash("  0xAbC  "); got != "0xabc" {
+		t.Fatalf("expected trimmed lower-case hash, got %q", got)
+	}
+}
+
 func TestHitNoMoreRetryErrors(t *testing.T) {
 	if HitNoMoreRetryErrors(nil) {
 		t.Fatalf("nil error should not match no-more-retry list")

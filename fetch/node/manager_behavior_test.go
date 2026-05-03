@@ -22,13 +22,12 @@ func TestNodeStateGetChainInfoAndNodeManagerMethods(t *testing.T) {
 	}
 
 	// Make all nodes unavailable for target height.
-	nm.SetNodeNotReady(0)
-	nm.SetNodeNotReady(1)
+	nm.UpdateNodeState(0, 0, false)
+	nm.UpdateNodeState(1, 0, false)
 	if _, _, err := nm.GetBestNode(1); err == nil {
 		t.Fatal("expected no valid node error")
 	}
 
-	nm.SetNodeReady(1)
 	nm.UpdateNodeState(1, 5, true)
 	nm.UpdateNodeChainInfo(1, 20, "0x20")
 	id, _, err := nm.GetBestNode(15)
@@ -44,8 +43,6 @@ func TestNodeStateGetChainInfoAndNodeManagerMethods(t *testing.T) {
 	nm.UpdateNodeChainInfo(100, 1, "0x1")
 	nm.UpdateNodeState(-1, 1, true)
 	nm.UpdateNodeState(100, 1, true)
-	nm.SetNodeNotReady(-1)
-	nm.SetNodeNotReady(100)
-	nm.SetNodeReady(-1)
-	nm.SetNodeReady(100)
+	nm.UpdateNodeState(-1, 0, false)
+	nm.UpdateNodeState(100, 0, false)
 }

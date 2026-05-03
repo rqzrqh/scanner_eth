@@ -1,10 +1,13 @@
 package fetch
 
 import (
+	"context"
+	fetcherpkg "scanner_eth/fetch/fetcher"
 	headernotify "scanner_eth/fetch/header_notify"
 	fetchscan "scanner_eth/fetch/scan"
 	fetchserialstore "scanner_eth/fetch/serial_store"
 	fetchstore "scanner_eth/fetch/store"
+	"scanner_eth/util"
 )
 
 func (fm *FetchManager) newScanFlow() *fetchscan.Flow {
@@ -23,22 +26,46 @@ func (fm *FetchManager) newScanWorker(flow *fetchscan.Flow) *fetchscan.Worker {
 }
 
 func (fm *FetchManager) newHeaderManager() *headernotify.Manager {
-	if scanFlow := fm.runtimeScanFlow(); scanFlow != nil {
-		scanFlow.BindRuntimeDeps()
+	if fm == nil {
+		return headernotify.NewManager(nil, nil)
 	}
-	return headernotify.NewManager(fm.hns, func(update *headernotify.RemoteChainUpdate) {
+	rt := fm.currentRuntime()
+	if rt == nil {
+		return headernotify.NewManager(nil, nil)
+	}
+	rt.scanFlow.BindRuntimeDeps()
+	handleUpdate := func(update *headernotify.RemoteChainUpdate) {
 		if update == nil {
 			return
 		}
 		fm.nodeManager.UpdateNodeChainInfo(update.NodeId, update.Height, update.BlockHash)
 		runtime := fm.currentRuntime()
-		if runtime != nil && update.BlockHash != "" && runtime.scanFlow != nil && runtime.scanWorker != nil && runtime.scanWorker.IsEnabled() {
-			runtime.scanFlow.FetchAndInsertHeaderByHashImmediate(normalizeHash(update.BlockHash))
+		if runtime != nil && update.BlockHash != "" && runtime.scanWorker.IsEnabled() {
+			taskRuntime := newTaskProcessRuntimeDeps(
+				runtime.blockTree,
+				runtime.stagingStore,
+				runtime.taskPool,
+				fm.nodeManager,
+				fm.fetcher,
+			)
+			// newHeads provides enough header fields to extend the block tree,
+			// but it must not populate pending block data because tx hashes are absent.
+			if update.Header != nil {
+				taskRuntime.InsertTreeHeader(&fetcherpkg.BlockHeaderJson{
+					Number:     update.Header.Number,
+					Hash:       update.Header.Hash,
+					ParentHash: update.Header.ParentHash,
+					Difficulty: update.Header.Difficulty,
+				})
+			} else {
+				_ = taskRuntime.SyncHeaderByHash(context.Background(), util.NormalizeHash(update.BlockHash))
+			}
 		}
-		if runtime != nil && runtime.scanWorker != nil {
+		if runtime != nil {
 			runtime.scanWorker.Trigger()
 		}
-	})
+	}
+	return headernotify.NewManager(fm.nodeManager.EthClients(), handleUpdate)
 }
 
 func (fm *FetchManager) newStoreWorker() *fetchserialstore.Worker {
@@ -56,13 +83,7 @@ func (fm *FetchManager) stopRuntimeWorkers() {
 	if rt == nil {
 		return
 	}
-	if rt.headerManager != nil {
-		rt.headerManager.Stop()
-	}
-	if rt.scanWorker != nil {
-		rt.scanWorker.Stop()
-	}
-	if rt.storeWorker != nil {
-		rt.storeWorker.Stop()
-	}
+	rt.headerManager.Stop()
+	rt.scanWorker.Stop()
+	rt.storeWorker.Stop()
 }

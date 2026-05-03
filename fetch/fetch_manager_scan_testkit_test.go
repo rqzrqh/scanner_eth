@@ -8,8 +8,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/ethclient"
-
 	fetcherpkg "scanner_eth/fetch/fetcher"
+
 	nodepkg "scanner_eth/fetch/node"
 )
 
@@ -20,8 +20,9 @@ func attachTestHeaderManager(fm *FetchManager) {
 	if headerManager := fm.runtimeHeaderManager(); headerManager != nil {
 		headerManager.Stop()
 	}
-	fm.headerManager = fm.newHeaderManager()
-	attachTestRuntime(fm)
+	if rt := fm.currentRuntime(); rt != nil {
+		rt.headerManager = fm.newHeaderManager()
+	}
 }
 
 func runScanAndWait(t *testing.T, fm *FetchManager) {
@@ -56,9 +57,26 @@ func runScanAndWait(t *testing.T, fm *FetchManager) {
 		}
 
 	checkIdle:
-		heightCount, hashCount := taskPool.HeaderSyncCounts()
-		headerSyncing := heightCount > 0 || hashCount > 0
-		if !headerSyncing && !drainedTrigger {
+		taskSyncing := taskPool.TrackedCount() > 0
+		storeBusy := false
+		if storeWorker := fm.runtimeStoreWorker(); storeWorker != nil {
+			metrics := storeWorker.MetricsPayload()
+			if queue, ok := metrics["queue"].(map[string]uint64); ok && queue["pending"] > 0 {
+				storeBusy = true
+			}
+			if state, ok := metrics["state"].(map[string]uint64); ok && state["storing"] > 0 {
+				storeBusy = true
+			}
+		}
+		if !taskSyncing && !storeBusy && !drainedTrigger {
+			hasMoreWork := len(scanFlow.GetExpandTreeTargets()) > 0 ||
+				len(scanFlow.GetFillTreeTargets()) > 0
+			if hasMoreWork {
+				scanFlow.RunScanCycle(context.Background())
+				quietSince = time.Time{}
+				time.Sleep(5 * time.Millisecond)
+				continue
+			}
 			if quietSince.IsZero() {
 				quietSince = time.Now()
 			} else if time.Since(quietSince) >= 100*time.Millisecond {
@@ -73,8 +91,8 @@ func runScanAndWait(t *testing.T, fm *FetchManager) {
 	t.Fatalf("scan stages did not finish before timeout")
 }
 
-func makeHeader(height uint64, hash string, parent string) *BlockHeaderJson {
-	return &BlockHeaderJson{
+func makeHeader(height uint64, hash string, parent string) *fetcherpkg.BlockHeaderJson {
+	return &fetcherpkg.BlockHeaderJson{
 		Number:       hexutil.EncodeUint64(height),
 		Hash:         hash,
 		ParentHash:   parent,
@@ -119,9 +137,16 @@ func setTestScanStartHeight(fm *FetchManager, height uint64) {
 	}
 }
 
-func setTestBlockFetcher(fm *FetchManager, fetcher fetcherpkg.BlockFetcher) {
+func setTestFetcher(fm *FetchManager, fetcher fetcherpkg.Fetcher) {
 	if fm == nil {
 		return
 	}
-	fm.blockFetcher = fetcher
+	if fetcher == nil {
+		fm.fetcher = nil
+		return
+	}
+	fm.fetcher = fetcher
+	if scanFlow := fm.runtimeScanFlow(); scanFlow != nil {
+		scanFlow.BindRuntimeDeps()
+	}
 }

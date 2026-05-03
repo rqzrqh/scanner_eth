@@ -9,7 +9,7 @@ func TestStoredBlockStateMarkAndIsStored(t *testing.T) {
 		t.Fatal("expected hash not stored initially")
 	}
 
-	s.MarkStored("0xAa") // normalizeHash lower-cases and keeps canonical form.
+	s.MarkStored("0xAa") // util.NormalizeHash lower-cases and trims to canonical form.
 	if !s.IsStored("0xaa") {
 		t.Fatal("expected normalized hash to be stored")
 	}
@@ -54,12 +54,12 @@ func TestStoredBlockStateEmptyHashNoop(t *testing.T) {
 	s.UnmarkStored("")
 }
 
-func TestStoredBlockStateWhitespaceHashIsStoredAsIs(t *testing.T) {
+func TestStoredBlockStateWhitespaceHashIsRejected(t *testing.T) {
 	s := NewStoredBlockState()
 
 	s.MarkStored("   ")
-	if !s.IsStored("   ") {
-		t.Fatal("whitespace hash should be stored as-is under current normalizeHash behavior")
+	if s.IsStored("   ") {
+		t.Fatal("whitespace-only hash should be rejected after normalization")
 	}
 }
 

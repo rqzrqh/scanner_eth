@@ -5,7 +5,7 @@ import (
 	"scanner_eth/data"
 	fetchstore "scanner_eth/fetch/store"
 	"scanner_eth/model"
-	"strings"
+	"scanner_eth/util"
 )
 
 var (
@@ -23,13 +23,6 @@ var (
 	optionalContractErc721       bool
 	optionalTokenErc721          bool
 )
-
-func normalizeHash(hash string) string {
-	if hash == "" {
-		return ""
-	}
-	return strings.ToLower(hash)
-}
 
 func SetOptionalFeatures(optionalFeature map[string]struct{}) {
 	pairs := []struct {
@@ -62,7 +55,7 @@ func ConvertStorageFullBlock(fullblock *data.FullBlock, irreversible blocktree.I
 	}
 	if fullblock.Block != nil {
 		fullblock.Block.IrreversibleHeight = irreversible.Height
-		fullblock.Block.IrreversibleHash = normalizeHash(irreversible.Key)
+		fullblock.Block.IrreversibleHash = util.NormalizeHash(irreversible.Key)
 	}
 	blockHeight := fullblock.Block.Height
 	modelBlock := model.Block{

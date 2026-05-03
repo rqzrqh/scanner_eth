@@ -1,8 +1,8 @@
 package headernotify
 
 // RemoteHeader is the subset we take from an eth subscription / HTTP poll.
-// It never includes the transactions list; only eth_getBlockByNumber/ByHash
-// returns a full header with transaction hashes for body fetch.
+// These fields are enough to extend the block tree, but not enough to seed
+// pending block data because the transactions list is absent.
 type RemoteHeader struct {
 	Hash       string
 	ParentHash string
@@ -14,6 +14,5 @@ type RemoteChainUpdate struct {
 	NodeId    int
 	Height    uint64
 	BlockHash string
-	Weight    uint64
 	Header    *RemoteHeader
 }

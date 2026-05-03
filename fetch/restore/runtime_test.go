@@ -10,10 +10,9 @@ import (
 func testRuntimeDeps() RuntimeDeps {
 	stored := fetchstore.NewStoredBlockState()
 	return RuntimeDeps{
-		BlockTree:         blocktree.NewBlockTree(2),
-		PendingBlockStore: fetchstore.NewPendingBlockStore(),
-		StoredBlocks:      &stored,
-		NormalizeHash:     func(hash string) string { return hash },
+		BlockTree:    blocktree.NewBlockTree(2),
+		StagingStore: fetchstore.NewStagingStore(),
+		StoredBlocks: &stored,
 	}
 }
 
@@ -36,9 +35,9 @@ func TestRestoreBlockTreeSkipsInvalidHashAndRepeatedRestore(t *testing.T) {
 	deps := testRuntimeDeps()
 	blocks := []model.Block{
 		{Height: 1, Hash: "", ParentHash: "", Difficulty: "1", Complete: true},
-		{Height: 1, Hash: "0x01", ParentHash: "", Difficulty: "1", Complete: true},
-		{Height: 2, Hash: "0x02", ParentHash: "0x01", Difficulty: "2", Complete: false},
-		{Height: 2, Hash: "0x03", ParentHash: "0x01", Difficulty: "2", Complete: true},
+		{Height: 1, Hash: " 0x01 ", ParentHash: "", Difficulty: "1", Complete: true},
+		{Height: 2, Hash: "0x02", ParentHash: " 0x01 ", Difficulty: "2", Complete: false},
+		{Height: 2, Hash: "0x03", ParentHash: "0X01", Difficulty: "2", Complete: true},
 	}
 
 	loaded, err := deps.RestoreBlockTree(blocks)
@@ -54,7 +53,7 @@ func TestRestoreBlockTreeSkipsInvalidHashAndRepeatedRestore(t *testing.T) {
 	if deps.BlockTree.Get("0x01") == nil || deps.BlockTree.Get("0x02") == nil || deps.BlockTree.Get("0x03") == nil {
 		t.Fatal("expected valid blocks to be inserted")
 	}
-	stored := deps.StoredBlocks.(*fetchstore.StoredBlockState)
+	stored := deps.StoredBlocks
 	if !stored.IsStored("0x01") || !stored.IsStored("0x03") {
 		t.Fatal("complete blocks should be marked stored")
 	}

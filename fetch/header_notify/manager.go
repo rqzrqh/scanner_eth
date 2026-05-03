@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/sirupsen/logrus"
 )
 
@@ -23,7 +24,11 @@ type Manager struct {
 
 const consumerWaitTimeout = 30 * time.Second
 
-func NewManager(notifiers []*HeaderNotifier, handleUpdate func(*RemoteChainUpdate)) *Manager {
+func NewManager(clients []*ethclient.Client, handleUpdate func(*RemoteChainUpdate)) *Manager {
+	notifiers := make([]*HeaderNotifier, len(clients))
+	for i, client := range clients {
+		notifiers[i] = NewHeaderNotifier(i, client)
+	}
 	return &Manager{
 		notifiers:    notifiers,
 		handleUpdate: handleUpdate,
@@ -55,9 +60,7 @@ func (m *Manager) StartWithChannel(ctx context.Context, ch chan *RemoteChainUpda
 	go m.runConsumer(ch)
 
 	for _, notifier := range m.notifiers {
-		if notifier != nil {
-			notifier.Run(notifyCtx, ch, &m.notifierWg)
-		}
+		notifier.Run(notifyCtx, ch, &m.notifierWg)
 	}
 }
 

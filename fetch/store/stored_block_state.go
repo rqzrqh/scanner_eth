@@ -1,6 +1,9 @@
 package store
 
-import "sync"
+import (
+	"scanner_eth/util"
+	"sync"
+)
 
 type StoredBlockState struct {
 	mu     sync.Mutex
@@ -20,7 +23,7 @@ func (s *StoredBlockState) Reset() {
 }
 
 func (s *StoredBlockState) IsStored(hash string) bool {
-	hash = normalizeHash(hash)
+	hash = util.NormalizeHash(hash)
 	if hash == "" {
 		return false
 	}
@@ -32,7 +35,7 @@ func (s *StoredBlockState) IsStored(hash string) bool {
 }
 
 func (s *StoredBlockState) MarkStored(hash string) {
-	hash = normalizeHash(hash)
+	hash = util.NormalizeHash(hash)
 	if hash == "" {
 		return
 	}
@@ -46,7 +49,7 @@ func (s *StoredBlockState) MarkStored(hash string) {
 }
 
 func (s *StoredBlockState) UnmarkStored(hash string) {
-	hash = normalizeHash(hash)
+	hash = util.NormalizeHash(hash)
 	if hash == "" {
 		return
 	}

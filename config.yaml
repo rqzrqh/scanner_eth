@@ -34,7 +34,7 @@ fetch:
     - "wss://bsc-testnet-rpc.publicnode.com"
 
   timeout: 10s
-  start_height: 103340299 #if db has blocks, this config would be ignored
+  start_height: 103340305 #if db has blocks, this config would be ignored
   end_height:  -1
   #With internal txs, all account balance changed action and all contract created action could be captured.
   #But this api need archive node, and always it is not free.

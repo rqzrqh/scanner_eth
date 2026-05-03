@@ -1,16 +1,16 @@
 package model
 
 type Block struct {
-	Id         uint64 `gorm:"primaryKey:autoIncrement;comment:auto_inc_id"`
-	Height     uint64 `gorm:"index:uniq_height,unique;type:bigint unsigned;comment:height"`
-	Hash       string `gorm:"index:uniq_hash,unique;type:varchar(255);comment:hash"`
-	ParentHash string `gorm:"index;type:varchar(255);comment:parent_hash"`
+	Id                 uint64 `gorm:"primaryKey:autoIncrement;comment:auto_inc_id"`
+	Height             uint64 `gorm:"index:uniq_height,unique;type:bigint unsigned;comment:height"`
+	Hash               string `gorm:"index:uniq_hash,unique;type:varchar(255);comment:hash"`
+	ParentHash         string `gorm:"index;type:varchar(255);comment:parent_hash"`
 	IrreversibleHeight uint64 `gorm:"type:bigint unsigned;index;comment:irreversible_height"`
 	IrreversibleHash   string `gorm:"type:varchar(255);index;comment:irreversible_hash"`
-	Timestamp  int64  `gorm:"index;type:bigint;comment:timestamp"`
-	TxCount    int    `gorm:"type:int;comment:tx_count"`
-	Miner      string `gorm:"index;type:varchar(255);comment:miner"`
-	Size       int    `gorm:"type:int;comment:size"`
+	Timestamp          int64  `gorm:"index;type:bigint;comment:timestamp"`
+	TxCount            int    `gorm:"type:int;comment:tx_count"`
+	Miner              string `gorm:"index;type:varchar(255);comment:miner"`
+	Size               int    `gorm:"type:int;comment:size"`
 
 	Nonce     string `gorm:"type:varchar(255);comment:nonce"`
 	BaseFee   string `gorm:"type:varchar(255);comment:base_fee"`

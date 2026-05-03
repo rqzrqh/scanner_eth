@@ -9,19 +9,30 @@ import (
 	"gorm.io/gorm"
 )
 
+type BlockWindowLoader interface {
+	LoadBlockWindowFromDB(context.Context) ([]model.Block, error)
+}
+
+type BlockDataStorer interface {
+	StoreBlockData(context.Context, *EventBlockData) error
+}
+
+type DBOperator interface {
+	BlockWindowLoader
+	BlockDataStorer
+}
+
 type Operator struct {
 	db                 *gorm.DB
 	chainID            int64
 	irreversibleBlocks int
-	storeBlock         func(context.Context, *gorm.DB, int64, *EventBlockData) error
 }
 
-func NewDbOperator(db *gorm.DB, chainID int64, irreversibleBlocks int, storeBlock func(context.Context, *gorm.DB, int64, *EventBlockData) error) *Operator {
+func NewDbOperator(db *gorm.DB, chainID int64, irreversibleBlocks int) *Operator {
 	return &Operator{
 		db:                 db,
 		chainID:            chainID,
 		irreversibleBlocks: irreversibleBlocks,
-		storeBlock:         storeBlock,
 	}
 }
 
@@ -48,8 +59,11 @@ func (op *Operator) LoadBlockWindowFromDB(ctx context.Context) ([]model.Block, e
 
 	lastHeight := uint64(maxHeight.Int64)
 	minHeight := uint64(0)
-	if op.irreversibleBlocks > 0 && lastHeight > uint64(op.irreversibleBlocks) {
-		minHeight = lastHeight - uint64(op.irreversibleBlocks)
+	if op.irreversibleBlocks > 0 {
+		windowSpan := uint64(2 * op.irreversibleBlocks)
+		if lastHeight > windowSpan {
+			minHeight = lastHeight - windowSpan
+		}
 	}
 
 	var blocks []model.Block
@@ -63,8 +77,9 @@ func (op *Operator) StoreBlockData(ctx context.Context, blockData *EventBlockDat
 	if op.db == nil {
 		return errors.New("db is nil")
 	}
-	if op.storeBlock == nil {
-		return errors.New("store block handler is nil")
+	if blockData == nil || blockData.StorageFullBlock == nil {
+		return errors.New("block data is nil")
 	}
-	return op.storeBlock(ctx, op.db, op.chainID, blockData)
+	_, err := StoreFullBlock(ctx, op.db, op.chainID, DefaultRuntime(), blockData.StorageFullBlock)
+	return err
 }

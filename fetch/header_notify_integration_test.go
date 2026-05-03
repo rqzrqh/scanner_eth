@@ -7,13 +7,13 @@ import (
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
 
-	fetcherpkg "scanner_eth/fetch/fetcher"
 	headernotify "scanner_eth/fetch/header_notify"
 )
 
 func TestStartHeaderNotifiersConsumerIgnoresRegressiveRemoteHeight(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
-	t.Cleanup(func() { fm.taskPool.Stop() })
+	taskPool := mustTestTaskPool(t, fm)
+	t.Cleanup(func() { taskPool.Stop() })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -24,7 +24,6 @@ func TestStartHeaderNotifiersConsumerIgnoresRegressiveRemoteHeight(t *testing.T)
 	})
 
 	updates := make(chan *headernotify.RemoteChainUpdate, 8)
-	fm.hns = []*headernotify.HeaderNotifier{headernotify.NewHeaderNotifier(0, nil)}
 	attachTestHeaderManager(fm)
 	// Disable scan so this test isolates remote tip tracking from insertHeader side effects.
 	mustTestScanWorker(t, fm).SetEnabled(false)
@@ -62,7 +61,8 @@ func TestStartHeaderNotifiersConsumerIgnoresRegressiveRemoteHeight(t *testing.T)
 
 func TestStartHeaderNotifiersAndConsumerAppliesRemoteUpdate(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
-	t.Cleanup(func() { fm.taskPool.Stop() })
+	taskPool := mustTestTaskPool(t, fm)
+	t.Cleanup(func() { taskPool.Stop() })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -73,25 +73,8 @@ func TestStartHeaderNotifiersAndConsumerAppliesRemoteUpdate(t *testing.T) {
 	})
 
 	updates := make(chan *headernotify.RemoteChainUpdate, 2)
-	fm.hns = []*headernotify.HeaderNotifier{headernotify.NewHeaderNotifier(0, nil)}
 	attachTestHeaderManager(fm)
 	mustTestScanWorker(t, fm).SetEnabled(true)
-
-	// New-head path now calls eth_getBlockByHash; mock the full header for 0x0f.
-	setTestBlockFetcher(fm, &mockBlockFetcher{
-		fetchByHashFn: func(_ context.Context, _ fetcherpkg.NodeOperator, _ int, hash string) *BlockHeaderJson {
-			if normalizeHash(hash) == "0x0f" {
-				return &BlockHeaderJson{
-					Number:       "0xf",
-					Hash:         "0x0f",
-					ParentHash:   "0x0e",
-					Difficulty:   "0x2",
-					Transactions: []string{},
-				}
-			}
-			return nil
-		},
-	})
 
 	mustTestHeaderManager(t, fm).StartWithChannel(ctx, updates)
 
@@ -109,7 +92,7 @@ func TestStartHeaderNotifiersAndConsumerAppliesRemoteUpdate(t *testing.T) {
 
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		n := fm.blockTree.Get("0x0f")
+		n := mustTestBlockTree(t, fm).Get("0x0f")
 		if n != nil {
 			node := fm.nodeManager.Node(0)
 			if node == nil {
@@ -121,6 +104,9 @@ func TestStartHeaderNotifiersAndConsumerAppliesRemoteUpdate(t *testing.T) {
 			if len(mustTestScanWorker(t, fm).TriggerChan()) == 0 {
 				t.Fatal("expected scan trigger after remote update")
 			}
+			if header := getTestNodeBlockHeader(t, fm, "0x0f"); header != nil {
+				t.Fatalf("expected remote update header not to be cached in pending store, got %+v", header)
+			}
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -128,12 +114,12 @@ func TestStartHeaderNotifiersAndConsumerAppliesRemoteUpdate(t *testing.T) {
 	t.Fatal("header from remote update was not inserted into blocktree")
 }
 
-// FormalVerification.md §3.7.1: newHeads only carries a slim RemoteHeader; the consumer must
-// use fetchAndInsertHeaderByHashImmediate. If the tree matched RemoteHeader's parent, that
-// would indicate the slim path was used for insert; we assert the parent comes from the RPC response.
-func TestStartHeaderNotifiersRemoteUpdateUsesBlockFetcherNotSlimHeader(t *testing.T) {
+// FormalVerification.md §3.7.1: newHeads carries enough fields to extend the block tree
+// directly, but it must not be cached in the pending store because tx hashes are absent.
+func TestStartHeaderNotifiersRemoteUpdateUsesHeaderOnlyForTree(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
-	t.Cleanup(func() { fm.taskPool.Stop() })
+	taskPool := mustTestTaskPool(t, fm)
+	t.Cleanup(func() { taskPool.Stop() })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -144,26 +130,8 @@ func TestStartHeaderNotifiersRemoteUpdateUsesBlockFetcherNotSlimHeader(t *testin
 	})
 
 	updates := make(chan *headernotify.RemoteChainUpdate, 1)
-	fm.hns = []*headernotify.HeaderNotifier{headernotify.NewHeaderNotifier(0, nil)}
 	attachTestHeaderManager(fm)
 	mustTestScanWorker(t, fm).SetEnabled(true)
-
-	var fetchByHashCalls int
-	setTestBlockFetcher(fm, &mockBlockFetcher{
-		fetchByHashFn: func(_ context.Context, _ fetcherpkg.NodeOperator, _ int, hash string) *BlockHeaderJson {
-			if normalizeHash(hash) != "0xabc1" {
-				return nil
-			}
-			fetchByHashCalls++
-			return &BlockHeaderJson{
-				Number:       "0x64",
-				Hash:         "0xabc1",
-				ParentHash:   "0xrpc_parent",
-				Difficulty:   "0x3",
-				Transactions: []string{"0xtx1"},
-			}
-		},
-	})
 
 	mustTestHeaderManager(t, fm).StartWithChannel(ctx, updates)
 
@@ -181,22 +149,22 @@ func TestStartHeaderNotifiersRemoteUpdateUsesBlockFetcherNotSlimHeader(t *testin
 
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		n := fm.blockTree.Get("0xabc1")
+		n := mustTestBlockTree(t, fm).Get("0xabc1")
 		if n != nil {
-			if fetchByHashCalls == 0 {
-				t.Fatal("expected at least one FetchBlockHeaderByHash from newHead consumer")
-			}
-			if n.ParentKey != "0xrpc_parent" {
-				t.Fatalf("expected parent from BlockFetcher (0xrpc_parent), got %q (slim had 0xwrong_parent)", n.ParentKey)
+			if n.ParentKey != "0xwrong_parent" {
+				t.Fatalf("expected parent from remote update header (0xwrong_parent), got %q", n.ParentKey)
 			}
 			if n.Weight == 0 {
-				t.Fatal("expected non-zero weight from rpc difficulty 0x3")
+				t.Fatal("expected non-zero weight from remote update header difficulty 0x9999")
+			}
+			if header := getTestNodeBlockHeader(t, fm, "0xabc1"); header != nil {
+				t.Fatalf("expected remote update header not to be cached in pending store, got %+v", header)
 			}
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("block never appeared in tree; BlockFetcher may not be used on new head path")
+	t.Fatal("block never appeared in tree from remote update header")
 }
 
 func TestHeaderNotifierRunNilSafe(t *testing.T) {

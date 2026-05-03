@@ -16,9 +16,6 @@ func TestNewHeaderNotifier(t *testing.T) {
 	if hn.id != 3 {
 		t.Fatalf("unexpected notifier id: %d", hn.id)
 	}
-	if hn.remote == nil {
-		t.Fatal("remote chain state should be initialized")
-	}
 }
 
 func TestToRemoteHeader(t *testing.T) {

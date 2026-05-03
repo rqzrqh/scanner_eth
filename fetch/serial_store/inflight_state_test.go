@@ -42,3 +42,22 @@ func TestStoreBlockInflightStateRejectsStoredHash(t *testing.T) {
 		t.Fatalf("unexpected in-flight count: got=%d want=0", s.Count())
 	}
 }
+
+func TestStoreBlockInflightStateNormalizesWhitespaceAndCase(t *testing.T) {
+	s := NewInflightState()
+
+	if !s.TryStart(" 0xAb ", nil) {
+		t.Fatal("expected normalized hash to start inflight")
+	}
+	if !s.Has("0XaB") {
+		t.Fatal("expected Has to match normalized hash")
+	}
+	if s.TryStart("0xab", nil) {
+		t.Fatal("expected duplicate normalized hash to be rejected")
+	}
+
+	s.Finish(" 0XAB ")
+	if s.Has("0xab") {
+		t.Fatal("expected normalized hash removed after finish")
+	}
+}

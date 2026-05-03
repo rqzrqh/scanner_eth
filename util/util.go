@@ -27,6 +27,13 @@ func ToBlockNumArg(height *big.Int) string {
 	return hexutil.EncodeBig(height)
 }
 
+func NormalizeHash(hash string) string {
+	if strings.TrimSpace(hash) == "" {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(hash))
+}
+
 func HandleErrorWithRetry(handle func() error, retryTimes int, interval time.Duration) error {
 	inc := 0
 	funcName := "unknown"

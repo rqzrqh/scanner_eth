@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/big"
 	"scanner_eth/data"
-	fetcherpkg "scanner_eth/fetch/fetcher"
 	"scanner_eth/filter"
 	"scanner_eth/util"
 	"strings"
@@ -20,34 +19,14 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type BlockHeaderJson = fetcherpkg.BlockHeaderJson
-type TxJson = fetcherpkg.TxJson
-type TxInternalTraceResultJson = fetcherpkg.TxInternalTraceResultJson
-
-// NodeOperator abstracts all RPC reads issued through a managed node.
-type NodeOperator interface {
-	ID() int
-	EthClient() *ethclient.Client
-	FetchBlockHeaderByHeight(ctx context.Context, taskId int, height uint64) *BlockHeaderJson
-	FetchBlockHeaderByHash(ctx context.Context, taskId int, hash string) *BlockHeaderJson
-	FetchInternalTxTracesByBlockHash(ctx context.Context, taskId int, blockHash string, height uint64) ([]*TxInternalTraceResultJson, error)
-	FetchTransactionsByHashBatch(ctx context.Context, txHashes []string, txs []*TxJson) error
-	FetchReceiptsBatch(ctx context.Context, txHashes []string, receipts []*ethTypes.Receipt) error
-	FetchBalanceNative(ctx context.Context, balancesNative []*data.BalanceNative, height uint64) error
-	FetchErc20BalancesBatch(ctx context.Context, bs []*data.BalanceErc20, height uint64) error
-	FetchErc1155BalancesBatch(ctx context.Context, bs []*data.BalanceErc1155, height uint64) error
-	ToCallArg(msg ethereum.CallMsg) interface{}
-	FetchContractErc20(ctx context.Context, addr *common.Address, height uint64) (*data.ContractErc20, error)
-	FetchContractErc721(ctx context.Context, addr *common.Address) (*data.ContractErc721, error)
-	FetchTokenErc721(ctx context.Context, contractAddr *common.Address, tokenId *big.Int) (*data.TokenErc721, error)
-}
-
-// NodeOperatorImpl implements NodeOperator via ethclient.
+// NodeOperatorImpl implements the fetcher-facing RPC contract via ethclient.
 type NodeOperatorImpl struct {
 	id         int
 	client     *ethclient.Client
 	rpcTimeout time.Duration
 }
+
+var _ NodeOperator = (*NodeOperatorImpl)(nil)
 
 func NewNodeOperator(id int, client *ethclient.Client, rpcTimeout time.Duration) *NodeOperatorImpl {
 	return &NodeOperatorImpl{id: id, client: client, rpcTimeout: rpcTimeout}

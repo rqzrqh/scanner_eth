@@ -1,0 +1,24 @@
+---
+description: Keep scan, task_process, and serial_store responsibilities separated
+alwaysApply: true
+---
+
+# Fetch Branch Persistence Boundaries
+
+When working on branch persistence in `fetch/`:
+
+- `scan/flow.go` owns branch materialization from `BlockTree`. It may convert leaf-first branches into low-to-high payloads and backfill missing body tasks on the fetch side before handing branches off.
+- `task_process/` owns header/full-block fetch and staging updates. If header insertion should trigger body work, do it from `task_process` or another fetch-side coordinator, not from `serial_store`.
+- `serial_store/` owns only serialized branch traversal and DB persistence. It must not depend directly on `taskpool`, enqueue fetch work, or define task orchestration callbacks.
+
+Preferred direction:
+
+- Put fetch scheduling and retry triggers in `scan`, `task_process`, or runtime wiring that already owns task orchestration.
+- Keep `serial_store` focused on parent-readiness checks, ordered persistence, and branch-local stop conditions.
+
+Examples:
+
+- Bad: add `SetBodyTaskEnqueuer(...)` or any task-pool callback to `fetch/serial_store/Worker`.
+- Bad: move missing-body task scheduling into `serial_store`.
+- Good: let `scan` submit low-to-high branches to `serial_store`.
+- Good: let `task_process` enqueue body work when newly inserted headers should trigger fetch.

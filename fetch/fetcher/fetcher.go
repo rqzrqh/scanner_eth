@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"scanner_eth/data"
 	"scanner_eth/filter"
+	nodepkg "scanner_eth/fetch/node"
 	"scanner_eth/util"
 	"strconv"
 	"strings"
@@ -18,19 +19,13 @@ import (
 	"gorm.io/gorm"
 )
 
-type NodeOperator interface {
-	ID() int
-	FetchBlockHeaderByHeight(context.Context, int, uint64) *BlockHeaderJson
-	FetchBlockHeaderByHash(context.Context, int, string) *BlockHeaderJson
-	FetchTransactionsByHashBatch(context.Context, []string, []*TxJson) error
-	FetchReceiptsBatch(context.Context, []string, []*ethTypes.Receipt) error
-	FetchInternalTxTracesByBlockHash(context.Context, int, string, uint64) ([]*TxInternalTraceResultJson, error)
-	FetchBalanceNative(context.Context, []*data.BalanceNative, uint64) error
-	FetchErc20BalancesBatch(context.Context, []*data.BalanceErc20, uint64) error
-	FetchErc1155BalancesBatch(context.Context, []*data.BalanceErc1155, uint64) error
-	FetchContractErc20(context.Context, *common.Address, uint64) (*data.ContractErc20, error)
-	FetchContractErc721(context.Context, *common.Address) (*data.ContractErc721, error)
-	FetchTokenErc721(context.Context, *common.Address, *big.Int) (*data.TokenErc721, error)
+// Fetcher captures the fetch capabilities consumed by higher-level
+// runtime/orchestration code. Keep this contract in `fetcher` so callers reuse a
+// shared boundary instead of redefining local fetch abstractions.
+type Fetcher interface {
+	FetchBlockHeaderByHeight(context.Context, nodepkg.NodeOperator, int, uint64) *BlockHeaderJson
+	FetchBlockHeaderByHash(context.Context, nodepkg.NodeOperator, int, string) *BlockHeaderJson
+	FetchFullBlock(context.Context, nodepkg.NodeOperator, int, *BlockHeaderJson) *data.FullBlock
 }
 
 var (
@@ -55,33 +50,25 @@ type FetchResult struct {
 	CostTime    time.Duration
 }
 
-type BlockFetcher interface {
-	FetchBlockHeaderByHeight(ctx context.Context, nodeOp NodeOperator, taskId int, height uint64) *BlockHeaderJson
-	FetchBlockHeaderByHash(ctx context.Context, nodeOp NodeOperator, taskId int, hash string) *BlockHeaderJson
-	FetchFullBlock(ctx context.Context, nodeOp NodeOperator, taskId int, header *BlockHeaderJson) *data.FullBlock
-}
-
-type dbBlockFetcher struct {
+// FetcherImpl binds DB-backed full-block assembly helpers into a concrete fetcher.
+type FetcherImpl struct {
 	db *gorm.DB
 }
 
-func NewBlockFetcher(db *gorm.DB) BlockFetcher {
-	return newDBBlockFetcher(db)
+// NewFetcherImpl creates the production fetcher implementation bound to `db`.
+func NewFetcherImpl(db *gorm.DB) *FetcherImpl {
+	return &FetcherImpl{db: db}
 }
 
-func newDBBlockFetcher(db *gorm.DB) BlockFetcher {
-	return &dbBlockFetcher{db: db}
-}
-
-func (bf *dbBlockFetcher) FetchBlockHeaderByHeight(ctx context.Context, nodeOp NodeOperator, taskId int, height uint64) *BlockHeaderJson {
+func (bf *FetcherImpl) FetchBlockHeaderByHeight(ctx context.Context, nodeOp nodepkg.NodeOperator, taskId int, height uint64) *BlockHeaderJson {
 	return FetchBlockHeaderByHeight(ctx, nodeOp, taskId, height)
 }
 
-func (bf *dbBlockFetcher) FetchBlockHeaderByHash(ctx context.Context, nodeOp NodeOperator, taskId int, hash string) *BlockHeaderJson {
+func (bf *FetcherImpl) FetchBlockHeaderByHash(ctx context.Context, nodeOp nodepkg.NodeOperator, taskId int, hash string) *BlockHeaderJson {
 	return FetchBlockHeaderByHash(ctx, nodeOp, taskId, hash)
 }
 
-func (bf *dbBlockFetcher) FetchFullBlock(ctx context.Context, nodeOp NodeOperator, taskId int, header *BlockHeaderJson) *data.FullBlock {
+func (bf *FetcherImpl) FetchFullBlock(ctx context.Context, nodeOp nodepkg.NodeOperator, taskId int, header *BlockHeaderJson) *data.FullBlock {
 	return FetchFullBlock(ctx, nodeOp, taskId, bf.db, header)
 }
 
@@ -113,14 +100,14 @@ type InternalTxParseResult struct {
 	InternalBalanceNativeAddress map[string]struct{}
 }
 
-func FetchBlockHeaderByHeight(ctx context.Context, nodeOp NodeOperator, taskId int, height uint64) *BlockHeaderJson {
+func FetchBlockHeaderByHeight(ctx context.Context, nodeOp nodepkg.NodeOperator, taskId int, height uint64) *BlockHeaderJson {
 	if nodeOp == nil {
 		return nil
 	}
 	return nodeOp.FetchBlockHeaderByHeight(ctx, taskId, height)
 }
 
-func FetchBlockHeaderByHash(ctx context.Context, nodeOp NodeOperator, taskId int, hash string) *BlockHeaderJson {
+func FetchBlockHeaderByHash(ctx context.Context, nodeOp nodepkg.NodeOperator, taskId int, hash string) *BlockHeaderJson {
 	if nodeOp == nil {
 		return nil
 	}
@@ -128,7 +115,7 @@ func FetchBlockHeaderByHash(ctx context.Context, nodeOp NodeOperator, taskId int
 }
 
 // FetchFullBlock loads txs, receipts, internal traces (if enabled), and token/balance state from RPC using the given header.
-func FetchFullBlock(ctx context.Context, nodeOp NodeOperator, taskId int, db *gorm.DB, header *BlockHeaderJson) *data.FullBlock {
+func FetchFullBlock(ctx context.Context, nodeOp nodepkg.NodeOperator, taskId int, db *gorm.DB, header *BlockHeaderJson) *data.FullBlock {
 	if ctx == nil {
 		ctx = context.Background()
 	}

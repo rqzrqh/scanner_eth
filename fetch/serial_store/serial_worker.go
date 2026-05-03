@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	fetchstore "scanner_eth/fetch/store"
+	"scanner_eth/util"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,8 +17,15 @@ const (
 	reqChannelCapacity     = 64
 )
 
-type blockStorer interface {
-	StoreBlockData(context.Context, *fetchstore.EventBlockData) error
+type Branch struct {
+	Nodes []BranchNode
+}
+
+type BranchNode struct {
+	Hash      string
+	ParentHash string
+	Height    uint64
+	BlockData *fetchstore.EventBlockData
 }
 
 type storeRequest struct {
@@ -25,12 +33,13 @@ type storeRequest struct {
 	Hash      string
 	Height    uint64
 	BlockData *fetchstore.EventBlockData
+	Branches  []Branch
 	ResultCh  chan error
 }
 
 type Worker struct {
-	dbOperator   blockStorer
-	storedBlocks StoredState
+	dbOperator   fetchstore.BlockDataStorer
+	storedBlocks *fetchstore.StoredBlockState
 	isZero       func(*fetchstore.EventBlockData) bool
 
 	reqCh       chan *storeRequest
@@ -46,7 +55,7 @@ type Worker struct {
 	canceled  uint64
 }
 
-func NewWorker(dbOperator blockStorer, storedBlocks StoredState, isZero func(*fetchstore.EventBlockData) bool) *Worker {
+func NewWorker(dbOperator fetchstore.BlockDataStorer, storedBlocks *fetchstore.StoredBlockState, isZero func(*fetchstore.EventBlockData) bool) *Worker {
 	return &Worker{
 		dbOperator:   dbOperator,
 		storedBlocks: storedBlocks,
@@ -56,13 +65,13 @@ func NewWorker(dbOperator blockStorer, storedBlocks StoredState, isZero func(*fe
 	}
 }
 
-func NewStartedWorker(dbOperator blockStorer, storedBlocks StoredState, isZero func(*fetchstore.EventBlockData) bool) *Worker {
+func NewStartedWorker(dbOperator fetchstore.BlockDataStorer, storedBlocks *fetchstore.StoredBlockState, isZero func(*fetchstore.EventBlockData) bool) *Worker {
 	worker := NewWorker(dbOperator, storedBlocks, isZero)
 	worker.Start()
 	return worker
 }
 
-func (w *Worker) SetDbOperator(dbOperator blockStorer) {
+func (w *Worker) SetDBOperator(dbOperator fetchstore.BlockDataStorer) {
 	if w == nil {
 		return
 	}
@@ -99,9 +108,6 @@ func (w *Worker) runLoop(ctx context.Context) {
 		case <-ticker.C:
 			w.logStats()
 		case req := <-w.reqCh:
-			if req == nil {
-				continue
-			}
 			err := w.runRequest(req)
 			req.ResultCh <- err
 		}
@@ -127,15 +133,12 @@ func (w *Worker) Submit(ctx context.Context, hash string, height uint64, blockDa
 	if w == nil {
 		return fmt.Errorf("store block worker is nil")
 	}
-	hash = normalizeHash(hash)
+	hash = util.NormalizeHash(hash)
 	if hash == "" {
 		return fmt.Errorf("invalid block hash")
 	}
 	if w.isZero != nil && w.isZero(blockData) {
 		return fmt.Errorf("block data is nil")
-	}
-	if w.reqCh == nil {
-		return fmt.Errorf("store block worker is not initialized")
 	}
 	if !w.inflight.TryStart(hash, w.storedBlocks) {
 		atomic.AddUint64(&w.skipped, 1)
@@ -172,6 +175,40 @@ func (w *Worker) Submit(ctx context.Context, hash string, height uint64, blockDa
 	}
 }
 
+func (w *Worker) SubmitBranches(ctx context.Context, branches []Branch) error {
+	if w == nil {
+		return fmt.Errorf("store block worker is nil")
+	}
+	if len(branches) == 0 {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	req := &storeRequest{
+		Ctx:      ctx,
+		Branches: branches,
+		ResultCh: make(chan error, 1),
+	}
+
+	select {
+	case <-ctx.Done():
+		atomic.AddUint64(&w.canceled, 1)
+		return ctx.Err()
+	case w.reqCh <- req:
+		atomic.AddUint64(&w.submitted, 1)
+	}
+
+	select {
+	case <-ctx.Done():
+		atomic.AddUint64(&w.canceled, 1)
+		return ctx.Err()
+	case err := <-req.ResultCh:
+		return err
+	}
+}
+
 func (w *Worker) IsInflight(hash string) bool {
 	if w == nil {
 		return false
@@ -184,13 +221,6 @@ func (w *Worker) MetricsPayload() map[string]any {
 		return map[string]any{}
 	}
 
-	queueCap := 0
-	queuePending := 0
-	if w.reqCh != nil {
-		queueCap = cap(w.reqCh)
-		queuePending = len(w.reqCh)
-	}
-
 	return map[string]any{
 		"totals": map[string]uint64{
 			"submitted": atomic.LoadUint64(&w.submitted),
@@ -200,8 +230,8 @@ func (w *Worker) MetricsPayload() map[string]any {
 			"canceled":  atomic.LoadUint64(&w.canceled),
 		},
 		"queue": map[string]uint64{
-			"pending":  uint64(queuePending),
-			"capacity": uint64(queueCap),
+			"pending":  uint64(len(w.reqCh)),
+			"capacity": uint64(cap(w.reqCh)),
 		},
 		"state": map[string]uint64{
 			"storing": uint64(w.inflight.Count()),
@@ -210,7 +240,7 @@ func (w *Worker) MetricsPayload() map[string]any {
 }
 
 func (w *Worker) logStats() {
-	if w == nil || w.reqCh == nil {
+	if w == nil {
 		return
 	}
 
@@ -226,9 +256,13 @@ func (w *Worker) logStats() {
 }
 
 func (w *Worker) runRequest(req *storeRequest) error {
-	if w == nil || req == nil {
-		return fmt.Errorf("store request is nil")
+	if len(req.Branches) > 0 {
+		return w.runBranches(req)
 	}
+	return w.runSingleRequest(req)
+}
+
+func (w *Worker) runSingleRequest(req *storeRequest) error {
 	if req.Ctx == nil {
 		req.Ctx = context.Background()
 	}
@@ -250,4 +284,112 @@ func (w *Worker) runRequest(req *storeRequest) error {
 	w.inflight.Finish(req.Hash)
 	atomic.AddUint64(&w.succeeded, 1)
 	return nil
+}
+
+func (w *Worker) runBranches(req *storeRequest) error {
+	if req == nil {
+		return nil
+	}
+	if req.Ctx == nil {
+		req.Ctx = context.Background()
+	}
+	for _, branch := range req.Branches {
+		if err := req.Ctx.Err(); err != nil {
+			atomic.AddUint64(&w.canceled, 1)
+			return err
+		}
+		w.runBranch(req.Ctx, branch)
+	}
+	return nil
+}
+
+func (w *Worker) runBranch(ctx context.Context, branch Branch) {
+	if w == nil {
+		return
+	}
+	readyParents := make(map[string]struct{}, len(branch.Nodes))
+	for _, node := range branch.Nodes {
+		if !w.runBranchNode(ctx, node, readyParents) {
+			return
+		}
+		hash := util.NormalizeHash(node.Hash)
+		if hash != "" {
+			readyParents[hash] = struct{}{}
+		}
+	}
+}
+
+func (w *Worker) runBranchNode(ctx context.Context, node BranchNode, readyParents map[string]struct{}) bool {
+	if w == nil {
+		return false
+	}
+	hash := util.NormalizeHash(node.Hash)
+	if hash == "" {
+		return false
+	}
+	if w.storedBlocks != nil && w.storedBlocks.IsStored(hash) {
+		return true
+	}
+	if w.inflight.Has(hash) {
+		return false
+	}
+	if node.BlockData == nil {
+		return false
+	}
+	if w.isZero != nil && w.isZero(node.BlockData) {
+		return false
+	}
+	parentHash := util.NormalizeHash(node.ParentHash)
+	parentReady := parentHash == ""
+	if !parentReady {
+		if _, ok := readyParents[parentHash]; ok {
+			parentReady = true
+		}
+	}
+	if !parentReady && w.storedBlocks != nil && w.storedBlocks.IsStored(parentHash) {
+		parentReady = true
+	}
+	if !parentReady {
+		return false
+	}
+	if err := w.storeInline(ctx, hash, node.Height, node.BlockData); err != nil {
+		logrus.Warnf("store block failed. height:%v hash:%v err:%v", node.Height, hash, err)
+		return false
+	}
+	return true
+}
+
+func (w *Worker) storeInline(ctx context.Context, hash string, height uint64, blockData *fetchstore.EventBlockData) error {
+	if w == nil {
+		return fmt.Errorf("store block worker is nil")
+	}
+	hash = util.NormalizeHash(hash)
+	if hash == "" {
+		return fmt.Errorf("invalid block hash")
+	}
+	if w.isZero != nil && w.isZero(blockData) {
+		return fmt.Errorf("block data is nil")
+	}
+	if !w.inflight.TryStart(hash, w.storedBlocks) {
+		atomic.AddUint64(&w.skipped, 1)
+		if w.storedBlocks != nil && w.storedBlocks.IsStored(hash) {
+			return nil
+		}
+		return fmt.Errorf("block is already in flight")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		w.inflight.Finish(hash)
+		atomic.AddUint64(&w.canceled, 1)
+		return err
+	}
+	req := &storeRequest{
+		Ctx:       ctx,
+		Hash:      hash,
+		Height:    height,
+		BlockData: blockData,
+	}
+	return w.runSingleRequest(req)
 }

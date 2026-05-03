@@ -21,17 +21,20 @@ func TestSetEnableInternalTx(t *testing.T) {
 	}
 }
 
-func TestNewBlockFetcher(t *testing.T) {
-	bf := NewBlockFetcher(nil)
+func TestNewFetcherImpl(t *testing.T) {
+	bf := NewFetcherImpl(nil)
 	if bf == nil {
-		t.Fatal("NewBlockFetcher should return non-nil")
+		t.Fatal("NewFetcherImpl should return non-nil")
 	}
-	impl, ok := bf.(*dbBlockFetcher)
-	if !ok {
-		t.Fatalf("unexpected block fetcher type: %T", bf)
-	}
-	if impl.db != (*gorm.DB)(nil) {
+	if bf.db != (*gorm.DB)(nil) {
 		t.Fatal("expected nil db in fetcher impl")
+	}
+}
+
+func TestNewMockFetcher(t *testing.T) {
+	mockFetcher := NewMockFetcher(nil, nil, nil)
+	if mockFetcher == nil {
+		t.Fatal("NewMockFetcher should return non-nil")
 	}
 }
 
