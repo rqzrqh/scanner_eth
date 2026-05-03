@@ -62,8 +62,8 @@ func TestStoreNodeBodyDataDedupesConcurrentStoreRequests(t *testing.T) {
 	if !env.stored.IsStored("b") {
 		t.Fatal("expected b to be marked stored after worker write succeeds")
 	}
-	if env.store != nil && env.store.IsInflight("b") {
-		t.Fatal("expected b to be removed from in-flight store state after success")
+	if env.store != nil && !env.store.IsIdle() {
+		t.Fatal("expected store worker to be idle after serialized writes finish")
 	}
 }
 

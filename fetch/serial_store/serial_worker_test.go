@@ -51,10 +51,10 @@ func TestSubmitBranchesStoresLowToHighFullBranch(t *testing.T) {
 	branch := Branch{
 		Nodes: []BranchNode{
 			{
-				Hash:      "b",
+				Hash:       "b",
 				ParentHash: "a",
-				Height:    2,
-				BlockData: makeSerialTestEventBlockData(2, "b", "a"),
+				Height:     2,
+				BlockData:  makeSerialTestEventBlockData(2, "b", "a"),
 			},
 		},
 	}
@@ -87,16 +87,16 @@ func TestSubmitBranchesUsesBranchLocalProgressForChildren(t *testing.T) {
 	branch := Branch{
 		Nodes: []BranchNode{
 			{
-				Hash:      "b",
+				Hash:       "b",
 				ParentHash: "a",
-				Height:    2,
-				BlockData: makeSerialTestEventBlockData(2, "b", "a"),
+				Height:     2,
+				BlockData:  makeSerialTestEventBlockData(2, "b", "a"),
 			},
 			{
-				Hash:      "c",
+				Hash:       "c",
 				ParentHash: "b",
-				Height:    3,
-				BlockData: makeSerialTestEventBlockData(3, "c", "b"),
+				Height:     3,
+				BlockData:  makeSerialTestEventBlockData(3, "c", "b"),
 			},
 		},
 	}
@@ -106,5 +106,34 @@ func TestSubmitBranchesUsesBranchLocalProgressForChildren(t *testing.T) {
 	}
 	if len(order) != 2 || order[0] != "b" || order[1] != "c" {
 		t.Fatalf("expected branch-local parent progression to allow b->c, got=%v", order)
+	}
+}
+
+func TestSubmitBranchesMetricsReportSkipReasons(t *testing.T) {
+	stored := fetchstore.NewStoredBlockState()
+	worker := NewStartedWorker(serialTestBlockStorer{}, &stored, func(data *fetchstore.EventBlockData) bool {
+		return data == nil || data.StorageFullBlock == nil
+	})
+	defer worker.Stop()
+
+	branch := Branch{
+		Nodes: []BranchNode{
+			{Hash: "missing-body", ParentHash: "", Height: 1},
+		},
+	}
+	if err := worker.SubmitBranches(context.Background(), []Branch{branch}); err != nil {
+		t.Fatalf("submit branches failed: %v", err)
+	}
+
+	metrics := worker.MetricsPayload()
+	reasons, ok := metrics["skip_reasons"].(map[string]uint64)
+	if !ok {
+		t.Fatalf("missing skip reasons payload: %+v", metrics)
+	}
+	if reasons["missing_body"] != 1 {
+		t.Fatalf("expected missing_body skip reason, got=%+v", reasons)
+	}
+	if !worker.IsIdle() {
+		t.Fatalf("worker should be idle after synchronous branch submission")
 	}
 }

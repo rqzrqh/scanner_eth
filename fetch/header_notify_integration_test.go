@@ -59,7 +59,7 @@ func TestStartHeaderNotifiersConsumerIgnoresRegressiveRemoteHeight(t *testing.T)
 	t.Fatal("expected regressive height notification to be ignored and tip to reach 31")
 }
 
-func TestStartHeaderNotifiersAndConsumerAppliesRemoteUpdate(t *testing.T) {
+func TestStartHeaderNotifiersEnqueuesConnectedHeaderHashCandidate(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
 	taskPool := mustTestTaskPool(t, fm)
 	t.Cleanup(func() { taskPool.Stop() })
@@ -75,6 +75,8 @@ func TestStartHeaderNotifiersAndConsumerAppliesRemoteUpdate(t *testing.T) {
 	updates := make(chan *headernotify.RemoteChainUpdate, 2)
 	attachTestHeaderManager(fm)
 	mustTestScanWorker(t, fm).SetEnabled(true)
+	mustTestBlockTree(t, fm).Insert(14, "0x0e", "", 1)
+	beforeHeaderHash := taskPool.Stats().EnqueuedHeaderHash
 
 	mustTestHeaderManager(t, fm).StartWithChannel(ctx, updates)
 
@@ -92,8 +94,7 @@ func TestStartHeaderNotifiersAndConsumerAppliesRemoteUpdate(t *testing.T) {
 
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		n := mustTestBlockTree(t, fm).Get("0x0f")
-		if n != nil {
+		if taskPool.Stats().EnqueuedHeaderHash > beforeHeaderHash {
 			node := fm.nodeManager.Node(0)
 			if node == nil {
 				t.Fatal("node 0 is nil")
@@ -104,6 +105,9 @@ func TestStartHeaderNotifiersAndConsumerAppliesRemoteUpdate(t *testing.T) {
 			if len(mustTestScanWorker(t, fm).TriggerChan()) == 0 {
 				t.Fatal("expected scan trigger after remote update")
 			}
+			if n := mustTestBlockTree(t, fm).Get("0x0f"); n != nil {
+				t.Fatal("remote update must enqueue header-by-hash instead of inserting blocktree directly")
+			}
 			if header := getTestNodeBlockHeader(t, fm, "0x0f"); header != nil {
 				t.Fatalf("expected remote update header not to be cached in pending store, got %+v", header)
 			}
@@ -111,12 +115,10 @@ func TestStartHeaderNotifiersAndConsumerAppliesRemoteUpdate(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("header from remote update was not inserted into blocktree")
+	t.Fatal("header from remote update did not enqueue header-by-hash")
 }
 
-// FormalVerification.md §3.7.1: newHeads carries enough fields to extend the block tree
-// directly, but it must not be cached in the pending store because tx hashes are absent.
-func TestStartHeaderNotifiersRemoteUpdateUsesHeaderOnlyForTree(t *testing.T) {
+func TestStartHeaderNotifiersRemoteUpdateRejectsUnlinkedHeaderCandidate(t *testing.T) {
 	fm := newTestFetchManager(t, 2)
 	taskPool := mustTestTaskPool(t, fm)
 	t.Cleanup(func() { taskPool.Stop() })
@@ -132,6 +134,7 @@ func TestStartHeaderNotifiersRemoteUpdateUsesHeaderOnlyForTree(t *testing.T) {
 	updates := make(chan *headernotify.RemoteChainUpdate, 1)
 	attachTestHeaderManager(fm)
 	mustTestScanWorker(t, fm).SetEnabled(true)
+	beforeHeaderHash := taskPool.Stats().EnqueuedHeaderHash
 
 	mustTestHeaderManager(t, fm).StartWithChannel(ctx, updates)
 
@@ -149,13 +152,12 @@ func TestStartHeaderNotifiersRemoteUpdateUsesHeaderOnlyForTree(t *testing.T) {
 
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		n := mustTestBlockTree(t, fm).Get("0xabc1")
-		if n != nil {
-			if n.ParentKey != "0xwrong_parent" {
-				t.Fatalf("expected parent from remote update header (0xwrong_parent), got %q", n.ParentKey)
+		if len(mustTestScanWorker(t, fm).TriggerChan()) > 0 {
+			if n := mustTestBlockTree(t, fm).Get("0xabc1"); n != nil {
+				t.Fatal("unlinked remote header candidate must not be inserted into blocktree")
 			}
-			if n.Weight == 0 {
-				t.Fatal("expected non-zero weight from remote update header difficulty 0x9999")
+			if after := taskPool.Stats().EnqueuedHeaderHash; after != beforeHeaderHash {
+				t.Fatalf("unlinked remote header candidate must not enqueue header-by-hash, before=%d after=%d", beforeHeaderHash, after)
 			}
 			if header := getTestNodeBlockHeader(t, fm, "0xabc1"); header != nil {
 				t.Fatalf("expected remote update header not to be cached in pending store, got %+v", header)
@@ -164,7 +166,7 @@ func TestStartHeaderNotifiersRemoteUpdateUsesHeaderOnlyForTree(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("block never appeared in tree from remote update header")
+	t.Fatal("expected scan trigger after remote update")
 }
 
 func TestHeaderNotifierRunNilSafe(t *testing.T) {

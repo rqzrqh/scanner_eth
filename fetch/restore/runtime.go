@@ -1,19 +1,26 @@
 package restore
 
 import (
+	"context"
 	"scanner_eth/blocktree"
+	fetcherpkg "scanner_eth/fetch/fetcher"
+	nodepkg "scanner_eth/fetch/node"
 	fetchstore "scanner_eth/fetch/store"
 	"scanner_eth/model"
 	"scanner_eth/util"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 
 type RuntimeDeps struct {
 	BlockTree    *blocktree.BlockTree
 	StagingStore *fetchstore.StagingStore
 	StoredBlocks *fetchstore.StoredBlockState
+	NodeManager  *nodepkg.NodeManager
+	Fetcher      fetcherpkg.Fetcher
 }
 
 func parseStoredBlockWeight(difficulty string) uint64 {
@@ -61,5 +68,73 @@ func (deps RuntimeDeps) RestoreBlockTree(blocks []model.Block) (int, error) {
 		}
 	}
 
+	deps.MarkRootParentReady()
 	return len(blocks), nil
+}
+
+func (deps RuntimeDeps) MarkRootParentReady() bool {
+	if deps.BlockTree == nil || deps.StoredBlocks == nil {
+		return false
+	}
+	root := deps.BlockTree.Root()
+	if root == nil {
+		return false
+	}
+	parentHash := util.NormalizeHash(root.ParentKey)
+	if parentHash == "" {
+		return false
+	}
+	deps.StoredBlocks.MarkStored(parentHash)
+	return true
+}
+
+func (deps RuntimeDeps) RestoreRemoteRoot(ctx context.Context, height uint64) bool {
+	if deps.BlockTree == nil || deps.NodeManager == nil || deps.Fetcher == nil {
+		return false
+	}
+	if _, _, ok := deps.BlockTree.HeightRange(); ok {
+		return deps.BlockTree.Root() != nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	header := deps.fetchRemoteHeaderByHeight(ctx, height)
+	if header == nil {
+		return false
+	}
+	headerHeight, ok := decodeHeaderHeight(header)
+	if !ok {
+		return false
+	}
+	hash := util.NormalizeHash(header.Hash)
+	if hash == "" {
+		return false
+	}
+	parentHash := util.NormalizeHash(header.ParentHash)
+	deps.BlockTree.Insert(headerHeight, hash, parentHash, fetcherpkg.HeaderWeight(header))
+	if deps.BlockTree.Get(hash) == nil {
+		return false
+	}
+	deps.MarkRootParentReady()
+	return true
+}
+
+func (deps RuntimeDeps) fetchRemoteHeaderByHeight(ctx context.Context, height uint64) *fetcherpkg.BlockHeaderJson {
+	if deps.NodeManager == nil || deps.Fetcher == nil {
+		return nil
+	}
+	for _, nodeOp := range deps.NodeManager.NodeOperators() {
+		if header := deps.Fetcher.FetchBlockHeaderByHeight(ctx, nodeOp, 0, height); header != nil {
+			return header
+		}
+	}
+	return nil
+}
+
+func decodeHeaderHeight(header *fetcherpkg.BlockHeaderJson) (uint64, bool) {
+	if header == nil {
+		return 0, false
+	}
+	height, err := hexutil.DecodeUint64(strings.TrimSpace(header.Number))
+	return height, err == nil
 }

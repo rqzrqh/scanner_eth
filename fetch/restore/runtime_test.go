@@ -1,10 +1,16 @@
 package restore
 
 import (
+	"context"
 	"scanner_eth/blocktree"
+	fetcherpkg "scanner_eth/fetch/fetcher"
+	nodepkg "scanner_eth/fetch/node"
 	fetchstore "scanner_eth/fetch/store"
 	"scanner_eth/model"
 	"testing"
+
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 func testRuntimeDeps() RuntimeDeps {
@@ -67,5 +73,63 @@ func TestRestoreBlockTreeSkipsInvalidHashAndRepeatedRestore(t *testing.T) {
 	}
 	if loaded2 != len(blocks) {
 		t.Fatalf("repeat loaded count mismatch: got=%d want=%d", loaded2, len(blocks))
+	}
+}
+
+func TestRestoreBlockTreeMarksRootParentReady(t *testing.T) {
+	deps := testRuntimeDeps()
+	blocks := []model.Block{
+		{Height: 8, Hash: "0x08", ParentHash: "0x07", Difficulty: "8", Complete: true},
+		{Height: 9, Hash: "0x09", ParentHash: "0x08", Difficulty: "9", Complete: true},
+	}
+
+	if _, err := deps.RestoreBlockTree(blocks); err != nil {
+		t.Fatalf("RestoreBlockTree failed: %v", err)
+	}
+	if !deps.StoredBlocks.IsStored("0x07") {
+		t.Fatal("off-window root parent should be marked ready")
+	}
+}
+
+func TestRestoreRemoteRootInsertsHeaderAndMarksParentReady(t *testing.T) {
+	deps := testRuntimeDeps()
+	deps.NodeManager = nodepkg.NewNodeManager([]*ethclient.Client{nil}, 0)
+	deps.Fetcher = fetcherpkg.NewMockFetcher(
+		func(_ context.Context, _ nodepkg.NodeOperator, _ int, height uint64) *fetcherpkg.BlockHeaderJson {
+			if height != 30 {
+				t.Fatalf("unexpected restore height: %d", height)
+			}
+			return &fetcherpkg.BlockHeaderJson{
+				Number:     hexutil.EncodeUint64(30),
+				Hash:       "0x30",
+				ParentHash: "0x29",
+			}
+		},
+		nil,
+		nil,
+	)
+
+	if !deps.RestoreRemoteRoot(context.Background(), 30) {
+		t.Fatal("expected remote root restore to succeed")
+	}
+	root := deps.BlockTree.Root()
+	if root == nil || root.Height != 30 || root.Key != "0x30" {
+		t.Fatalf("unexpected restored root: %+v", root)
+	}
+	if !deps.StoredBlocks.IsStored("0x29") {
+		t.Fatal("remote root parent should be marked ready")
+	}
+}
+
+func TestRestoreRemoteRootFailsWithoutHeader(t *testing.T) {
+	deps := testRuntimeDeps()
+	deps.NodeManager = nodepkg.NewNodeManager([]*ethclient.Client{nil}, 0)
+	deps.Fetcher = fetcherpkg.NewMockFetcher(nil, nil, nil)
+
+	if deps.RestoreRemoteRoot(context.Background(), 30) {
+		t.Fatal("expected remote root restore to fail without a header")
+	}
+	if deps.BlockTree.Root() != nil {
+		t.Fatal("failed remote restore must not create a root")
 	}
 }

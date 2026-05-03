@@ -1,6 +1,7 @@
 package task
 
 import (
+	"context"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -45,13 +46,10 @@ func TestTaskPoolAsyncDeduplicated(t *testing.T) {
 	}
 
 	close(release)
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for pool.HasTask("0xabc") && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
-
-	if pool.HasTask("0xabc") {
-		t.Fatalf("task should be removed after async worker completes")
+	waitCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	if err := pool.WaitIdle(waitCtx, 0); err != nil {
+		t.Fatalf("task pool did not become idle: %v", err)
 	}
 	if got := atomic.LoadInt32(&handled); got != 1 {
 		t.Fatalf("dedupe failed: got=%v want=1", got)
@@ -131,13 +129,10 @@ func TestTaskPoolRetryAndStats(t *testing.T) {
 		t.Fatalf("timeout waiting retry task completion")
 	}
 
-	deadline := time.Now().Add(300 * time.Millisecond)
-	for pool.HasTask("retry-me") && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
-
-	if pool.HasTask("retry-me") {
-		t.Fatalf("retry task should be removed after success")
+	waitCtx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	if err := pool.WaitIdle(waitCtx, 0); err != nil {
+		t.Fatalf("task pool did not become idle after retry: %v", err)
 	}
 
 	stats := pool.Stats()

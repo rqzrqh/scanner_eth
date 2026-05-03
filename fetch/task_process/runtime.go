@@ -15,10 +15,10 @@ import (
 )
 
 type RuntimeDeps struct {
-	BlockTree    *blocktree.BlockTree
-	StagingStore *fetchstore.StagingStore
-	NodeManager  *nodepkg.NodeManager
-	Fetcher      fetcherpkg.Fetcher
+	BlockTree       *blocktree.BlockTree
+	StagingStore    *fetchstore.StagingStore
+	NodeManager     *nodepkg.NodeManager
+	Fetcher         fetcherpkg.Fetcher
 	EnqueueBodyTask func(string)
 
 	TryClaimHeaderHeight func(uint64) bool
@@ -167,6 +167,7 @@ func (deps RuntimeDeps) SyncHeaderByHeight(ctx context.Context, height uint64) *
 		return nil
 	}
 	deps.InsertTreeHeader(header)
+	deps.setPendingHeader(header.Hash, header)
 	return header
 }
 
@@ -184,6 +185,7 @@ func (deps RuntimeDeps) SyncHeaderByHash(ctx context.Context, hash string) bool 
 		return false
 	}
 	deps.InsertTreeHeader(header)
+	deps.setPendingHeader(header.Hash, header)
 	return true
 }
 

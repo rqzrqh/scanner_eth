@@ -37,6 +37,18 @@ type Branch struct {
 	Nodes  []*LinkedNode
 }
 
+type Snapshot struct {
+	Root              *Node  `json:"root"`
+	StartHeight       uint64 `json:"start_height"`
+	EndHeight         uint64 `json:"end_height"`
+	HasRange          bool   `json:"has_range"`
+	LinkedCount       uint64 `json:"linked_count"`
+	LeafCount         uint64 `json:"leaf_count"`
+	BranchCount       uint64 `json:"branch_count"`
+	OrphanParentCount uint64 `json:"orphan_parent_count"`
+	OrphanCount       uint64 `json:"orphan_count"`
+}
+
 func cloneLinkedNode(n *LinkedNode) *LinkedNode {
 	if n == nil {
 		return nil
@@ -509,4 +521,41 @@ func (t *BlockTree) Len() int {
 	defer t.mu.RUnlock()
 
 	return len(t.keyValue)
+}
+
+func (t *BlockTree) Snapshot() Snapshot {
+	if t == nil {
+		return Snapshot{}
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	snapshot := Snapshot{
+		LinkedCount: uint64(len(t.keyValue)),
+		LeafCount:   uint64(len(t.headers)),
+		BranchCount: uint64(len(t.headers)),
+	}
+	if t.root != nil {
+		root := *t.root
+		snapshot.Root = &root
+		snapshot.StartHeight = root.Height
+		snapshot.EndHeight = root.Height
+		snapshot.HasRange = len(t.keyValue) > 0
+	}
+	for k := range t.headers {
+		nv := t.keyValue[k]
+		if nv != nil && (!snapshot.HasRange || nv.Height > snapshot.EndHeight) {
+			snapshot.EndHeight = nv.Height
+		}
+	}
+	for parentKey, children := range t.orphanParentToChild {
+		if len(children) == 0 {
+			continue
+		}
+		if _, ok := t.orphanKeySet[parentKey]; !ok {
+			snapshot.OrphanParentCount++
+		}
+		snapshot.OrphanCount += uint64(len(children))
+	}
+	return snapshot
 }

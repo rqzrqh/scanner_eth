@@ -28,7 +28,23 @@ func TestEnableTaskPoolMetricsPublishesStats(t *testing.T) {
 	if storeV == nil {
 		t.Fatalf("expected store block expvar metric to be published")
 	}
-	if !strings.Contains(storeV.String(), "\"submitted\"") || !strings.Contains(storeV.String(), "\"storing\"") {
+	if !strings.Contains(storeV.String(), "\"submitted\"") || !strings.Contains(storeV.String(), "\"processing\"") {
 		t.Fatalf("unexpected store block metric payload: %v", storeV.String())
+	}
+
+	scanV := expvar.Get(name + "_scan")
+	if scanV == nil {
+		t.Fatalf("expected scan expvar metric to be published")
+	}
+	if !strings.Contains(scanV.String(), "\"stages\"") {
+		t.Fatalf("unexpected scan metric payload: %v", scanV.String())
+	}
+
+	runtimeV := expvar.Get(name + "_runtime")
+	if runtimeV == nil {
+		t.Fatalf("expected runtime expvar metric to be published")
+	}
+	if !strings.Contains(runtimeV.String(), "\"blocktree\"") || !strings.Contains(runtimeV.String(), "\"nodes\"") {
+		t.Fatalf("unexpected runtime metric payload: %v", runtimeV.String())
 	}
 }

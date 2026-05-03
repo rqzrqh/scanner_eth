@@ -69,3 +69,12 @@ func (s *StoredBlockState) Snapshot() map[string]struct{} {
 	}
 	return snapshot
 }
+
+func (s *StoredBlockState) Count() uint64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return uint64(len(s.hashes))
+}

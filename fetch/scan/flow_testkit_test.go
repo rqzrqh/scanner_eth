@@ -307,17 +307,9 @@ func (env *testFlowEnv) runScanAndWait() {
 
 	checkIdle:
 		heightCount, hashCount := env.taskPool.HeaderSyncCounts()
-		taskSyncing := heightCount > 0 || hashCount > 0
-		storeBusy := false
-		if env.store != nil {
-			metrics := env.store.MetricsPayload()
-			if queue, ok := metrics["queue"].(map[string]uint64); ok && queue["pending"] > 0 {
-				storeBusy = true
-			}
-			if state, ok := metrics["state"].(map[string]uint64); ok && state["storing"] > 0 {
-				storeBusy = true
-			}
-		}
+		taskStats := env.taskPool.Stats()
+		taskSyncing := heightCount > 0 || hashCount > 0 || taskStats.PendingHigh > 0 || taskStats.PendingNormal > 0
+		storeBusy := env.store != nil && !env.store.IsIdle()
 		if !taskSyncing && !storeBusy && !drainedTrigger {
 			bodyWorkPending := false
 			if env.store != nil {
@@ -329,7 +321,7 @@ func (env *testFlowEnv) runScanAndWait() {
 			if hasMoreWork {
 				env.flow.RunScanCycle(context.Background())
 				quietSince = time.Time{}
-				time.Sleep(5 * time.Millisecond)
+				env.waitRuntimeQuiet(20 * time.Millisecond)
 				continue
 			}
 			if quietSince.IsZero() {
@@ -340,10 +332,20 @@ func (env *testFlowEnv) runScanAndWait() {
 		} else {
 			quietSince = time.Time{}
 		}
-		time.Sleep(5 * time.Millisecond)
+		env.waitRuntimeQuiet(20 * time.Millisecond)
 	}
 
 	env.t.Fatalf("scan stages did not finish before timeout")
+}
+
+func (env *testFlowEnv) waitRuntimeQuiet(timeout time.Duration) {
+	env.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	_ = env.taskPool.WaitIdle(ctx, 0)
+	if env.store != nil {
+		_ = env.store.WaitIdle(ctx, 0)
+	}
 }
 
 func makeTestHeader(height uint64, hash string, parent string) *testHeader {

@@ -2,6 +2,8 @@ package scan
 
 import (
 	"context"
+	"strings"
+	"time"
 
 	"scanner_eth/blocktree"
 	fetchserialstore "scanner_eth/fetch/serial_store"
@@ -17,12 +19,31 @@ type branchProcessState struct {
 }
 
 func (sf *Flow) RunSyncBodyStage(ctx context.Context) []fetchserialstore.Branch {
+	startedAt := time.Now()
 	if !sf.canRunScanStage(ctx) {
+		if sf != nil {
+			sf.logScanStageEvent(scanStageEvent{stage: scanStageSyncBody, success: false, duration: time.Since(startedAt), errMsg: "scan stage unavailable"})
+		}
 		return nil
 	}
 	bodyBranches := sf.collectStoreBranchesForBodySync()
 	sf.requestMissingBodySync(bodyBranches)
+	sf.logScanStageEvent(scanStageEvent{
+		stage:       scanStageSyncBody,
+		target:      strings.Join(sf.serializeStoreBranches(bodyBranches), bodyTargetBranchSep),
+		targetCount: countBranchNodes(bodyBranches),
+		success:     true,
+		duration:    time.Since(startedAt),
+	})
 	return bodyBranches
+}
+
+func countBranchNodes(branches []fetchserialstore.Branch) int {
+	count := 0
+	for _, branch := range branches {
+		count += len(branch.Nodes)
+	}
+	return count
 }
 
 func (sf *Flow) EnqueueMissingBodyTasks(branches []fetchserialstore.Branch) {
@@ -59,9 +80,6 @@ func (sf *Flow) ProcessBranchNode(ctx context.Context, node *blocktree.LinkedNod
 	if sf.storedBlocks != nil && sf.storedBlocks.IsStored(hash) {
 		return true
 	}
-	if sf.storeWorker != nil && sf.storeWorker.IsInflight(hash) {
-		return false
-	}
 
 	state, ok := sf.BuildBranchProcessState(node)
 	if !ok || !state.ParentReady {
@@ -80,7 +98,7 @@ func (sf *Flow) BuildBranchProcessState(node *blocktree.LinkedNode) (branchProce
 		return branchProcessState{}, false
 	}
 	hash := sf.normalize(node.Key)
-	if hash == "" || sf.storedBlocks.IsStored(hash) || (sf.storeWorker != nil && sf.storeWorker.IsInflight(hash)) {
+	if hash == "" || sf.storedBlocks.IsStored(hash) {
 		return branchProcessState{}, false
 	}
 	parentHash := sf.normalize(node.ParentKey)

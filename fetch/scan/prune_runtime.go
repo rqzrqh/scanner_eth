@@ -6,6 +6,7 @@ import (
 	fetchstore "scanner_eth/fetch/store"
 	fetchtask "scanner_eth/fetch/taskpool"
 	"scanner_eth/util"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -34,6 +35,7 @@ type pruneStateSnapshot struct {
 }
 
 func (sf *Flow) RunPruneStage(ctx context.Context) {
+	startedAt := time.Now()
 	if sf == nil || sf.irreversible <= 0 {
 		return
 	}
@@ -41,7 +43,31 @@ func (sf *Flow) RunPruneStage(ctx context.Context) {
 	// therefore waits for body persistence to finish before pruning. This keeps
 	// serial_store on the simpler contract of consuming scan-time low-to-high
 	// full branch snapshots without prune interleaving during the same cycle.
+	before := sf.pruneRuntime.CaptureStateSnapshot()
 	sf.pruneRuntime.PruneStoredBlocks(ctx, sf.irreversible)
+	after := sf.pruneRuntime.CaptureStateSnapshot()
+	beforeCount := 0
+	afterCount := 0
+	if before != nil {
+		beforeCount = len(before.Branches)
+	}
+	if after != nil {
+		afterCount = len(after.Branches)
+	}
+	event := scanStageEvent{
+		stage:       scanStagePrune,
+		target:      "stored_blocks",
+		targetCount: beforeCount,
+		success:     ctx == nil || ctx.Err() == nil,
+		duration:    time.Since(startedAt),
+	}
+	if !event.success {
+		event.errMsg = ctx.Err().Error()
+	}
+	if afterCount != beforeCount {
+		event.target = "stored_blocks_pruned"
+	}
+	sf.logScanStageEvent(event)
 }
 
 func (deps PruneRuntimeDeps) CaptureStateSnapshot() *pruneStateSnapshot {

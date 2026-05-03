@@ -67,10 +67,13 @@ func TestRestoreBlockTreeLoadsWindowAndCompleteState(t *testing.T) {
 	if storedBlocks.IsStored("0x08") {
 		t.Fatalf("incomplete block should not be marked stored")
 	}
-	for _, hash := range []string{"0x06", "0x07"} {
+	for _, hash := range []string{"0x06"} {
 		if storedBlocks.IsStored(hash) {
 			t.Fatalf("pruned block %s should not remain marked stored", hash)
 		}
+	}
+	if !storedBlocks.IsStored("0x07") {
+		t.Fatal("parent of retained root should remain marked ready after restore prune")
 	}
 	if !storedBlocks.IsStored("0x09") || !storedBlocks.IsStored("0x0a") {
 		t.Fatalf("complete blocks in recovery window should be marked stored")
@@ -103,6 +106,63 @@ func TestRestoreBlockTreeLoadsWindowAndCompleteState(t *testing.T) {
 	}
 }
 
+func TestRestoreBlockTreePrunesAvailableShortWindowSuffix(t *testing.T) {
+	db := newTestDB(t)
+	blocks := []model.Block{
+		{Height: 2, Hash: "0x02", ParentHash: "", Difficulty: "2", Complete: true, IrreversibleHeight: 999, IrreversibleHash: "0xstale"},
+		{Height: 3, Hash: "0x03", ParentHash: "0x02", Difficulty: "3", Complete: true, IrreversibleHeight: 999, IrreversibleHash: "0xstale"},
+		{Height: 4, Hash: "0x04", ParentHash: "0x03", Difficulty: "4", Complete: true, IrreversibleHeight: 999, IrreversibleHash: "0xstale"},
+		{Height: 5, Hash: "0x05", ParentHash: "0x04", Difficulty: "5", Complete: true, IrreversibleHeight: 999, IrreversibleHash: "0xstale"},
+	}
+	if err := db.Create(&blocks).Error; err != nil {
+		t.Fatalf("seed short recovery window failed: %v", err)
+	}
+
+	fm := newTestFetchManager(t, 2)
+	fm.db = db
+	op := newRuntimeDbOperator(fm.db, fm.chainId, fm.irreversibleBlocks)
+	setTestDbOperator(fm, op)
+	blockTree := mustTestBlockTree(t, fm)
+	storedBlocks := mustTestStoredBlocks(t, fm)
+
+	windowBlocks := loadTestBlockWindow(t, fm, context.Background())
+	if len(windowBlocks) != 4 {
+		t.Fatalf("expected all available short-window rows to load, got=%d", len(windowBlocks))
+	}
+
+	loaded, err := fm.restoreBlockTree(windowBlocks)
+	if err != nil {
+		t.Fatalf("restore short recovery window failed: %v", err)
+	}
+	if loaded != 4 {
+		t.Fatalf("loaded block count mismatch: got=%v want=4", loaded)
+	}
+
+	start, end, ok := blockTree.HeightRange()
+	if !ok || start != 3 || end != 5 {
+		t.Fatalf("unexpected retained short-window suffix: ok=%v start=%v end=%v", ok, start, end)
+	}
+	if blockTree.Get("0x02") != nil {
+		t.Fatal("context-only block 0x02 should be pruned from tree")
+	}
+	if !storedBlocks.IsStored("0x02") {
+		t.Fatal("parent of retained root should remain marked ready after restore prune")
+	}
+	for _, hash := range []string{"0x03", "0x04", "0x05"} {
+		if blockTree.Get(hash) == nil {
+			t.Fatalf("expected retained block %s in tree", hash)
+		}
+		if !storedBlocks.IsStored(hash) {
+			t.Fatalf("expected retained complete block %s in stored state", hash)
+		}
+	}
+
+	root := blockTree.Get("0x03")
+	if root == nil || root.Irreversible.Height != 2 || root.Irreversible.Key != "0x02" {
+		t.Fatalf("retained root should recompute irreversible from loaded context, got=%+v", root)
+	}
+}
+
 func TestRestoreBlockTreeInsertsWhenParentMissingOutsideWindow(t *testing.T) {
 	db := newTestDB(t)
 	blocks := []model.Block{
@@ -119,6 +179,7 @@ func TestRestoreBlockTreeInsertsWhenParentMissingOutsideWindow(t *testing.T) {
 	op := newRuntimeDbOperator(fm.db, fm.chainId, fm.irreversibleBlocks)
 	setTestDbOperator(fm, op)
 	blockTree := mustTestBlockTree(t, fm)
+	storedBlocks := mustTestStoredBlocks(t, fm)
 
 	windowBlocks := loadTestBlockWindow(t, fm, context.Background())
 
@@ -137,6 +198,9 @@ func TestRestoreBlockTreeInsertsWhenParentMissingOutsideWindow(t *testing.T) {
 	start, end, ok := blockTree.HeightRange()
 	if !ok || start != 8 || end != 10 {
 		t.Fatalf("unexpected height range: ok=%v start=%v end=%v", ok, start, end)
+	}
+	if !storedBlocks.IsStored("0x07") {
+		t.Fatal("off-window parent of restored root should be marked ready")
 	}
 }
 
@@ -280,5 +344,66 @@ func TestOnBecameLeaderFallsBackToRemoteBootstrapWhenDBEmpty(t *testing.T) {
 	root := mustTestBlockTree(t, fm).Root()
 	if root == nil || root.Height != 30 || root.Key != "0x30" {
 		t.Fatalf("expected remote bootstrap root at height 30, got=%+v", root)
+	}
+	if !mustTestStoredBlocks(t, fm).IsStored("0x29") {
+		t.Fatal("remote bootstrap parent should be marked ready")
+	}
+}
+
+func TestOnBecameLeaderFallsBackToRemoteWhenDBRestoreHasNoRoot(t *testing.T) {
+	fm := newTestFetchManager(t, 2)
+	setTestScanStartHeight(fm, 40)
+	setTestDbOperator(fm, &mockDbOperator{
+		loadFn: func(context.Context) ([]model.Block, error) {
+			return []model.Block{{Height: 40, Hash: "", ParentHash: "0x39", Complete: true}}, nil
+		},
+	})
+
+	fetchHeaderCalls := 0
+	setTestFetcher(fm, fetcherpkg.NewMockFetcher(
+		func(_ context.Context, _ nodepkg.NodeOperator, _ int, height uint64) *fetcherpkg.BlockHeaderJson {
+			fetchHeaderCalls++
+			if height != 40 {
+				t.Fatalf("unexpected header fetch height: %v", height)
+			}
+			return makeHeader(40, "0x40", "0x39")
+		},
+		nil,
+		nil,
+	))
+
+	if err := fm.onBecameLeader(context.Background()); err != nil {
+		t.Fatalf("onBecameLeader fallback failed: %v", err)
+	}
+	if fetchHeaderCalls != 1 {
+		t.Fatalf("expected remote fallback after unusable db restore, got calls=%v", fetchHeaderCalls)
+	}
+	root := mustTestBlockTree(t, fm).Root()
+	if root == nil || root.Height != 40 || root.Key != "0x40" {
+		t.Fatalf("expected remote bootstrap root at height 40, got=%+v", root)
+	}
+}
+
+func TestOnBecameLeaderReleasesRuntimeWhenDBAndRemoteBootstrapFail(t *testing.T) {
+	fm := newTestFetchManager(t, 2)
+	setTestScanStartHeight(fm, 50)
+	setTestDbOperator(fm, &mockDbOperator{
+		loadFn: func(context.Context) ([]model.Block, error) {
+			return []model.Block{{Height: 50, Hash: "", ParentHash: "0x49", Complete: true}}, nil
+		},
+	})
+	setTestFetcher(fm, fetcherpkg.NewMockFetcher(
+		func(context.Context, nodepkg.NodeOperator, int, uint64) *fetcherpkg.BlockHeaderJson {
+			return nil
+		},
+		nil,
+		nil,
+	))
+
+	if err := fm.onBecameLeader(context.Background()); err == nil {
+		t.Fatal("expected onBecameLeader to fail when db restore and remote bootstrap both fail")
+	}
+	if fm.currentRuntime() != nil {
+		t.Fatal("runtime should be released when leader bootstrap cannot restore from db or remote")
 	}
 }

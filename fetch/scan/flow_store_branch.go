@@ -143,11 +143,11 @@ func (sf *Flow) waitStoreBranchesWrite(ctx context.Context, bodyBranches []fetch
 	bodyBranchTarget := strings.Join(sf.serializeStoreBranches(bodyBranches), bodyTargetBranchSep)
 	startedAt := time.Now()
 	if ctx != nil && ctx.Err() != nil {
-		sf.logScanStageEvent(scanStageEvent{stage: scanStageStoreBranches, target: bodyBranchTarget, duration: time.Since(startedAt), errMsg: "scan context cancelled"})
+		sf.logScanStageEvent(scanStageEvent{stage: scanStageStoreBranches, target: bodyBranchTarget, targetCount: countBranchNodes(bodyBranches), duration: time.Since(startedAt), errMsg: "scan context cancelled"})
 		return
 	}
 	err := sf.SubmitStoreBranches(ctx, bodyBranches)
-	event := scanStageEvent{stage: scanStageStoreBranches, target: bodyBranchTarget, success: err == nil, duration: time.Since(startedAt)}
+	event := scanStageEvent{stage: scanStageStoreBranches, target: bodyBranchTarget, targetCount: countBranchNodes(bodyBranches), success: err == nil, duration: time.Since(startedAt)}
 	if err != nil {
 		event.errMsg = err.Error()
 	}

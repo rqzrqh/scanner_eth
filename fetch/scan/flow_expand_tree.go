@@ -3,6 +3,8 @@ package scan
 import (
 	"context"
 	"strconv"
+	"strings"
+	"time"
 
 	fetcherpkg "scanner_eth/fetch/fetcher"
 
@@ -10,11 +12,34 @@ import (
 )
 
 func (sf *Flow) RunExpandTreeStage(ctx context.Context) {
+	startedAt := time.Now()
 	if !sf.canRunScanStage(ctx) {
+		if sf != nil {
+			sf.logScanStageEvent(scanStageEvent{stage: scanStageExpandTree, success: false, duration: time.Since(startedAt), errMsg: "scan stage unavailable"})
+		}
 		return
 	}
 	sf.inspectBlockTreeState("before_expand_tree")
-	sf.enqueueExpandTreeTargets(sf.GetExpandTreeTargets())
+	targets := sf.GetExpandTreeTargets()
+	sf.enqueueExpandTreeTargets(targets)
+	sf.logScanStageEvent(scanStageEvent{
+		stage:       scanStageExpandTree,
+		target:      formatUintTargets(targets),
+		targetCount: len(targets),
+		success:     true,
+		duration:    time.Since(startedAt),
+	})
+}
+
+func formatUintTargets(targets []uint64) string {
+	if len(targets) == 0 {
+		return ""
+	}
+	values := make([]string, 0, len(targets))
+	for _, target := range targets {
+		values = append(values, strconv.FormatUint(target, 10))
+	}
+	return strings.Join(values, ",")
 }
 
 func (sf *Flow) latestRemoteHeight() uint64 {
@@ -127,7 +152,25 @@ func (sf *Flow) EnsureBootstrapHeader() bool {
 		return false
 	}
 	sf.taskRuntime.InsertTreeHeader(header)
+	sf.MarkRootParentReady()
 	logrus.Infof("bootstrap blocktree root by startHeight success. height:%v hash:%v", height, sf.normalize(header.Hash))
+	return true
+}
+
+func (sf *Flow) MarkRootParentReady() bool {
+	if sf == nil || sf.blockTree == nil || sf.storedBlocks == nil {
+		return false
+	}
+	root := sf.blockTree.Root()
+	if root == nil {
+		return false
+	}
+	parentHash := sf.normalize(root.ParentKey)
+	if parentHash == "" {
+		return false
+	}
+	sf.storedBlocks.MarkStored(parentHash)
+	logrus.Infof("mark blocktree root parent ready. root_height:%v root_hash:%v parent_hash:%v", root.Height, sf.normalize(root.Key), parentHash)
 	return true
 }
 
@@ -152,6 +195,7 @@ func (sf *Flow) ExpandTreeWindow() {
 			if header == nil {
 				return
 			}
+			sf.MarkRootParentReady()
 			logrus.Infof("sync header window bootstrap by startHeight success. height:%v hash:%v", height, sf.normalize(header.Hash))
 			continue
 		}

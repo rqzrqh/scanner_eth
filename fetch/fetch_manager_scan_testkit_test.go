@@ -57,24 +57,17 @@ func runScanAndWait(t *testing.T, fm *FetchManager) {
 		}
 
 	checkIdle:
-		taskSyncing := taskPool.TrackedCount() > 0
-		storeBusy := false
-		if storeWorker := fm.runtimeStoreWorker(); storeWorker != nil {
-			metrics := storeWorker.MetricsPayload()
-			if queue, ok := metrics["queue"].(map[string]uint64); ok && queue["pending"] > 0 {
-				storeBusy = true
-			}
-			if state, ok := metrics["state"].(map[string]uint64); ok && state["storing"] > 0 {
-				storeBusy = true
-			}
-		}
+		taskStats := taskPool.Stats()
+		taskSyncing := taskStats.PendingHigh > 0 || taskStats.PendingNormal > 0 || taskPool.TrackedCount() > 0
+		storeWorker := fm.runtimeStoreWorker()
+		storeBusy := storeWorker != nil && !storeWorker.IsIdle()
 		if !taskSyncing && !storeBusy && !drainedTrigger {
 			hasMoreWork := len(scanFlow.GetExpandTreeTargets()) > 0 ||
 				len(scanFlow.GetFillTreeTargets()) > 0
 			if hasMoreWork {
 				scanFlow.RunScanCycle(context.Background())
 				quietSince = time.Time{}
-				time.Sleep(5 * time.Millisecond)
+				waitFetchManagerRuntimeQuiet(fm, 20*time.Millisecond)
 				continue
 			}
 			if quietSince.IsZero() {
@@ -85,10 +78,21 @@ func runScanAndWait(t *testing.T, fm *FetchManager) {
 		} else {
 			quietSince = time.Time{}
 		}
-		time.Sleep(5 * time.Millisecond)
+		waitFetchManagerRuntimeQuiet(fm, 20*time.Millisecond)
 	}
 
 	t.Fatalf("scan stages did not finish before timeout")
+}
+
+func waitFetchManagerRuntimeQuiet(fm *FetchManager, timeout time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if taskPool := fm.runtimeTaskPool(); taskPool != nil {
+		_ = taskPool.WaitIdle(ctx, 0)
+	}
+	if storeWorker := fm.runtimeStoreWorker(); storeWorker != nil {
+		_ = storeWorker.WaitIdle(ctx, 0)
+	}
 }
 
 func makeHeader(height uint64, hash string, parent string) *fetcherpkg.BlockHeaderJson {

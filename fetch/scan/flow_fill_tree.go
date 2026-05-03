@@ -2,15 +2,29 @@ package scan
 
 import (
 	"context"
+	"strings"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
 
 func (sf *Flow) RunFillTreeStage(ctx context.Context) {
+	startedAt := time.Now()
 	if !sf.canRunScanStage(ctx) {
+		if sf != nil {
+			sf.logScanStageEvent(scanStageEvent{stage: scanStageFillTree, success: false, duration: time.Since(startedAt), errMsg: "scan stage unavailable"})
+		}
 		return
 	}
-	sf.enqueueFillTreeTargets(sf.GetFillTreeTargets())
+	targets := sf.GetFillTreeTargets()
+	sf.enqueueFillTreeTargets(targets)
+	sf.logScanStageEvent(scanStageEvent{
+		stage:       scanStageFillTree,
+		target:      strings.Join(targets, ","),
+		targetCount: len(targets),
+		success:     true,
+		duration:    time.Since(startedAt),
+	})
 }
 
 func (sf *Flow) GetFillTreeTargets() []string {

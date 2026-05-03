@@ -67,14 +67,15 @@ sequenceDiagram
     FM->>RT: allocate fresh T / P / D / workers
     FM->>DB: LoadBlockWindowFromDB(ctx)
     alt DB window non-empty
-        FM->>BT: restoreBlockTree
+        FM->>BT: restore.RestoreBlockTree
         FM->>SS: SetPendingHeader(hash, nil)
         FM->>DS: MarkStored(complete rows)
         FM->>SF: PruneStoredBlocks(if needed)
+        FM->>DS: MarkStored(current root parent as ready marker)
     else DB window empty
-        FM->>SF: EnsureBootstrapHeader()
-        SF->>FE: FetchBlockHeaderByHeight
-        SF->>BT: insertHeader(topology)
+        FM->>FE: restore.RestoreRemoteRoot fetches startHeight header
+        FM->>BT: insert root header topology
+        FM->>DS: MarkStored(root parent as ready marker)
     end
 
     FM->>HM: Start()
@@ -94,18 +95,17 @@ sequenceDiagram
     FM->>SC: Trigger()
 
     SC->>SF: RunScanCycle(ctx)
-    SF->>SF: getHeaderByHeightSyncTargets
-    SF->>SF: getHeaderByHashSyncTargets
-    SF->>SF: build low-to-high branches
-
-    par header by height
-        SF->>TP: EnqueueHeaderHeightTask
-    and header by hash
-        SF->>TP: EnqueueHeaderHashTask
-    and body
-        SF->>TP: enqueue missing-body tasks
-        SF->>SW: SubmitBranches(branches)
-    end
+    SF->>SF: RunExpandTreeStage
+    SF->>SF: GetExpandTreeTargets
+    SF->>TP: EnqueueHeaderHeightTask
+    SF->>SF: RunFillTreeStage
+    SF->>SF: GetFillTreeTargets
+    SF->>TP: EnqueueHeaderHashTask
+    SF->>SF: RunSyncBodyStage
+    SF->>TP: enqueue missing-body tasks
+    SF->>SF: RunStoreBranchesStage
+    SF->>SW: SubmitBranches(branches)
+    SF->>SF: RunPruneStage
 
     TP->>TR: HandleTaskPoolTask(task)
     TR->>FE: FetchBlockHeader / FetchFullBlock
@@ -126,7 +126,11 @@ sequenceDiagram
 
 - **Scheduling & lifecycle**
   - `fetch_manager.go`: leader callbacks, runtime bootstrap, trigger control
-- `scan/flow.go`: target enumeration, low-to-high branch materialization, body-task backfill for missing payloads, async stage execution, stage logging
+- `scan/flow.go`: scan pipeline orchestration, runtime binding, stage logging
+  - `scan/flow_expand_tree.go`: height-window expansion and expand-tree target enumeration during scan
+  - `scan/flow_fill_tree.go`: orphan-parent recovery, fill-tree target enumeration
+  - `scan/flow_sync_body.go`: missing-body task backfill, body/staging readiness helpers
+  - `scan/flow_store_branch.go`: low-to-high branch materialization and serialized store submission
   - `scan/worker.go`: periodic/triggered scan execution
 - **Nodes & chain head**
   - `fetch/node`: node readiness, latency, best-node selection
@@ -137,26 +141,51 @@ sequenceDiagram
 - **Tree & state**
   - `blocktree` package: fork topology, orphan linking, prune, thread-safe API
   - `staging_block_store.go`: `StagingStore`, pending headers/bodies by hash
-  - `restore/runtime.go`: rebuild tree from DB window
+  - `restore/runtime.go`: restore leader bootstrap state from DB window or remote `startHeight`, and mark the current root parent as a persisted-readiness boundary
   - `scan/prune_runtime.go`: prune policy for already-stored blocks
   - `stored_block_state.go`: set of persisted block hashes
 - **Task execution**
   - `taskpool/pool.go`: dedupe, priority queue, workers, retries, metrics
-- `task_process`: body/header fetch, tree insertion, body-task trigger on inserted headers, and write-back to `StagingStore`
+  - `task_process`: body/header fetch, tree insertion, body-task trigger on inserted headers, and write-back to `StagingStore`
 - **Storage**
   - `store/db_operator.go`: DB window read and block persistence via `DBOperator`
   - `serial_store/serial_worker.go`: serialized write pipeline
 
-## 4. Concurrency model
+## 4. Scan pipeline
+
+Each scan cycle is an explicit task-oriented pipeline:
+
+1. **Expand tree**: `RunExpandTreeStage()` computes `GetExpandTreeTargets()` from local height range, configured window, and latest remote tip, then enqueues height-based header sync.
+2. **Fill tree**: `RunFillTreeStage()` computes `GetFillTreeTargets()` from current orphans, then enqueues parent-by-hash recovery.
+3. **Sync body**: `RunSyncBodyStage()` materializes current storeable branches, identifies nodes that still lack body payload, and backfills body tasks on the fetch side.
+4. **Store branches**: `RunStoreBranchesStage()` hands low-to-high branch snapshots to `serial_store`, which decides the writable prefix using persisted-parent readiness only.
+5. **Prune**: `RunPruneStage()` removes stored history outside the retained irreversible window and clears matching payload/task state.
+
+This split matches the ownership boundary used in code:
+
+- `scan` decides **what work should exist now** from the current tree snapshot.
+- `task_process` decides **when header insertion should trigger body work**.
+- `serial_store` decides **which contiguous prefix is actually writable** and performs DB persistence.
+
+## 5. Concurrency model
 
 - `BlockTree` is internally locked; callers use its methods only.
 - `StagingStore` is owned by runtime state; it maps hash → pending header/body.
 - `BlockTree.Branches()` returns each branch leaf-first, so branch-local node order is high → low at the API boundary.
-- `scan/flow.go` only materializes low → high branch sequences from `BlockTree` and hands those branches to `serial_store/serial_worker.go`.
-- `scan/flow.go` may re-enqueue body tasks for branch nodes whose payload is still missing, but it does not traverse the branch node-by-node for persistence decisions.
+- `scan/flow_store_branch.go` only materializes low → high branch sequences from `BlockTree` and hands those branches to `serial_store/serial_worker.go`.
+- `scan/flow_sync_body.go` may re-enqueue body tasks for branch nodes whose payload is still missing, but it does not traverse the branch node-by-node for persistence decisions.
 - `task_process/runtime.go` enqueues body tasks for headers newly inserted into `BlockTree`, so header progression continues to feed body fetch independently of `serial_store`.
 - `serial_store/serial_worker.go` is responsible for branch-local traversal: parent-persisted checks, treating a pruned-away parent as an acceptable branch root, DB writes, and stopping only the current branch when a node is blocked or fails.
+- Restore and restore-time prune keep one explicit boundary marker in `StoredBlockState`: the current `BlockTree.Root().ParentKey`, when non-empty. This marker means “the retained root's parent is outside the active tree but is ready for parent checks”; it is not a pending block to refetch or a retained block in `BlockTree`.
 - Header sync dedupes along two axes: `headerHeightsSyncing` (by height) and `headerHashesSyncing` (by hash).
 - Whether body sync runs is decided by target enumeration plus task-pool dedupe, not a single global boolean.
-- `BlockTree.Insert` rule: if `root` is set, headers with height ≤ `root.Height` are rejected.
-- Scan is triggered by: periodic ticker (1s), `HeaderNotifier` updates, and `triggerScan` after body sync completes.
+- `BlockTree.Insert` rule: if `root` is set, headers with height <= `root.Height` are rejected.
+- Scan is triggered by: periodic ticker (1s), `HeaderNotifier` updates, and fetch-side follow-up triggers after body/header progress completes.
+
+## 6. Observability and test hooks
+
+- `FetchManager.EnableTaskPoolMetrics(name)` publishes task pool, serial store, scan stage, and runtime summary expvar payloads.
+- `scan.Flow.MetricsPayload()` records per-stage run/failure counts, last target count, last duration, and last error for expand/fill/sync/store/prune.
+- Owner modules expose read-only snapshots for runtime inspection: `BlockTree.Snapshot()`, `StagingStore.Snapshot()`, `StoredBlockState.Count()`, and `NodeManager.Snapshot()`.
+- `serial_store.Worker.MetricsPayload()` includes branch skip reasons such as missing body, parent not ready, already stored, and DB failure counts.
+- `taskpool.Pool.WaitIdle()` and `serial_store.Worker.WaitIdle()` provide deterministic test synchronization around async queues without relying on fixed sleeps.

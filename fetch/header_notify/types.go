@@ -1,8 +1,9 @@
 package headernotify
 
 // RemoteHeader is the subset we take from an eth subscription / HTTP poll.
-// These fields are enough to extend the block tree, but not enough to seed
-// pending block data because the transactions list is absent.
+// These fields are enough for scan to validate a continuous header-by-hash
+// candidate, but not enough to insert/cache block data because the transaction
+// list and full block fields are absent.
 type RemoteHeader struct {
 	Hash       string
 	ParentHash string

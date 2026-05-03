@@ -1,6 +1,7 @@
 package task
 
 import (
+	"context"
 	"fmt"
 	"scanner_eth/util"
 	"strings"
@@ -700,5 +701,52 @@ func (tp *Pool) MetricsPayload() map[string]any {
 			"normal_queue_capacity": stats.NormalQueueCapacity,
 			"max_retry":             stats.MaxRetry,
 		},
+	}
+}
+
+func (tp *Pool) IsIdle() bool {
+	if tp == nil {
+		return true
+	}
+	stats := tp.Stats()
+	return stats.PendingHigh == 0 &&
+		stats.PendingNormal == 0 &&
+		stats.Tracked == 0
+}
+
+func (tp *Pool) WaitIdle(ctx context.Context, quietFor time.Duration) error {
+	if tp == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if quietFor < 0 {
+		quietFor = 0
+	}
+
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+
+	var idleSince time.Time
+	for {
+		if tp.IsIdle() {
+			if quietFor == 0 {
+				return nil
+			}
+			if idleSince.IsZero() {
+				idleSince = time.Now()
+			} else if time.Since(idleSince) >= quietFor {
+				return nil
+			}
+		} else {
+			idleSince = time.Time{}
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
 	}
 }

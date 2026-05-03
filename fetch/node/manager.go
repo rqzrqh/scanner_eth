@@ -16,6 +16,21 @@ type NodeState struct {
 	ready    bool
 }
 
+type NodeSnapshot struct {
+	ID           int    `json:"id"`
+	Ready        bool   `json:"ready"`
+	Delay        int64  `json:"delay"`
+	RemoteHeight uint64 `json:"remote_height"`
+	RemoteHash   string `json:"remote_hash"`
+}
+
+type ManagerSnapshot struct {
+	NodeCount    uint64         `json:"node_count"`
+	ReadyCount   uint64         `json:"ready_count"`
+	LatestHeight uint64         `json:"latest_height"`
+	Nodes        []NodeSnapshot `json:"nodes"`
+}
+
 func (n *NodeState) GetChainInfo() uint64 {
 	if n == nil {
 		return 0
@@ -163,4 +178,42 @@ func (nm *NodeManager) GetBestNode(height uint64) (int, NodeOperator, error) {
 		return -1, nil, fmt.Errorf("no valid node with height >= %d", height)
 	}
 	return nodeId, nm.nodes[nodeId].operator, nil
+}
+
+func (nm *NodeManager) Snapshot() ManagerSnapshot {
+	if nm == nil {
+		return ManagerSnapshot{Nodes: []NodeSnapshot{}}
+	}
+	nm.mu.RLock()
+	defer nm.mu.RUnlock()
+
+	snapshot := ManagerSnapshot{
+		NodeCount: uint64(len(nm.nodes)),
+		Nodes:     make([]NodeSnapshot, 0, len(nm.nodes)),
+	}
+	for id, node := range nm.nodes {
+		if node == nil {
+			snapshot.Nodes = append(snapshot.Nodes, NodeSnapshot{ID: id})
+			continue
+		}
+		var remoteHeight uint64
+		var remoteHash string
+		if node.remote != nil {
+			remoteHeight, remoteHash = node.remote.GetChainInfo()
+		}
+		if node.ready {
+			snapshot.ReadyCount++
+		}
+		if remoteHeight > snapshot.LatestHeight {
+			snapshot.LatestHeight = remoteHeight
+		}
+		snapshot.Nodes = append(snapshot.Nodes, NodeSnapshot{
+			ID:           id,
+			Ready:        node.ready,
+			Delay:        node.delay,
+			RemoteHeight: remoteHeight,
+			RemoteHash:   remoteHash,
+		})
+	}
+	return snapshot
 }

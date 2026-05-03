@@ -20,6 +20,13 @@ type StagingStore struct {
 	blocks map[string]*StagingBlock
 }
 
+type StagingSnapshot struct {
+	Blocks         uint64 `json:"blocks"`
+	PendingHeaders uint64 `json:"pending_headers"`
+	PendingBodies  uint64 `json:"pending_bodies"`
+	CompleteBlocks uint64 `json:"complete_blocks"`
+}
+
 func NewStagingStore() *StagingStore {
 	return &StagingStore{
 		blocks: make(map[string]*StagingBlock),
@@ -85,4 +92,33 @@ func (s *StagingStore) DeleteBlock(key string) {
 	defer s.mu.Unlock()
 
 	delete(s.blocks, key)
+}
+
+func (s *StagingStore) Snapshot() StagingSnapshot {
+	if s == nil {
+		return StagingSnapshot{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	snapshot := StagingSnapshot{
+		Blocks: uint64(len(s.blocks)),
+	}
+	for _, block := range s.blocks {
+		if block == nil {
+			continue
+		}
+		hasHeader := block.PendingHeader != nil
+		hasBody := block.PendingBody != nil
+		if hasHeader {
+			snapshot.PendingHeaders++
+		}
+		if hasBody {
+			snapshot.PendingBodies++
+		}
+		if hasHeader && hasBody {
+			snapshot.CompleteBlocks++
+		}
+	}
+	return snapshot
 }

@@ -85,17 +85,35 @@ func (fm *FetchManager) restoreBlockTree(blocks []model.Block) (int, error) {
 	if fm == nil {
 		return 0, nil
 	}
-	loaded, err := fetchrestore.RuntimeDeps{
-		BlockTree:    fm.runtimeBlockTree(),
-		StagingStore: fm.runtimeStagingStore(),
-		StoredBlocks: fm.runtimeStoredBlocks(),
-	}.RestoreBlockTree(blocks)
+	loaded, err := fm.restoreRuntimeDeps().RestoreBlockTree(blocks)
 	if err != nil || loaded == 0 || fm.irreversibleBlocks <= 0 {
 		return loaded, err
 	}
 
 	fm.scanFlowRuntimeDeps().PruneRuntime.PruneStoredBlocks(context.Background(), fm.irreversibleBlocks)
+	fm.restoreRuntimeDeps().MarkRootParentReady()
 	return loaded, nil
+}
+
+func (fm *FetchManager) restoreRuntimeDeps() fetchrestore.RuntimeDeps {
+	if fm == nil {
+		return fetchrestore.RuntimeDeps{}
+	}
+	return fetchrestore.RuntimeDeps{
+		BlockTree:    fm.runtimeBlockTree(),
+		StagingStore: fm.runtimeStagingStore(),
+		StoredBlocks: fm.runtimeStoredBlocks(),
+		NodeManager:  fm.nodeManager,
+		Fetcher:      fm.fetcher,
+	}
+}
+
+func (fm *FetchManager) hasRestoredBlockTreeRoot() bool {
+	if fm == nil {
+		return false
+	}
+	blockTree := fm.runtimeBlockTree()
+	return blockTree != nil && blockTree.Root() != nil
 }
 
 func (fm *FetchManager) scanFlowRuntimeDeps() fetchscan.RuntimeDeps {
@@ -168,6 +186,50 @@ func (fm *FetchManager) EnableTaskPoolMetrics(name string) {
 		}
 		return storeWorker.MetricsPayload()
 	}))
+	expvar.Publish(name+"_scan", expvar.Func(func() any {
+		scanFlow := fm.runtimeScanFlow()
+		if scanFlow == nil {
+			return map[string]any{}
+		}
+		return scanFlow.MetricsPayload()
+	}))
+	expvar.Publish(name+"_runtime", expvar.Func(func() any {
+		return fm.runtimeMetricsPayload()
+	}))
+}
+
+func (fm *FetchManager) runtimeMetricsPayload() map[string]any {
+	if fm == nil {
+		return map[string]any{}
+	}
+	payload := map[string]any{}
+	if blockTree := fm.runtimeBlockTree(); blockTree != nil {
+		payload["blocktree"] = blockTree.Snapshot()
+	}
+	if stagingStore := fm.runtimeStagingStore(); stagingStore != nil {
+		payload["staging"] = stagingStore.Snapshot()
+	}
+	if storedBlocks := fm.runtimeStoredBlocks(); storedBlocks != nil {
+		payload["stored"] = map[string]uint64{"count": storedBlocks.Count()}
+	}
+	if fm.nodeManager != nil {
+		payload["nodes"] = fm.nodeManager.Snapshot()
+	}
+	if taskPool := fm.runtimeTaskPool(); taskPool != nil {
+		stats := taskPool.Stats()
+		payload["taskpool"] = map[string]uint64{
+			"pending_high":   stats.PendingHigh,
+			"pending_normal": stats.PendingNormal,
+			"tracked":        stats.Tracked,
+		}
+	}
+	if storeWorker := fm.runtimeStoreWorker(); storeWorker != nil {
+		payload["store"] = storeWorker.MetricsPayload()
+	}
+	if scanFlow := fm.runtimeScanFlow(); scanFlow != nil {
+		payload["scan"] = scanFlow.MetricsPayload()
+	}
+	return payload
 }
 
 func (fm *FetchManager) onBecameLeader(ctx context.Context) error {
@@ -193,10 +255,13 @@ func (fm *FetchManager) onBecameLeader(ctx context.Context) error {
 		return fmt.Errorf("leader bootstrap load latest blocks from db failed: %w", err)
 	}
 
-	if loaded > 0 {
+	if loaded > 0 && fm.hasRestoredBlockTreeRoot() {
 		logrus.Infof("leader bootstrap from db success. loaded:%v", loaded)
 	} else {
-		if !fm.runtimeScanFlow().EnsureBootstrapHeader() {
+		if loaded > 0 {
+			logrus.Warnf("leader bootstrap from db produced no usable blocktree root. loaded:%v", loaded)
+		}
+		if !fm.restoreRuntimeDeps().RestoreRemoteRoot(ctx, fm.scanConfig.StartHeight) {
 			logrus.Errorf("leader bootstrap from remote failed")
 			fm.releaseLeaderRuntime(true)
 			return fmt.Errorf("leader bootstrap from remote failed")

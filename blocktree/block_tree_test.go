@@ -84,6 +84,30 @@ func branchKeyPath(branch Branch) []Key {
 	return keys
 }
 
+func TestBlockTreeSnapshotReportsRuntimeShape(t *testing.T) {
+	bt := NewBlockTree(2)
+	applyInsertList(bt, []insertInput{
+		{height: 1, key: "a", parentKey: "", weight: 1},
+		{height: 2, key: "b", parentKey: "a", weight: 1},
+		{height: 2, key: "c", parentKey: "a", weight: 2},
+		{height: 4, key: "orphan", parentKey: "missing", weight: 1},
+	})
+
+	snapshot := bt.Snapshot()
+	if !snapshot.HasRange || snapshot.StartHeight != 1 || snapshot.EndHeight != 2 {
+		t.Fatalf("unexpected height range snapshot: %+v", snapshot)
+	}
+	if snapshot.LinkedCount != 3 || snapshot.LeafCount != 2 || snapshot.BranchCount != 2 {
+		t.Fatalf("unexpected linked/leaf/branch counts: %+v", snapshot)
+	}
+	if snapshot.OrphanParentCount != 1 || snapshot.OrphanCount != 1 {
+		t.Fatalf("unexpected orphan counts: %+v", snapshot)
+	}
+	if snapshot.Root == nil || snapshot.Root.Key != "a" {
+		t.Fatalf("unexpected root snapshot: %+v", snapshot.Root)
+	}
+}
+
 func assertKeyPathEqual(t *testing.T, got []Key, want []Key) {
 	t.Helper()
 	if len(got) != len(want) {

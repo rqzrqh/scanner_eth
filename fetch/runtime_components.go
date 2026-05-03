@@ -1,13 +1,10 @@
 package fetch
 
 import (
-	"context"
-	fetcherpkg "scanner_eth/fetch/fetcher"
 	headernotify "scanner_eth/fetch/header_notify"
 	fetchscan "scanner_eth/fetch/scan"
 	fetchserialstore "scanner_eth/fetch/serial_store"
 	fetchstore "scanner_eth/fetch/store"
-	"scanner_eth/util"
 )
 
 func (fm *FetchManager) newScanFlow() *fetchscan.Flow {
@@ -40,26 +37,13 @@ func (fm *FetchManager) newHeaderManager() *headernotify.Manager {
 		}
 		fm.nodeManager.UpdateNodeChainInfo(update.NodeId, update.Height, update.BlockHash)
 		runtime := fm.currentRuntime()
-		if runtime != nil && update.BlockHash != "" && runtime.scanWorker.IsEnabled() {
-			taskRuntime := newTaskProcessRuntimeDeps(
-				runtime.blockTree,
-				runtime.stagingStore,
-				runtime.taskPool,
-				fm.nodeManager,
-				fm.fetcher,
+		if runtime != nil && update.BlockHash != "" && update.Header != nil && runtime.scanWorker.IsEnabled() {
+			runtime.scanFlow.EnqueueRemoteHeaderCandidate(
+				update.BlockHash,
+				update.Header.Hash,
+				update.Header.ParentHash,
+				update.Header.Number,
 			)
-			// newHeads provides enough header fields to extend the block tree,
-			// but it must not populate pending block data because tx hashes are absent.
-			if update.Header != nil {
-				taskRuntime.InsertTreeHeader(&fetcherpkg.BlockHeaderJson{
-					Number:     update.Header.Number,
-					Hash:       update.Header.Hash,
-					ParentHash: update.Header.ParentHash,
-					Difficulty: update.Header.Difficulty,
-				})
-			} else {
-				_ = taskRuntime.SyncHeaderByHash(context.Background(), util.NormalizeHash(update.BlockHash))
-			}
 		}
 		if runtime != nil {
 			runtime.scanWorker.Trigger()

@@ -9,6 +9,7 @@ import (
 	fetchstore "scanner_eth/fetch/store"
 	fetchtaskprocess "scanner_eth/fetch/task_process"
 	"scanner_eth/util"
+	"sync"
 	"time"
 
 	fetchtask "scanner_eth/fetch/taskpool"
@@ -44,11 +45,22 @@ const (
 )
 
 type scanStageEvent struct {
-	stage    scanStage
-	target   string
-	success  bool
-	duration time.Duration
-	errMsg   string
+	stage       scanStage
+	target      string
+	targetCount int
+	success     bool
+	duration    time.Duration
+	errMsg      string
+}
+
+type scanStageMetrics struct {
+	Runs            uint64
+	Failures        uint64
+	LastSuccess     bool
+	LastTarget      string
+	LastTargetCount uint64
+	LastDurationNS  uint64
+	LastError       string
 }
 
 func scanStageName(stage scanStage) string {
@@ -83,6 +95,9 @@ type Flow struct {
 	fetcher      fetcherpkg.Fetcher
 	taskRuntime  fetchtaskprocess.RuntimeDeps
 	pruneRuntime PruneRuntimeDeps
+
+	metricsMu    sync.RWMutex
+	stageMetrics map[scanStage]scanStageMetrics
 }
 
 func NewFlow(runtimeDepsFn func() RuntimeDeps, config Config) *Flow {
@@ -184,12 +199,59 @@ func (sf *Flow) canRunScanStage(ctx context.Context) bool {
 }
 
 func (sf *Flow) logScanStageEvent(event scanStageEvent) {
+	sf.recordScanStageEvent(event)
 	stage := scanStageName(event.stage)
 	if event.success {
-		logrus.Infof("scan stage event stage:%s target:%v success:%v duration:%v", stage, event.target, event.success, event.duration)
+		logrus.Infof("scan stage event stage:%s target:%v target_count:%v success:%v duration:%v", stage, event.target, event.targetCount, event.success, event.duration)
 		return
 	}
-	logrus.Warnf("scan stage event stage:%s target:%v success:%v duration:%v err:%v", stage, event.target, event.success, event.duration, event.errMsg)
+	logrus.Warnf("scan stage event stage:%s target:%v target_count:%v success:%v duration:%v err:%v", stage, event.target, event.targetCount, event.success, event.duration, event.errMsg)
+}
+
+func (sf *Flow) recordScanStageEvent(event scanStageEvent) {
+	if sf == nil {
+		return
+	}
+	sf.metricsMu.Lock()
+	defer sf.metricsMu.Unlock()
+	if sf.stageMetrics == nil {
+		sf.stageMetrics = make(map[scanStage]scanStageMetrics)
+	}
+	metrics := sf.stageMetrics[event.stage]
+	metrics.Runs++
+	if !event.success {
+		metrics.Failures++
+	}
+	metrics.LastSuccess = event.success
+	metrics.LastTarget = event.target
+	metrics.LastTargetCount = uint64(event.targetCount)
+	metrics.LastDurationNS = uint64(event.duration)
+	metrics.LastError = event.errMsg
+	sf.stageMetrics[event.stage] = metrics
+}
+
+func (sf *Flow) MetricsPayload() map[string]any {
+	if sf == nil {
+		return map[string]any{}
+	}
+	sf.metricsMu.RLock()
+	defer sf.metricsMu.RUnlock()
+
+	stages := make(map[string]map[string]any, len(sf.stageMetrics))
+	for stage, metrics := range sf.stageMetrics {
+		stages[scanStageName(stage)] = map[string]any{
+			"runs":              metrics.Runs,
+			"failures":          metrics.Failures,
+			"last_success":      metrics.LastSuccess,
+			"last_target":       metrics.LastTarget,
+			"last_target_count": metrics.LastTargetCount,
+			"last_duration_ns":  metrics.LastDurationNS,
+			"last_error":        metrics.LastError,
+		}
+	}
+	return map[string]any{
+		"stages": stages,
+	}
 }
 
 func (sf *Flow) inspectBlockTreeState(stage string) {
