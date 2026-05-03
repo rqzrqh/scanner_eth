@@ -10,13 +10,13 @@ import (
 type MockFetcher struct {
 	fetchHeaderByHeightFn func(context.Context, nodepkg.NodeOperator, int, uint64) *BlockHeaderJson
 	fetchHeaderByHashFn   func(context.Context, nodepkg.NodeOperator, int, string) *BlockHeaderJson
-	fetchFullBlockFn      func(context.Context, nodepkg.NodeOperator, int, *BlockHeaderJson) *data.FullBlock
+	fetchFullBlockFn      func(context.Context, []nodepkg.NodeOperator, int, *BlockHeaderJson) *data.FullBlock
 }
 
 func NewMockFetcher(
 	fetchHeaderByHeightFn func(context.Context, nodepkg.NodeOperator, int, uint64) *BlockHeaderJson,
 	fetchHeaderByHashFn func(context.Context, nodepkg.NodeOperator, int, string) *BlockHeaderJson,
-	fetchFullBlockFn func(context.Context, nodepkg.NodeOperator, int, *BlockHeaderJson) *data.FullBlock,
+	fetchFullBlockFn func(context.Context, []nodepkg.NodeOperator, int, *BlockHeaderJson) *data.FullBlock,
 ) *MockFetcher {
 	return &MockFetcher{
 		fetchHeaderByHeightFn: fetchHeaderByHeightFn,
@@ -39,9 +39,9 @@ func (f *MockFetcher) FetchBlockHeaderByHash(ctx context.Context, nodeOp nodepkg
 	return f.fetchHeaderByHashFn(ctx, nodeOp, taskId, hash)
 }
 
-func (f *MockFetcher) FetchFullBlock(ctx context.Context, nodeOp nodepkg.NodeOperator, taskId int, header *BlockHeaderJson) *data.FullBlock {
+func (f *MockFetcher) FetchFullBlock(ctx context.Context, nodeOps []nodepkg.NodeOperator, taskId int, header *BlockHeaderJson) *data.FullBlock {
 	if f == nil || f.fetchFullBlockFn == nil {
 		return nil
 	}
-	return f.fetchFullBlockFn(ctx, nodeOp, taskId, header)
+	return f.fetchFullBlockFn(ctx, nodeOps, taskId, header)
 }

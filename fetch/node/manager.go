@@ -3,6 +3,8 @@ package node
 import (
 	"fmt"
 	headernotify "scanner_eth/fetch/header_notify"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -75,6 +77,36 @@ func (nm *NodeManager) NodeOperators() []NodeOperator {
 	ops := make([]NodeOperator, len(nm.nodes))
 	for i, node := range nm.nodes {
 		ops[i] = node.operator
+	}
+	return ops
+}
+
+func (nm *NodeManager) GetAllValidNodeOperators(height uint64, blockHash string) []NodeOperator {
+	if nm == nil {
+		return nil
+	}
+	if strings.TrimSpace(blockHash) == "" {
+		return nil
+	}
+	nm.mu.RLock()
+	defer nm.mu.RUnlock()
+	nodes := make([]*NodeState, 0, len(nm.nodes))
+	for _, node := range nm.nodes {
+		if node == nil || node.remote == nil || !node.ready {
+			continue
+		}
+		remoteHeight, _ := node.remote.GetChainInfo()
+		if remoteHeight < height {
+			continue
+		}
+		nodes = append(nodes, node)
+	}
+	sort.SliceStable(nodes, func(i, j int) bool {
+		return nodes[i].delay < nodes[j].delay
+	})
+	ops := make([]NodeOperator, 0, len(nodes))
+	for _, node := range nodes {
+		ops = append(ops, node.operator)
 	}
 	return ops
 }
@@ -162,6 +194,9 @@ func (nm *NodeManager) GetBestNode(height uint64) (int, NodeOperator, error) {
 	nodeId := -1
 	bestDelay := int64(0)
 	for i, node := range nm.nodes {
+		if node == nil {
+			continue
+		}
 		if !node.ready {
 			continue
 		}

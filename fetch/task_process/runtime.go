@@ -103,15 +103,15 @@ func (deps RuntimeDeps) FetchHeaderByHash(ctx context.Context, hash string) *fet
 }
 
 func (deps RuntimeDeps) fetchBodyByHash(ctx context.Context, hash string, height uint64, header *fetcherpkg.BlockHeaderJson) (body *fetchstore.EventBlockData, nodeID int, costMicros int64, ok bool) {
-	nodeID, nodeOp, err := deps.NodeManager.GetBestNode(height)
-	if err != nil {
+	nodeOps := deps.NodeManager.GetAllValidNodeOperators(height, hash)
+	if len(nodeOps) == 0 {
 		return nil, -1, 0, false
 	}
 	startTime := time.Now()
-	fullBlock := deps.Fetcher.FetchFullBlock(ctx, nodeOp, int(height), header)
+	fullBlock := deps.Fetcher.FetchFullBlock(ctx, nodeOps, int(height), header)
 	cost := time.Since(startTime).Microseconds()
 	if fullBlock == nil {
-		return nil, nodeID, cost, false
+		return nil, nodeOps[0].ID(), cost, false
 	}
 	irreversibleNode := blocktree.IrreversibleNode{}
 	if treeNode := deps.BlockTree.Get(util.NormalizeHash(hash)); treeNode != nil {
@@ -119,7 +119,7 @@ func (deps RuntimeDeps) fetchBodyByHash(ctx context.Context, hash string, height
 	}
 	return &fetchstore.EventBlockData{
 		StorageFullBlock: convertpkg.ConvertStorageFullBlock(fullBlock, irreversibleNode),
-	}, nodeID, cost, true
+	}, nodeOps[0].ID(), cost, true
 }
 
 func (deps RuntimeDeps) updateNodeState(id int, delay int64, success bool) {

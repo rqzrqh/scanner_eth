@@ -1,12 +1,17 @@
 package fetcher
 
 import (
+	"context"
+	"errors"
 	"math/big"
 	"testing"
+	"time"
 
 	"scanner_eth/data"
+	nodepkg "scanner_eth/fetch/node"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"gorm.io/gorm"
 )
 
@@ -35,6 +40,35 @@ func TestNewMockFetcher(t *testing.T) {
 	mockFetcher := NewMockFetcher(nil, nil, nil)
 	if mockFetcher == nil {
 		t.Fatal("NewMockFetcher should return non-nil")
+	}
+}
+
+func TestWithFullBlockRPCRetryReselectsNodePerAttempt(t *testing.T) {
+	oldInterval := fullBlockRPCRetryInterval
+	fullBlockRPCRetryInterval = time.Nanosecond
+	defer func() { fullBlockRPCRetryInterval = oldInterval }()
+
+	nm := nodepkg.NewNodeManager([]*ethclient.Client{nil, nil, nil}, 0)
+	for id := 0; id < nm.NodeCount(); id++ {
+		nm.UpdateNodeChainInfo(id, 10, "0x10")
+	}
+
+	var nodeIDs []int
+	_, ok := withFullBlockRPCRetry(context.Background(), nm.GetAllValidNodeOperators(10, "0x10"), 10, 7, "test_rpc", func(nodeOp nodepkg.NodeOperator) error {
+		nodeIDs = append(nodeIDs, nodeOp.ID())
+		if len(nodeIDs) < 3 {
+			return errors.New("temporary rpc failure")
+		}
+		return nil
+	})
+	if !ok {
+		t.Fatal("expected retry to eventually succeed")
+	}
+	if len(nodeIDs) != 3 {
+		t.Fatalf("unexpected attempt count: got=%d want=3 ids=%v", len(nodeIDs), nodeIDs)
+	}
+	if nodeIDs[0] == nodeIDs[1] || nodeIDs[1] == nodeIDs[2] || nodeIDs[0] == nodeIDs[2] {
+		t.Fatalf("expected each retry to choose a different node while available, got %v", nodeIDs)
 	}
 }
 

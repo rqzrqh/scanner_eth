@@ -56,7 +56,7 @@ func TestContinuousGeneratedScenarios(t *testing.T) {
 			}
 			return nil
 		},
-		func(_ context.Context, _ nodepkg.NodeOperator, _ int, header *fetcherpkg.BlockHeaderJson) *data.FullBlock {
+		func(_ context.Context, _ []nodepkg.NodeOperator, _ int, header *fetcherpkg.BlockHeaderJson) *data.FullBlock {
 			if header == nil {
 				return nil
 			}

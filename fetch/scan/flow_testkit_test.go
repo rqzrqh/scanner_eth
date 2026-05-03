@@ -136,7 +136,7 @@ func newTestFlowEnv(t *testing.T, irreversible int) *testFlowEnv {
 				func(ctx context.Context, _ nodepkg.NodeOperator, _ int, hash string) *fetcherpkg.BlockHeaderJson {
 					return testFetchHeaderByHash(env, ctx, hash)
 				},
-				func(ctx context.Context, _ nodepkg.NodeOperator, taskID int, header *fetcherpkg.BlockHeaderJson) *data.FullBlock {
+				func(ctx context.Context, _ []nodepkg.NodeOperator, taskID int, header *fetcherpkg.BlockHeaderJson) *data.FullBlock {
 					return testFetchFullBlock(env, ctx, taskID, header)
 				},
 			),
