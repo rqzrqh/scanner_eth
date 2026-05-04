@@ -138,6 +138,8 @@ func withFullBlockRPCRetry(
 	}
 	lastNodeID := -1
 	var lastErr error
+	startedAt := time.Now()
+	selectedNodeIDs := make([]string, 0, len(nodeOps))
 
 	maxAttempts := fullBlockRPCRetries + 1
 	if len(nodeOps) < maxAttempts {
@@ -146,9 +148,12 @@ func withFullBlockRPCRetry(
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		nodeOp := nodeOps[attempt]
 		nodeID := nodeOp.ID()
+		selectedNodeIDs = append(selectedNodeIDs, strconv.Itoa(nodeID))
 		err := call(nodeOp)
 		lastNodeID = nodeID
 		if err == nil {
+			logrus.Infof("fetch full block rpc success. op:%v nodeId:%v taskId:%v height:%v attempts:%v retries:%v selected_node_ids:%v cost_us:%v",
+				opName, nodeID, taskId, height, attempt+1, fullBlockRPCRetries, strings.Join(selectedNodeIDs, ","), time.Since(startedAt).Microseconds())
 			return nodeID, true
 		}
 
@@ -167,7 +172,8 @@ func withFullBlockRPCRetry(
 	}
 
 	if lastErr != nil {
-		logrus.Warnf("fetch full block rpc exhausted retries. op:%v taskId:%v height:%v err:%v", opName, taskId, height, lastErr)
+		logrus.Warnf("fetch full block rpc exhausted retries. op:%v taskId:%v height:%v attempts:%v retries:%v selected_node_ids:%v cost_us:%v err:%v",
+			opName, taskId, height, len(selectedNodeIDs), fullBlockRPCRetries, strings.Join(selectedNodeIDs, ","), time.Since(startedAt).Microseconds(), lastErr)
 	}
 	return lastNodeID, false
 }

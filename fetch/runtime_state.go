@@ -10,6 +10,7 @@ import (
 	fetchstore "scanner_eth/fetch/store"
 	fetchtaskprocess "scanner_eth/fetch/task_process"
 	fetchtask "scanner_eth/fetch/taskpool"
+	"sync"
 )
 
 type fetchRuntimeState struct {
@@ -21,6 +22,8 @@ type fetchRuntimeState struct {
 	headerManager *headernotify.Manager
 	scanWorker    *fetchscan.Worker
 	storeWorker   *fetchserialstore.Worker
+	healthStopCh  chan struct{}
+	healthStop    sync.Once
 }
 
 func newTaskProcessRuntimeDeps(
@@ -66,6 +69,7 @@ func newFetchRuntimeState(irreversibleBlocks int) *fetchRuntimeState {
 		storedBlocks: &stored,
 		stagingStore: fetchstore.NewStagingStore(),
 		taskPool:     &taskPoolState,
+		healthStopCh: make(chan struct{}),
 	}
 }
 

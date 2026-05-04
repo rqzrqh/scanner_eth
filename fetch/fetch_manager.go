@@ -21,6 +21,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const runtimeHealthStatsInterval = 30 * time.Second
+
 type FetchManager struct {
 	election               *leader.Election
 	redisClient            *redis.Client
@@ -296,7 +298,73 @@ func (fm *FetchManager) startLeaderRuntime(ctx context.Context) {
 	rt.taskPool.Start()
 	rt.scanWorker.SetEnabled(true)
 	rt.scanWorker.Start()
+	fm.startRuntimeHealthStatsReporter(ctx, rt)
 	fm.startRedisMessagePushLoop()
+}
+
+func (fm *FetchManager) startRuntimeHealthStatsReporter(ctx context.Context, rt *fetchRuntimeState) {
+	if fm == nil || rt == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	go func() {
+		ticker := time.NewTicker(runtimeHealthStatsInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-rt.healthStopCh:
+				return
+			case <-ticker.C:
+				fm.logRuntimeHealthStats(rt)
+			}
+		}
+	}()
+}
+
+func (fm *FetchManager) logRuntimeHealthStats(rt *fetchRuntimeState) {
+	if fm == nil || rt == nil {
+		return
+	}
+	blocktreeSnapshot := rt.blockTree.Snapshot()
+	stagingSnapshot := rt.stagingStore.Snapshot()
+	taskStats := rt.taskPool.Stats()
+	storeMetrics := rt.storeWorker.MetricsPayload()
+	storeTotals, _ := storeMetrics["totals"].(map[string]uint64)
+	storeQueue, _ := storeMetrics["queue"].(map[string]uint64)
+	nodeSnapshot := fm.nodeManager.Snapshot()
+
+	logrus.Infof("runtime health stats remote_latest:%v node_ready:%v/%v blocktree_range:[%v,%v] linked:%v leaves:%v branches:%v orphans:%v orphan_parents:%v staging_blocks:%v pending_headers:%v pending_bodies:%v complete_blocks:%v stored_count:%v task_pending_high:%v task_pending_normal:%v task_tracked:%v task_succeeded:%v task_failed:%v task_retried:%v store_submitted:%v store_succeeded:%v store_failed:%v store_skipped:%v store_queue_pending:%v",
+		nodeSnapshot.LatestHeight,
+		nodeSnapshot.ReadyCount,
+		nodeSnapshot.NodeCount,
+		blocktreeSnapshot.StartHeight,
+		blocktreeSnapshot.EndHeight,
+		blocktreeSnapshot.LinkedCount,
+		blocktreeSnapshot.LeafCount,
+		blocktreeSnapshot.BranchCount,
+		blocktreeSnapshot.OrphanCount,
+		blocktreeSnapshot.OrphanParentCount,
+		stagingSnapshot.Blocks,
+		stagingSnapshot.PendingHeaders,
+		stagingSnapshot.PendingBodies,
+		stagingSnapshot.CompleteBlocks,
+		rt.storedBlocks.Count(),
+		taskStats.PendingHigh,
+		taskStats.PendingNormal,
+		taskStats.Tracked,
+		taskStats.Succeeded,
+		taskStats.Failed,
+		taskStats.Retried,
+		storeTotals["submitted"],
+		storeTotals["succeeded"],
+		storeTotals["failed"],
+		storeTotals["skipped"],
+		storeQueue["pending"],
+	)
 }
 
 func (fm *FetchManager) releaseLeaderRuntime(dropState bool) {
@@ -310,6 +378,9 @@ func (fm *FetchManager) releaseLeaderRuntime(dropState bool) {
 	fm.stopRuntimeWorkers()
 	fm.stopRedisMessagePushLoop()
 	if rt != nil {
+		rt.healthStop.Do(func() {
+			close(rt.healthStopCh)
+		})
 		rt.taskPool.Stop()
 	}
 	if dropState {

@@ -182,6 +182,8 @@ func StoreFullBlock(ctx context.Context, db *gorm.DB, chainID int64, runtime *Ru
 	}
 
 	height := handler.Block.Height
+	hash := handler.Block.Hash
+	storeStartedAt := time.Now()
 
 	select {
 	case <-ctx.Done():
@@ -206,6 +208,7 @@ func StoreFullBlock(ctx context.Context, db *gorm.DB, chainID int64, runtime *Ru
 		if err == ErrStoreFullBlockFailed {
 			logrus.Errorf("store fullblock failed %v", height)
 		}
+		logrus.Errorf("store block data failed. height:%v hash:%v block_id:%v tasks:%v cost:%v err:%v", height, hash, blockID, len(allTasks), time.Since(storeStartedAt).String(), err)
 		return 0, err
 	}
 
@@ -213,13 +216,34 @@ func StoreFullBlock(ctx context.Context, db *gorm.DB, chainID int64, runtime *Ru
 		return 0, err
 	}
 
-	startTime := time.Now()
+	finalizeStartTime := time.Now()
 	messageID, err := handler.finalize(ctx, dbc, blockID)
 	if err != nil {
 		logrus.Errorf("finalize store fullblock failed %v", err)
 		return 0, err
 	}
 
-	logrus.Infof("store block. height:%v cost:%v message_id:%v", height, time.Since(startTime).String(), messageID)
+	logrus.Infof("store block. height:%v hash:%v block_id:%v message_id:%v txs:%v internal_txs:%v event_logs:%v erc20_events:%v erc721_events:%v erc1155_events:%v contracts:%v erc20_contracts:%v erc721_contracts:%v native_balances:%v erc20_balances:%v erc1155_balances:%v tokens_erc721:%v tasks:%v finalize_cost:%v total_cost:%v",
+		height,
+		hash,
+		blockID,
+		messageID,
+		len(handler.TxList),
+		len(handler.TxInternalList),
+		len(handler.EventLogList),
+		len(handler.EventErc20TransferList),
+		len(handler.EventErc721TransferList),
+		len(handler.EventErc1155TransferList),
+		len(handler.ContractList),
+		len(handler.ContractErc20List),
+		len(handler.ContractErc721List),
+		len(handler.BalanceNativeList),
+		len(handler.BalanceErc20List),
+		len(handler.BalanceErc1155List),
+		len(handler.TokenErc721List),
+		len(allTasks),
+		time.Since(finalizeStartTime).String(),
+		time.Since(storeStartedAt).String(),
+	)
 	return messageID, nil
 }

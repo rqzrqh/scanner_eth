@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/sirupsen/logrus"
 )
 
 type NodeState struct {
@@ -91,12 +92,26 @@ func (nm *NodeManager) GetAllValidNodeOperators(height uint64, blockHash string)
 	nm.mu.RLock()
 	defer nm.mu.RUnlock()
 	nodes := make([]*NodeState, 0, len(nm.nodes))
+	nilNodes := 0
+	notReady := 0
+	remoteUnknown := 0
+	heightTooLow := 0
 	for _, node := range nm.nodes {
-		if node == nil || node.remote == nil || !node.ready {
+		if node == nil {
+			nilNodes++
+			continue
+		}
+		if !node.ready {
+			notReady++
+			continue
+		}
+		if node.remote == nil {
+			remoteUnknown++
 			continue
 		}
 		remoteHeight, _ := node.remote.GetChainInfo()
 		if remoteHeight < height {
+			heightTooLow++
 			continue
 		}
 		nodes = append(nodes, node)
@@ -105,9 +120,15 @@ func (nm *NodeManager) GetAllValidNodeOperators(height uint64, blockHash string)
 		return nodes[i].delay < nodes[j].delay
 	})
 	ops := make([]NodeOperator, 0, len(nodes))
+	nodeIDs := make([]int, 0, len(nodes))
 	for _, node := range nodes {
 		ops = append(ops, node.operator)
+		if node.operator != nil {
+			nodeIDs = append(nodeIDs, node.operator.ID())
+		}
 	}
+	logrus.Infof("valid node operators selected. height:%v hash:%v valid_nodes:%v node_ids:%v not_ready:%v height_too_low:%v remote_unknown:%v nil_nodes:%v",
+		height, strings.TrimSpace(blockHash), len(ops), nodeIDs, notReady, heightTooLow, remoteUnknown, nilNodes)
 	return ops
 }
 

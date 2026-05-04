@@ -8,10 +8,12 @@ import (
 	nodepkg "scanner_eth/fetch/node"
 	fetchstore "scanner_eth/fetch/store"
 	"scanner_eth/util"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/sirupsen/logrus"
 )
 
 type RuntimeDeps struct {
@@ -105,14 +107,23 @@ func (deps RuntimeDeps) FetchHeaderByHash(ctx context.Context, hash string) *fet
 func (deps RuntimeDeps) fetchBodyByHash(ctx context.Context, hash string, height uint64, header *fetcherpkg.BlockHeaderJson) (body *fetchstore.EventBlockData, nodeID int, costMicros int64, ok bool) {
 	nodeOps := deps.NodeManager.GetAllValidNodeOperators(height, hash)
 	if len(nodeOps) == 0 {
+		logrus.Warnf("body sync no valid nodes. height:%v hash:%v", height, hash)
 		return nil, -1, 0, false
 	}
+	nodeIDs := nodeOperatorIDs(nodeOps)
+	logrus.Infof("body sync start. height:%v hash:%v valid_nodes:%v node_ids:%v", height, hash, len(nodeOps), nodeIDs)
 	startTime := time.Now()
 	fullBlock := deps.Fetcher.FetchFullBlock(ctx, nodeOps, int(height), header)
 	cost := time.Since(startTime).Microseconds()
 	if fullBlock == nil {
+		logrus.Warnf("body sync failed. height:%v hash:%v valid_nodes:%v node_ids:%v cost_us:%v", height, hash, len(nodeOps), nodeIDs, cost)
 		return nil, nodeOps[0].ID(), cost, false
 	}
+	txCount := 0
+	if fullBlock.Block != nil {
+		txCount = fullBlock.Block.TxCount
+	}
+	logrus.Infof("body sync success. height:%v hash:%v valid_nodes:%v node_ids:%v txs:%v cost_us:%v", height, hash, len(nodeOps), nodeIDs, txCount, cost)
 	irreversibleNode := blocktree.IrreversibleNode{}
 	if treeNode := deps.BlockTree.Get(util.NormalizeHash(hash)); treeNode != nil {
 		irreversibleNode = treeNode.Irreversible
@@ -120,6 +131,20 @@ func (deps RuntimeDeps) fetchBodyByHash(ctx context.Context, hash string, height
 	return &fetchstore.EventBlockData{
 		StorageFullBlock: convertpkg.ConvertStorageFullBlock(fullBlock, irreversibleNode),
 	}, nodeOps[0].ID(), cost, true
+}
+
+func nodeOperatorIDs(nodeOps []nodepkg.NodeOperator) string {
+	if len(nodeOps) == 0 {
+		return ""
+	}
+	ids := make([]string, 0, len(nodeOps))
+	for _, nodeOp := range nodeOps {
+		if nodeOp == nil {
+			continue
+		}
+		ids = append(ids, strconv.Itoa(nodeOp.ID()))
+	}
+	return strings.Join(ids, ",")
 }
 
 func (deps RuntimeDeps) updateNodeState(id int, delay int64, success bool) {
