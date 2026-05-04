@@ -82,11 +82,16 @@ func (deps RuntimeDeps) FetchHeaderByHeight(ctx context.Context, height uint64) 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	_, nodeOp, err := deps.NodeManager.GetBestNode(height)
+	nodeID, nodeOp, err := deps.NodeManager.GetBestNode(height)
 	if err != nil {
 		return nil
 	}
-	return deps.Fetcher.FetchBlockHeaderByHeight(ctx, nodeOp, 0, height)
+	startedAt := time.Now()
+	header := deps.Fetcher.FetchBlockHeaderByHeight(ctx, nodeOp, 0, height)
+	if header != nil {
+		deps.NodeManager.RecordNodeResult(nodeID, time.Since(startedAt).Microseconds(), true)
+	}
+	return header
 }
 
 func (deps RuntimeDeps) FetchHeaderByHash(ctx context.Context, hash string) *fetcherpkg.BlockHeaderJson {
@@ -97,31 +102,39 @@ func (deps RuntimeDeps) FetchHeaderByHash(ctx context.Context, hash string) *fet
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	_, nodeOp, err := deps.NodeManager.GetBestNode(0)
+	nodeID, nodeOp, err := deps.NodeManager.GetBestNode(0)
 	if err != nil {
 		return nil
 	}
-	return deps.Fetcher.FetchBlockHeaderByHash(ctx, nodeOp, 0, hash)
+	startedAt := time.Now()
+	header := deps.Fetcher.FetchBlockHeaderByHash(ctx, nodeOp, 0, hash)
+	if header != nil {
+		deps.NodeManager.RecordNodeResult(nodeID, time.Since(startedAt).Microseconds(), true)
+	}
+	return header
 }
 
-func (deps RuntimeDeps) fetchBodyByHash(ctx context.Context, hash string, height uint64, header *fetcherpkg.BlockHeaderJson) (body *fetchstore.EventBlockData, nodeID int, costMicros int64, ok bool) {
+func (deps RuntimeDeps) fetchBodyByHash(ctx context.Context, hash string, height uint64, header *fetcherpkg.BlockHeaderJson) (body *fetchstore.EventBlockData, attempts []fetcherpkg.FullBlockRPCAttempt, ok bool) {
 	nodeOps := deps.NodeManager.GetAllValidNodeOperators(height, hash)
 	if len(nodeOps) == 0 {
 		logrus.Warnf("body sync no valid nodes. height:%v hash:%v", height, hash)
-		return nil, -1, 0, false
+		return nil, nil, false
 	}
 	nodeIDs := nodeOperatorIDs(nodeOps)
 	logrus.Infof("body sync start. height:%v hash:%v valid_nodes:%v node_ids:%v", height, hash, len(nodeOps), nodeIDs)
 	startTime := time.Now()
-	fullBlock := deps.Fetcher.FetchFullBlock(ctx, nodeOps, int(height), header)
+	result := deps.Fetcher.FetchFullBlockWithAttempts(ctx, nodeOps, int(height), header)
 	cost := time.Since(startTime).Microseconds()
-	if fullBlock == nil {
+	if result != nil {
+		attempts = result.Attempts
+	}
+	if result == nil || result.FullBlock == nil {
 		logrus.Warnf("body sync failed. height:%v hash:%v valid_nodes:%v node_ids:%v cost_us:%v", height, hash, len(nodeOps), nodeIDs, cost)
-		return nil, nodeOps[0].ID(), cost, false
+		return nil, attempts, false
 	}
 	txCount := 0
-	if fullBlock.Block != nil {
-		txCount = fullBlock.Block.TxCount
+	if result.FullBlock.Block != nil {
+		txCount = result.FullBlock.Block.TxCount
 	}
 	logrus.Infof("body sync success. height:%v hash:%v valid_nodes:%v node_ids:%v txs:%v cost_us:%v", height, hash, len(nodeOps), nodeIDs, txCount, cost)
 	irreversibleNode := blocktree.IrreversibleNode{}
@@ -129,8 +142,8 @@ func (deps RuntimeDeps) fetchBodyByHash(ctx context.Context, hash string, height
 		irreversibleNode = treeNode.Irreversible
 	}
 	return &fetchstore.EventBlockData{
-		StorageFullBlock: convertpkg.ConvertStorageFullBlock(fullBlock, irreversibleNode),
-	}, nodeOps[0].ID(), cost, true
+		StorageFullBlock: convertpkg.ConvertStorageFullBlock(result.FullBlock, irreversibleNode),
+	}, attempts, true
 }
 
 func nodeOperatorIDs(nodeOps []nodepkg.NodeOperator) string {
@@ -149,6 +162,15 @@ func nodeOperatorIDs(nodeOps []nodepkg.NodeOperator) string {
 
 func (deps RuntimeDeps) updateNodeState(id int, delay int64, success bool) {
 	deps.NodeManager.UpdateNodeState(id, delay, success)
+}
+
+func (deps RuntimeDeps) updateNodeAttempts(attempts []fetcherpkg.FullBlockRPCAttempt) {
+	for _, attempt := range attempts {
+		if attempt.NodeID < 0 {
+			continue
+		}
+		deps.updateNodeState(attempt.NodeID, attempt.CostMicros, attempt.Success)
+	}
 }
 
 func headerHeight(header *fetcherpkg.BlockHeaderJson) (uint64, bool) {
@@ -253,17 +275,12 @@ func (deps RuntimeDeps) SyncNodeDataByHash(ctx context.Context, hash string) boo
 		height = node.Height
 	}
 
-	body, nodeID, costMicros, ok := deps.fetchBodyByHash(ctx, hash, height, header)
+	body, attempts, ok := deps.fetchBodyByHash(ctx, hash, height, header)
+	deps.updateNodeAttempts(attempts)
 	if !ok {
-		if nodeID >= 0 {
-			deps.updateNodeState(nodeID, costMicros, false)
-		}
 		return false
 	}
 
 	deps.setPendingBody(hash, body)
-	if nodeID >= 0 {
-		deps.updateNodeState(nodeID, costMicros, true)
-	}
 	return true
 }

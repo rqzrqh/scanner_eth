@@ -76,7 +76,7 @@ func testFetchHeaderByHash(env *testFlowEnv, ctx context.Context, hash string) *
 	return env.fetchHeaderByHashFn(ctx, normalizeTestHash(hash))
 }
 
-func testFetchFullBlock(env *testFlowEnv, ctx context.Context, taskID int, header *fetcherpkg.BlockHeaderJson) *data.FullBlock {
+func testFetchBodyBlock(env *testFlowEnv, ctx context.Context, taskID int, header *fetcherpkg.BlockHeaderJson) *data.FullBlock {
 	if env == nil || env.fetchBodyByHashFn == nil || header == nil {
 		return nil
 	}
@@ -137,7 +137,7 @@ func newTestFlowEnv(t *testing.T, irreversible int) *testFlowEnv {
 					return testFetchHeaderByHash(env, ctx, hash)
 				},
 				func(ctx context.Context, _ []nodepkg.NodeOperator, taskID int, header *fetcherpkg.BlockHeaderJson) *data.FullBlock {
-					return testFetchFullBlock(env, ctx, taskID, header)
+					return testFetchBodyBlock(env, ctx, taskID, header)
 				},
 			),
 			PruneRuntime: PruneRuntimeDeps{

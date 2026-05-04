@@ -54,14 +54,14 @@ func TestWithFullBlockRPCRetryReselectsNodePerAttempt(t *testing.T) {
 	}
 
 	var nodeIDs []int
-	_, ok := withFullBlockRPCRetry(context.Background(), nm.GetAllValidNodeOperators(10, "0x10"), 10, 7, "test_rpc", func(nodeOp nodepkg.NodeOperator) error {
+	result := withFullBlockRPCRetry(context.Background(), nm.GetAllValidNodeOperators(10, "0x10"), 10, 7, "test_rpc", func(nodeOp nodepkg.NodeOperator) error {
 		nodeIDs = append(nodeIDs, nodeOp.ID())
 		if len(nodeIDs) < 3 {
 			return errors.New("temporary rpc failure")
 		}
 		return nil
 	})
-	if !ok {
+	if !result.OK {
 		t.Fatal("expected retry to eventually succeed")
 	}
 	if len(nodeIDs) != 3 {
@@ -69,6 +69,15 @@ func TestWithFullBlockRPCRetryReselectsNodePerAttempt(t *testing.T) {
 	}
 	if nodeIDs[0] == nodeIDs[1] || nodeIDs[1] == nodeIDs[2] || nodeIDs[0] == nodeIDs[2] {
 		t.Fatalf("expected each retry to choose a different node while available, got %v", nodeIDs)
+	}
+	if len(result.Attempts) != 3 {
+		t.Fatalf("unexpected attempt result count: got=%d want=3", len(result.Attempts))
+	}
+	if result.Attempts[0].Success || result.Attempts[1].Success || !result.Attempts[2].Success {
+		t.Fatalf("unexpected attempt success flags: %+v", result.Attempts)
+	}
+	if result.NodeID != nodeIDs[2] {
+		t.Fatalf("unexpected successful node id: got=%d want=%d", result.NodeID, nodeIDs[2])
 	}
 }
 

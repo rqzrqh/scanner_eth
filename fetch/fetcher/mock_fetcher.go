@@ -39,9 +39,9 @@ func (f *MockFetcher) FetchBlockHeaderByHash(ctx context.Context, nodeOp nodepkg
 	return f.fetchHeaderByHashFn(ctx, nodeOp, taskId, hash)
 }
 
-func (f *MockFetcher) FetchFullBlock(ctx context.Context, nodeOps []nodepkg.NodeOperator, taskId int, header *BlockHeaderJson) *data.FullBlock {
+func (f *MockFetcher) FetchFullBlockWithAttempts(ctx context.Context, nodeOps []nodepkg.NodeOperator, taskId int, header *BlockHeaderJson) *FullBlockFetchResult {
 	if f == nil || f.fetchFullBlockFn == nil {
-		return nil
+		return &FullBlockFetchResult{}
 	}
-	return f.fetchFullBlockFn(ctx, nodeOps, taskId, header)
+	return &FullBlockFetchResult{FullBlock: f.fetchFullBlockFn(ctx, nodeOps, taskId, header)}
 }
