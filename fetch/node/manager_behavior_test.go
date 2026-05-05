@@ -97,3 +97,31 @@ func TestGetAllValidNodeOperatorsFiltersAndSortsByScore(t *testing.T) {
 		t.Fatalf("unexpected operator order: got=%d,%d", ops[0].ID(), ops[1].ID())
 	}
 }
+
+func TestNodeManagerMarkNodeUnavailableExcludesNode(t *testing.T) {
+	nm := NewNodeManager([]*ethclient.Client{nil, nil}, 0)
+	nm.UpdateNodeChainInfo(0, 100, "0x64")
+	nm.UpdateNodeChainInfo(1, 100, "0x64")
+
+	nm.MarkNodeUnavailable(0, "get chain id failed")
+	id, _, err := nm.GetBestNode(100)
+	if err != nil {
+		t.Fatalf("expected fallback node, got error: %v", err)
+	}
+	if id != 1 {
+		t.Fatalf("expected node 1 after node 0 disabled, got %d", id)
+	}
+
+	ops := nm.GetAllValidNodeOperators(100, "0x64")
+	if len(ops) != 1 || ops[0].ID() != 1 {
+		t.Fatalf("unexpected valid operators after disable: %+v", ops)
+	}
+
+	snapshot := nm.Snapshot()
+	if !snapshot.Nodes[0].Disabled || snapshot.Nodes[0].Ready {
+		t.Fatalf("expected disabled node snapshot, got %+v", snapshot.Nodes[0])
+	}
+	if snapshot.ReadyCount != 1 {
+		t.Fatalf("unexpected ready count: %d", snapshot.ReadyCount)
+	}
+}

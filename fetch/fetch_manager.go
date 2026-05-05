@@ -200,6 +200,13 @@ func (fm *FetchManager) EnableTaskPoolMetrics(name string) {
 	}))
 }
 
+func (fm *FetchManager) MarkNodeUnavailable(id int, reason string) {
+	if fm == nil || fm.nodeManager == nil {
+		return
+	}
+	fm.nodeManager.MarkNodeUnavailable(id, reason)
+}
+
 func (fm *FetchManager) runtimeMetricsPayload() map[string]any {
 	if fm == nil {
 		return map[string]any{}

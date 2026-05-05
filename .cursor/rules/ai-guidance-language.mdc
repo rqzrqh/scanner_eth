@@ -1,0 +1,20 @@
+---
+description: Require persistent AI guidance documents to be written in English
+alwaysApply: true
+---
+
+# AI Guidance Language
+
+Persistent AI guidance in this repository must be written in English.
+
+This applies to:
+
+- Cursor rules under `.cursor/rules/`
+- Cursor skills under `.cursor/skills/`
+- Other project-level AI guidance files, if added later
+
+When editing or creating these files:
+
+- Use English for titles, descriptions, instructions, examples, and templates.
+- Preserve existing technical identifiers, log messages, file paths, code symbols, and command output exactly as needed.
+- If user-facing product text or source data is intentionally non-English, keep it unchanged and explain that exception in English.

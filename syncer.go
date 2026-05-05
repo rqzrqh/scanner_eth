@@ -19,6 +19,11 @@ import (
 	"gorm.io/gorm"
 )
 
+type unavailableNode struct {
+	id     int
+	reason string
+}
+
 func newFetchManager(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, redisClient *redis.Client, chainId int64, genesisBlockHash string, optionalTables map[string]struct{}) *fetch.FetchManager {
 
 	reversibleBlocks := conf.Chain.ReversibleBlocks
@@ -39,7 +44,7 @@ func newFetchManager(conf *config.Config, clients []*ethclient.Client, db *gorm.
 
 	fetchstore.DefaultRuntime().Init(db, conf.Fetch.Store.BatchSize, conf.Fetch.Store.WorkerCount)
 
-	checkNodeChainInfo(clients, chainId, genesisBlockHash)
+	unavailableNodes := checkNodeChainInfo(clients, chainId, genesisBlockHash)
 
 	logrus.Infof("node chain info check passed")
 
@@ -78,18 +83,25 @@ func newFetchManager(conf *config.Config, clients []*ethclient.Client, db *gorm.
 	if conf.Metrics.Enable {
 		fm.EnableTaskPoolMetrics(fmt.Sprintf("fetch_task_pool_%s", conf.Chain.ChainName))
 	}
+	for _, node := range unavailableNodes {
+		fm.MarkNodeUnavailable(node.id, node.reason)
+		logrus.Warnf("node marked unavailable. id:%v reason:%v", node.id, node.reason)
+	}
 
 	return fm
 }
 
-func checkNodeChainInfo(clients []*ethclient.Client, dbChainId int64, dbGenesisBlockHash string) {
+func checkNodeChainInfo(clients []*ethclient.Client, dbChainId int64, dbGenesisBlockHash string) []unavailableNode {
+	unavailableNodes := make([]unavailableNode, 0)
 
 	// compare node chain info with db
 	for i, client := range clients {
 		chainId, err := client.ChainID(context.Background())
 		if err != nil {
-			logrus.Errorf("get chain id failed. id:%v err:%v", i, err)
-			os.Exit(0)
+			reason := fmt.Sprintf("get chain id failed: %v", err)
+			logrus.Warnf("get chain id failed. id:%v err:%v", i, err)
+			unavailableNodes = append(unavailableNodes, unavailableNode{id: i, reason: reason})
+			continue
 		}
 
 		if chainId.Uint64() != uint64(dbChainId) {
@@ -108,4 +120,5 @@ func checkNodeChainInfo(clients []*ethclient.Client, dbChainId int64, dbGenesisB
 			os.Exit(0)
 		}
 	}
+	return unavailableNodes
 }

@@ -27,6 +27,8 @@ type NodeState struct {
 	remote              *headernotify.RemoteChain
 	delay               int64
 	ready               bool
+	disabled            bool
+	disabledReason      string
 	ewmaDelay           int64
 	score               int64
 	successCount        uint64
@@ -41,6 +43,8 @@ type NodeState struct {
 type NodeSnapshot struct {
 	ID                  int    `json:"id"`
 	Ready               bool   `json:"ready"`
+	Disabled            bool   `json:"disabled"`
+	DisabledReason      string `json:"disabled_reason"`
 	Delay               int64  `json:"delay"`
 	EWMADelay           int64  `json:"ewma_delay"`
 	Score               int64  `json:"score"`
@@ -74,6 +78,9 @@ func (n *NodeState) effectiveReady(now time.Time) bool {
 	if n == nil {
 		return false
 	}
+	if n.disabled {
+		return false
+	}
 	if n.ready {
 		return true
 	}
@@ -83,6 +90,9 @@ func (n *NodeState) effectiveReady(now time.Time) bool {
 func (n *NodeState) currentScore(now time.Time) int64 {
 	if n == nil {
 		return 0
+	}
+	if n.disabled {
+		return nodeScoreFailurePenaltyMicros * 100
 	}
 	delay := n.ewmaDelay
 	if delay <= 0 {
@@ -152,6 +162,7 @@ type nodeCandidate struct {
 
 type nodeSelectionStats struct {
 	nilNodes      int
+	disabled      int
 	notReady      int
 	cooldown      int
 	remoteUnknown int
@@ -167,6 +178,10 @@ func (nm *NodeManager) validCandidatesLocked(height uint64, now time.Time) ([]no
 	for id, node := range nm.nodes {
 		if node == nil {
 			stats.nilNodes++
+			continue
+		}
+		if node.disabled {
+			stats.disabled++
 			continue
 		}
 		if !node.cooldownUntil.IsZero() && now.Before(node.cooldownUntil) {
@@ -218,8 +233,8 @@ func (nm *NodeManager) GetAllValidNodeOperators(height uint64, blockHash string)
 			scores = append(scores, candidate.score)
 		}
 	}
-	logrus.Infof("valid node operators selected. height:%v hash:%v valid_nodes:%v node_ids:%v scores:%v not_ready:%v cooldown:%v height_too_low:%v remote_unknown:%v nil_nodes:%v",
-		height, strings.TrimSpace(blockHash), len(ops), nodeIDs, scores, stats.notReady, stats.cooldown, stats.heightTooLow, stats.remoteUnknown, stats.nilNodes)
+	logrus.Infof("valid node operators selected. height:%v hash:%v valid_nodes:%v node_ids:%v scores:%v disabled:%v not_ready:%v cooldown:%v height_too_low:%v remote_unknown:%v nil_nodes:%v",
+		height, strings.TrimSpace(blockHash), len(ops), nodeIDs, scores, stats.disabled, stats.notReady, stats.cooldown, stats.heightTooLow, stats.remoteUnknown, stats.nilNodes)
 	return ops
 }
 
@@ -268,6 +283,23 @@ func (nm *NodeManager) UpdateNodeChainInfo(id int, height uint64, hash string) {
 
 func (nm *NodeManager) UpdateNodeState(id int, delay int64, success bool) {
 	nm.RecordNodeResult(id, delay, success)
+}
+
+func (nm *NodeManager) MarkNodeUnavailable(id int, reason string) {
+	nm.mu.Lock()
+	defer nm.mu.Unlock()
+	if !nm.validNodeLocked(id) {
+		return
+	}
+	node := nm.nodes[id]
+	node.disabled = true
+	node.disabledReason = strings.TrimSpace(reason)
+	node.ready = false
+	node.failureCount++
+	node.consecutiveFailures++
+	node.lastFailureAt = time.Now()
+	node.cooldownUntil = time.Time{}
+	node.score = node.currentScore(node.lastFailureAt)
 }
 
 func (nm *NodeManager) RecordNodeAttemptStart(id int) {
@@ -347,6 +379,8 @@ func (nm *NodeManager) SetAllNodesIdle() {
 		node.ewmaDelay = 0
 		node.score = nodeScoreColdStartDelayMicros
 		node.ready = true
+		node.disabled = false
+		node.disabledReason = ""
 		node.consecutiveFailures = 0
 		node.cooldownUntil = time.Time{}
 		node.inflight = 0
@@ -435,6 +469,8 @@ func (nm *NodeManager) Snapshot() ManagerSnapshot {
 		snapshot.Nodes = append(snapshot.Nodes, NodeSnapshot{
 			ID:                  id,
 			Ready:               ready,
+			Disabled:            node.disabled,
+			DisabledReason:      node.disabledReason,
 			Delay:               node.delay,
 			EWMADelay:           node.ewmaDelay,
 			Score:               score,

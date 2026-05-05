@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --card: #ffffff;
+      --text: #172033;
+      --muted: #667085;
+      --border: #d9e0ea;
+      --good: #087443;
+      --warn: #b54708;
+      --bad: #b42318;
+      --accent: #155eef;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 32px;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    h1, h2, h3 { margin: 0 0 12px; }
+    h1 { font-size: 28px; }
+    h2 { font-size: 20px; margin-top: 28px; }
+    h3 { font-size: 16px; margin-top: 18px; }
+    .muted { color: var(--muted); }
+    .page { max-width: 1280px; margin: 0 auto; }
+    .header, .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+      box-shadow: 0 1px 2px rgba(16, 24, 40, .04);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+      margin-top: 16px;
+    }
+    .metric {
+      background: #fbfcfe;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+    }
+    .metric .label { color: var(--muted); font-size: 12px; }
+    .metric .value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: 10px;
+      background: var(--card);
+    }
+    th, td {
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+      white-space: nowrap;
+    }
+    th {
+      background: #eef3fb;
+      color: #344054;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    td.wrap { white-space: normal; }
+    .section { margin-top: 18px; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .high { color: var(--bad); background: #fee4e2; }
+    .medium { color: var(--warn); background: #fef0c7; }
+    .low { color: var(--accent); background: #d1e9ff; }
+    .empty {
+      padding: 18px;
+      color: var(--muted);
+      border: 1px dashed var(--border);
+      border-radius: 10px;
+      background: #fbfcfe;
+    }
+    .sources { margin: 8px 0 0; padding-left: 18px; }
+    @media print {
+      body { padding: 0; background: #fff; }
+      .card, .header { box-shadow: none; break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+<main class="page">
+  <section class="header">
+    <h1>{{.Title}}</h1>
+    <div class="muted">
+      Generated at: {{formatTime .GeneratedAt}} |
+      Log window: {{formatTime .WindowStart}} - {{formatTime .WindowEnd}} |
+      Parsed lines: {{.LinesParsed}} / {{.LinesTotal}}
+    </div>
+    <ul class="sources">
+      {{range .Sources}}<li><code>{{.}}</code></li>{{end}}
+    </ul>
+    <div class="grid">
+      <div class="metric"><div class="label">Node Requests</div><div class="value">{{.Summary.TotalNodeRequests}}</div><div class="muted">failure rate {{.Summary.NodeFailureRate}}</div></div>
+      <div class="metric"><div class="label">Task Success Rate</div><div class="value">{{.Summary.TaskSuccessRate}}</div><div class="muted">success {{.Summary.TaskSucceeded}} / failure {{.Summary.TaskFailed}}</div></div>
+      <div class="metric"><div class="label">Body Sync Success Rate</div><div class="value">{{.BodySync.SuccessRate}}</div><div class="muted">success {{.BodySync.Succeeded}} / failure {{.BodySync.Failed}}</div></div>
+      <div class="metric"><div class="label">Store Success Rate</div><div class="value">{{.Summary.StoreSuccessRate}}</div><div class="muted">success {{.Summary.StoreSucceeded}} / failure {{.Summary.StoreFailed}}</div></div>
+      <div class="metric"><div class="label">Sync Progress</div><div class="value">{{.Summary.StoredCount}}</div><div class="muted">remote {{.Summary.RemoteLatest}} / lag {{.Summary.Lag}}</div></div>
+    </div>
+  </section>
+
+  <section class="card section">
+    <h2>Anomaly Summary</h2>
+    {{if .Anomalies}}
+    <table>
+      <thead><tr><th>Level</th><th>Category</th><th>Count</th><th>Description</th><th>Recommendation</th></tr></thead>
+      <tbody>
+      {{range .Anomalies}}
+        <tr><td><span class="badge {{.Level}}">{{.Level}}</span></td><td>{{.Category}}</td><td>{{.Count}}</td><td class="wrap">{{.Message}}</td><td class="wrap">{{.Suggestion}}</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{else}}<div class="empty">No high-risk anomaly patterns were detected.</div>{{end}}
+  </section>
+
+  <section class="card section">
+    <h2>Node Stats</h2>
+    {{if .Nodes}}
+    <table>
+      <thead><tr><th>Node</th><th>Requests</th><th>Success</th><th>Failure</th><th>Failure Rate</th><th>Avg Cost (us)</th><th>Max Cost (us)</th><th>Remote Height</th><th>Top Failure</th></tr></thead>
+      <tbody>
+      {{range .Nodes}}
+        <tr><td>{{.ID}}</td><td>{{.Requests}}</td><td>{{.Successes}}</td><td>{{.Failures}}</td><td>{{.FailureRate}}</td><td>{{.AvgCostUS}}</td><td>{{.MaxCostUS}}</td><td>{{.RemoteHeight}}</td><td>{{.TopFailure}}</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{else}}<div class="empty">No node request data.</div>{{end}}
+  </section>
+
+  <section class="card section">
+    <h2>RPC Method Stats</h2>
+    {{if .Methods}}
+    <table>
+      <thead><tr><th>Method</th><th>Requests</th><th>Success</th><th>Failure</th><th>Retries</th><th>Failure Rate</th><th>Avg Cost (us)</th><th>Max Cost (us)</th></tr></thead>
+      <tbody>
+      {{range .Methods}}
+        <tr><td>{{.Name}}</td><td>{{.Requests}}</td><td>{{.Successes}}</td><td>{{.Failures}}</td><td>{{.Retries}}</td><td>{{.FailureRate}}</td><td>{{.AvgCostUS}}</td><td>{{.MaxCostUS}}</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{else}}<div class="empty">No RPC method data.</div>{{end}}
+  </section>
+
+  <section class="card section">
+    <h2>Body Sync</h2>
+    <table>
+      <thead><tr><th>Started</th><th>Success</th><th>Failure</th><th>Success Rate</th><th>Avg Cost (us)</th><th>Max Cost (us)</th><th>Avg Txs</th><th>Last Height</th><th>Last Hash</th></tr></thead>
+      <tbody>
+        <tr><td>{{.BodySync.Started}}</td><td>{{.BodySync.Succeeded}}</td><td>{{.BodySync.Failed}}</td><td>{{.BodySync.SuccessRate}}</td><td>{{.BodySync.AvgCostUS}}</td><td>{{.BodySync.MaxCostUS}}</td><td>{{.BodySync.AvgTxs}}</td><td>{{.BodySync.LastHeight}}</td><td class="wrap">{{.BodySync.LastHash}}</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card section">
+    <h2>Node Candidate Selection</h2>
+    <table>
+      <thead><tr><th>Events</th><th>Valid Nodes Total</th><th>No Valid Candidates</th><th>Disabled</th><th>Not Ready</th><th>Cooldown</th><th>Height Too Low</th><th>Remote Unknown</th><th>Nil Nodes</th></tr></thead>
+      <tbody>
+        <tr><td>{{.NodeSelection.Events}}</td><td>{{.NodeSelection.ValidNodes}}</td><td>{{.NodeSelection.NoValidNodes}}</td><td>{{.NodeSelection.Disabled}}</td><td>{{.NodeSelection.NotReady}}</td><td>{{.NodeSelection.Cooldown}}</td><td>{{.NodeSelection.HeightTooLow}}</td><td>{{.NodeSelection.RemoteUnknown}}</td><td>{{.NodeSelection.NilNodes}}</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card section">
+    <h2>Task Pool</h2>
+    {{if .TaskPool.Kinds}}
+    <table>
+      <thead><tr><th>Task Kind</th><th>Enqueued</th><th>Dequeued</th><th>Success</th><th>Failure</th><th>Retries</th><th>Dropped</th><th>Tracked</th><th>Success Rate</th></tr></thead>
+      <tbody>
+      {{range .TaskPool.Kinds}}
+        <tr><td>{{.Name}}</td><td>{{.Enqueued}}</td><td>{{.Dequeued}}</td><td>{{.Succeeded}}</td><td>{{.Failed}}</td><td>{{.Retried}}</td><td>{{.Dropped}}</td><td>{{.Tracked}}</td><td>{{.SuccessRate}}</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+    <p class="muted">Queues: high={{.TaskPool.PendingHigh}}, normal={{.TaskPool.PendingNormal}}, workers={{.TaskPool.WorkerCount}}, max_retry={{.TaskPool.MaxRetry}}</p>
+    {{else}}<div class="empty">No task pool stats.</div>{{end}}
+  </section>
+
+  <section class="card section">
+    <h2>Scan Stages</h2>
+    {{if .ScanStages}}
+    <table>
+      <thead><tr><th>Stage</th><th>Runs</th><th>Failures</th><th>Success Rate</th><th>Last Target</th><th>Target Count</th><th>Last Duration</th><th>Last Error</th></tr></thead>
+      <tbody>
+      {{range .ScanStages}}
+        <tr><td>{{.Stage}}</td><td>{{.Runs}}</td><td>{{.Failures}}</td><td>{{.SuccessRate}}</td><td>{{.LastTarget}}</td><td>{{.LastTargetCount}}</td><td>{{.LastDuration}}</td><td class="wrap">{{.LastError}}</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{else}}<div class="empty">No scan stage data.</div>{{end}}
+  </section>
+
+  <section class="card section">
+    <h2>Store</h2>
+    <table>
+      <thead><tr><th>Submitted</th><th>Success</th><th>Failure</th><th>Skipped</th><th>Canceled</th><th>Success Rate</th><th>Missing Body</th><th>Parent Not Ready</th><th>DB Failures</th><th>Queue</th></tr></thead>
+      <tbody>
+        <tr><td>{{.Store.Submitted}}</td><td>{{.Store.Succeeded}}</td><td>{{.Store.Failed}}</td><td>{{.Store.Skipped}}</td><td>{{.Store.Canceled}}</td><td>{{.Store.SuccessRate}}</td><td>{{.Store.SkippedMissingBody}}</td><td>{{.Store.SkippedParentNotReady}}</td><td>{{.Store.FailedDB}}</td><td>{{.Store.QueuePending}}</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card section">
+    <h2>Sync Progress</h2>
+    {{if .RuntimeSeries}}
+    <table>
+      <thead><tr><th>Time</th><th>Remote</th><th>Nodes</th><th>BlockTree</th><th>Branches</th><th>Orphans</th><th>Staging</th><th>Stored</th><th>Task Backlog</th><th>Store Queue</th></tr></thead>
+      <tbody>
+      {{range .RuntimeSeries}}
+        <tr><td>{{formatTime .Time}}</td><td>{{.RemoteLatest}}</td><td>{{.NodeReady}}/{{.NodeTotal}}</td><td>{{.BlocktreeStart}}-{{.BlocktreeEnd}}</td><td>{{.Branches}}</td><td>{{.Orphans}}</td><td>h={{.PendingHeaders}} b={{.PendingBodies}} done={{.CompleteBlocks}}</td><td>{{.StoredCount}}</td><td>{{.TaskPendingHigh}}/{{.TaskPendingNormal}}</td><td>{{.StoreQueuePending}}</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{else}}<div class="empty">No runtime health stats data.</div>{{end}}
+  </section>
+</main>
+</body>
+</html>

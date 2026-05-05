@@ -7,78 +7,37 @@ description: Analyze scanner_eth synchronization logs for sync success rate, dup
 
 ## Scope
 
-Use this skill for `scanner_eth` runtime log analysis, especially fetch/task/store/scan behavior. Focus on evidence from logs and metrics payloads, not guesses.
-
-Primary questions this skill should answer:
-
-- Sync success rate: task, scan stage, body fetch, header fetch, and store branch success/failure.
-- Duplicate writes: repeated store attempts, DB duplicate-key errors, repeated block persistence, or repeated pending body/header writes.
-- Node load and health: per-node RPC usage, failures, latency, ready/unready transitions, and retry distribution.
-- Sync progress: latest remote height, block tree progress, stored count, task backlog, stage duration, and lag.
-- Retry behavior: taskpool retries versus per-RPC retries inside body/full-block fetch.
-- Pipeline bottleneck: where progress stops across `BlockTree`, `StagingStore`, `TaskPool`, `FetchFullBlock`, `serial_store`, and DB persistence.
-- Fork/reorg health: branch growth, same-height competing hashes, irreversible window behavior, and whether branches converge.
+Use this skill for `scanner_eth` runtime log analysis, especially fetch/task/store/scan behavior. Prefer the coded report generator over manual parsing so that metric definitions stay centralized in the repository.
 
 ## Inputs
 
 Ask for log file paths if none are obvious. Prefer real log files, terminal output, or copied log snippets. If the user provides a directory, search within it using `rg`, not broad shell grep.
 
-Useful patterns in this repo:
-
-- `scan stage event stage:` for scan stage status and durations.
-- `task pool stats` for enqueue/dequeue/success/failure/retry/drop/backlog.
-- `store block worker stats` for persistence throughput and skip/failure reasons.
-- `runtime health stats` for periodic end-to-end progress and backlog snapshots.
-- `valid node operators selected` for body-sync candidate node selection.
-- `body sync start`, `body sync success`, and `body sync failed` for per-block body fetch status.
-- `fetch full block rpc failed` and `fetch full block rpc exhausted retries` for per-RPC retry health.
-- `fetch full block rpc success` for per-RPC selected nodes, attempts, and latency.
-- `fetch .* failed` with `nodeId:` for node-specific RPC failures.
-- `fetch .* success` with `nodeId:` and `cost:` for node latency and load.
-- `store block. height:` for DB persistence row counts, task counts, and latency.
-- `MetricsPayload`, `/debug/vars`, or expvar snapshots for structured runtime state.
-
 ## Workflow
 
-1. Identify the analysis window:
-   - Time range or log file boundaries.
-   - Chain, environment, node count, start height, and target/latest height if available.
-   - Whether logs include all workers or only one process.
+1. Identify the log files and time window.
+2. Run the built-in report generator from the repository root:
 
-2. Extract high-signal events:
-   - Scan stages: count success/failure by stage, target count, duration, error message.
-   - Taskpool stats: body/header enqueued, succeeded, failed, retried, dropped, pending, tracked.
-   - Store stats: submitted, skipped, succeeded, failed, canceled, skipped_missing_body, skipped_parent_not_ready, failed_db.
-   - RPC events: per node operation count, failure count, retry count, latency/cost.
-   - Runtime snapshots: latest height, blocktree root/leaves, stored count, node ready count.
-   - Block lineage events: inserted headers, branch targets, store branches, pruning, remote header candidates.
+```bash
+go run ./cmd/logreport -input <log-path> -output report.html
+```
 
-3. Compute derived metrics when enough data exists:
-   - Sync success rate = succeeded / (succeeded + failed), by stage and task kind.
-   - Retry pressure = retried / dequeued or per-RPC retry failures / RPC attempts.
-   - Drop rate = dropped / enqueued.
-   - Store success rate = succeeded / submitted.
-   - Missing-body ratio = skipped_missing_body / skipped.
-   - Parent-not-ready ratio = skipped_parent_not_ready / skipped.
-   - Node failure rate = node failures / node RPC attempts.
-   - Node load share = node RPC attempts / total RPC attempts.
-   - Progress speed = height delta / time delta, if heights and timestamps exist.
-   - Lag = remote latest height - stored or best local height, if both exist.
-   - Pipeline lag: remote latest -> blocktree latest -> pending body/store -> DB stored latest.
-   - Method failure rate: failures per RPC method / attempts per RPC method.
+For multiple files or a time window:
 
-4. Look for failure signatures:
-   - Repeated `fetch full block rpc exhausted retries` on the same op means node pool or RPC method quality issue.
-   - High `skipped_missing_body` means body fetch is behind store branch submission.
-   - High `skipped_parent_not_ready` means branches are arriving before ancestors are persisted.
-   - High `dropped` task count means queue sizing or worker throughput is insufficient.
-   - One node with disproportionate failures or latency should be marked as suspect.
-   - Balanced high latency across nodes usually indicates upstream/network pressure, not one bad node.
-   - Duplicate-key DB errors or repeated successful store of the same hash indicate duplicate write risk.
+```bash
+go run ./cmd/logreport \
+  -input logs/app.log,logs/app-2026-05-04T06-40-43.530.log \
+  -since "2026-05-04 06:40:00" \
+  -until "2026-05-04 07:00:00" \
+  -output report.html
+```
+
+3. Use the generated HTML as the primary evidence source. It computes node load/failures, RPC method health, task pool stats by kind, body sync stats, node candidate selection, scan stages, store worker stats, runtime progress, and anomaly summaries.
+4. Only do targeted manual searches when the report shows missing data, a suspicious anomaly, or the user asks for deeper root-cause evidence.
 
 ## Project-Specific Checks
 
-Use this checklist for `scanner_eth` before making conclusions:
+The report generator covers the common checks below. Use them as manual follow-up prompts when the generated report is not enough:
 
 - End-to-end stage split:
   - Header fetched but not inserted into `BlockTree`: inspect header fetch and parent/header validation.
@@ -131,24 +90,24 @@ Use this checklist for `scanner_eth` before making conclusions:
 
 ## Output Format
 
-Use this structure unless the user asks for a different format:
+When responding in chat after generating or inspecting a report, use this structure unless the user asks for a different format:
 
 ```markdown
-## 结论
-[1-3 句概括同步健康度、主要瓶颈、是否需要人工处理。]
+## Conclusion
+[Summarize sync health, the main bottleneck, and whether manual intervention is needed in 1-3 sentences.]
 
-## 关键指标
-- 同步成功率: ...
-- 重试/失败: ...
-- 重复写入: ...
-- 节点负载: ...
-- 同步进度: ...
-- 链路瓶颈: ...
+## Key Metrics
+- Sync success rate: ...
+- Retries/failures: ...
+- Duplicate writes: ...
+- Node load: ...
+- Sync progress: ...
+- Pipeline bottleneck: ...
 
-## 发现的问题
-- [严重程度] 问题: 证据、影响、建议。
+## Findings
+- [Severity] Issue: evidence, impact, recommendation.
 
-## 建议动作
+## Recommended Actions
 1. ...
 2. ...
 ```
@@ -163,7 +122,7 @@ Use this structure unless the user asks for a different format:
 
 ## Useful Searches
 
-Use targeted searches like:
+Use targeted searches only as a fallback or for drilling into report findings:
 
 ```bash
 rg "scan stage event stage:" <log-path>
