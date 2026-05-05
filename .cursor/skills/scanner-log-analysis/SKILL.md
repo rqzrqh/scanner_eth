@@ -11,7 +11,9 @@ Use this skill for `scanner_eth` runtime log analysis, especially fetch/task/sto
 
 ## Inputs
 
-Ask for log file paths if none are obvious. Prefer real log files, terminal output, or copied log snippets. If the user provides a directory, search within it using `rg`, not broad shell grep.
+By default, look for runtime logs under the repository root `logs/` directory. Ask for log file paths only if `logs/` is missing, empty, or the user wants a specific external log source. Prefer real log files, terminal output, or copied log snippets. If the user provides a directory, search within it using `rg`, not broad shell grep.
+
+Important: this repository ignores `logs` in `.gitignore`, so file discovery tools that respect ignore rules may not show `logs/app.log` even when it exists. Always check the default path directly first, for example with `ls -la logs logs/app.log` from the repository root, before asking the user for a log path.
 
 ## Workflow
 
@@ -32,8 +34,18 @@ go run ./cmd/logreport \
   -output report.html
 ```
 
-3. Use the generated HTML as the primary evidence source. It computes node load/failures, RPC method health, task pool stats by kind, body sync stats, node candidate selection, scan stages, store worker stats, runtime progress, and anomaly summaries.
+3. Use the generated HTML as the primary evidence source. It computes node load/failures, RPC method health, task pool stats by kind, body sync stats, node candidate selection, scan stages, store worker stats, runtime progress, and anomaly summaries. The sync progress section must include the visual progress chart so users can see `remote_latest`, `stored_count`, and `blocktree_end` moving over time instead of relying only on a table.
 4. Only do targeted manual searches when the report shows missing data, a suspicious anomaly, or the user asks for deeper root-cause evidence.
+
+## Analysis Model
+
+The analysis should first summarize each module independently, then explain the likely cause by comparing those module signals with overall block progress.
+
+- Treat sync progress as the backbone of the diagnosis. Use `remote_latest`, `blocktree_end`, `stored_height`, `stored_count`, and lag trends to decide whether the scanner is advancing, stalled before body fetch, stalled before storage, or falling behind the chain tip.
+- Break the pipeline into modules: node selection, header fetch, body/full-block RPC, task pool, scan stages, serial store, DB writes, and runtime health. Each module should have its own counters, latency, failure, retry, backlog, and throughput signals when the logs provide them.
+- Interpret module metrics in the context of progress. High RPC latency matters most when block progress slows; DB write cost matters most when fetched bodies accumulate but stored height or stored count does not advance.
+- Avoid diagnosing from one metric alone. A root cause should connect a local symptom, such as node failures or store queue growth, to an end-to-end progress symptom, such as widening lag or flat stored height.
+- Prefer cause chains over isolated observations. For example: node height lag reduces valid nodes, which increases body RPC retries, which slows body completion, which leaves store input low and keeps stored height flat.
 
 ## Project-Specific Checks
 
@@ -118,6 +130,7 @@ When responding in chat after generating or inspecting a report, use this struct
 - Always distinguish observed facts from inference.
 - If logs are incomplete, state the missing data and avoid pretending to know rates.
 - Prefer tables for node comparison and stage metrics.
+- Use the HTML progress chart when discussing sync advancement; mention whether the visual trend shows forward movement, stalled storage, or widening lag.
 - Mention the exact log files or command outputs used, but do not invent paths.
 
 ## Useful Searches

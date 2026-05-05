@@ -35,7 +35,7 @@ func HandleHeaderHashTask(deps RuntimeDeps, hash string) bool {
 		logrus.Warnf("scan stage event stage:header_by_hash target:%v success:false duration:%v err:%v", hash, time.Since(startedAt), "header-by-hash fetch failed")
 		return false
 	}
-	logrus.Infof("scan stage event stage:header_by_hash target:%v success:true duration:%v", hash, time.Since(startedAt))
+	logrus.Debugf("scan stage event stage:header_by_hash target:%v success:true duration:%v", hash, time.Since(startedAt))
 	return true
 }
 
@@ -45,6 +45,6 @@ func HandleHeaderHeightTask(deps RuntimeDeps, height uint64) bool {
 		logrus.Warnf("scan stage event stage:header_by_height target:%v success:false duration:%v err:%v", strconv.FormatUint(height, 10), time.Since(startedAt), "header-by-height fetch failed")
 		return false
 	}
-	logrus.Infof("scan stage event stage:header_by_height target:%v success:true duration:%v", strconv.FormatUint(height, 10), time.Since(startedAt))
+	logrus.Debugf("scan stage event stage:header_by_height target:%v success:true duration:%v", strconv.FormatUint(height, 10), time.Since(startedAt))
 	return true
 }

@@ -282,7 +282,7 @@ func (w *Worker) logStats() {
 		avgDurationNS = totalDurationNS / durationSamples
 	}
 
-	logrus.Infof("store block worker stats submitted:%v skipped:%v succeeded:%v failed:%v canceled:%v queue_pending:%v processing:%v skipped_missing_body:%v skipped_parent_not_ready:%v failed_db:%v store_duration_total:%v store_duration_last:%v store_duration_avg:%v store_duration_max:%v",
+	logrus.Debugf("store block worker stats submitted:%v skipped:%v succeeded:%v failed:%v canceled:%v queue_pending:%v processing:%v skipped_missing_body:%v skipped_parent_not_ready:%v failed_db:%v store_duration_total:%v store_duration_last:%v store_duration_avg:%v store_duration_max:%v",
 		atomic.LoadUint64(&w.submitted),
 		atomic.LoadUint64(&w.skipped),
 		succeeded,

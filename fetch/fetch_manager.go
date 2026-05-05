@@ -265,7 +265,7 @@ func (fm *FetchManager) onBecameLeader(ctx context.Context) error {
 	}
 
 	if loaded > 0 && fm.hasRestoredBlockTreeRoot() {
-		logrus.Infof("leader bootstrap from db success. loaded:%v", loaded)
+		logrus.Debugf("leader bootstrap from db success. loaded:%v", loaded)
 	} else {
 		if loaded > 0 {
 			logrus.Warnf("leader bootstrap from db produced no usable blocktree root. loaded:%v", loaded)
@@ -276,7 +276,7 @@ func (fm *FetchManager) onBecameLeader(ctx context.Context) error {
 			return fmt.Errorf("leader bootstrap from remote failed")
 		}
 
-		logrus.Infof("leader bootstrap from remote success")
+		logrus.Debugf("leader bootstrap from remote success")
 	}
 
 	fm.startLeaderRuntime(ctx)
@@ -286,7 +286,7 @@ func (fm *FetchManager) onBecameLeader(ctx context.Context) error {
 
 func (fm *FetchManager) onLostLeader(_ context.Context) error {
 	fm.releaseLeaderRuntime(true)
-	logrus.Infof("leader runtime state released")
+	logrus.Debugf("leader runtime state released")
 	return nil
 }
 
@@ -345,7 +345,7 @@ func (fm *FetchManager) logRuntimeHealthStats(rt *fetchRuntimeState) {
 	storeDuration, _ := storeMetrics["duration"].(map[string]uint64)
 	nodeSnapshot := fm.nodeManager.Snapshot()
 
-	logrus.Infof("runtime health stats remote_latest:%v node_ready:%v/%v blocktree_range:[%v,%v] linked:%v leaves:%v branches:%v orphans:%v orphan_parents:%v staging_blocks:%v pending_headers:%v pending_bodies:%v complete_blocks:%v stored_count:%v task_pending_high:%v task_pending_normal:%v task_tracked:%v task_succeeded:%v task_failed:%v task_retried:%v store_submitted:%v store_succeeded:%v store_failed:%v store_skipped:%v store_queue_pending:%v store_duration_last:%v store_duration_avg:%v store_duration_max:%v",
+	logrus.Debugf("runtime health stats remote_latest:%v node_ready:%v/%v blocktree_range:[%v,%v] linked:%v leaves:%v branches:%v orphans:%v orphan_parents:%v staging_blocks:%v pending_headers:%v pending_bodies:%v complete_blocks:%v stored_count:%v task_pending_high:%v task_pending_normal:%v task_tracked:%v task_succeeded:%v task_failed:%v task_retried:%v store_submitted:%v store_succeeded:%v store_failed:%v store_skipped:%v store_queue_pending:%v store_duration_last:%v store_duration_avg:%v store_duration_max:%v",
 		nodeSnapshot.LatestHeight,
 		nodeSnapshot.ReadyCount,
 		nodeSnapshot.NodeCount,

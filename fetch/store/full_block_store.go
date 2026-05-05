@@ -162,10 +162,10 @@ func (fullblock *StorageFullBlock) finalize(ctx context.Context, db *gorm.DB, bl
 		return 0, err
 	}
 	if reusedScannerMsg {
-		logrus.Infof("reuse scanner_message by hash. height:%v hash:%v message_id:%v", fullblock.Block.Height, fullblock.Block.Hash, scannerMsg.Id)
+		logrus.Debugf("reuse scanner_message by hash. height:%v hash:%v message_id:%v", fullblock.Block.Height, fullblock.Block.Hash, scannerMsg.Id)
 	}
 	if reusedCompletedBlock {
-		logrus.Infof("block already complete with same hash during finalize. height:%v hash:%v block_id:%v", fullblock.Block.Height, fullblock.Block.Hash, blockID)
+		logrus.Debugf("block already complete with same hash during finalize. height:%v hash:%v block_id:%v", fullblock.Block.Height, fullblock.Block.Hash, blockID)
 	}
 	return scannerMsg.Id, nil
 }
@@ -193,17 +193,24 @@ func StoreFullBlock(ctx context.Context, db *gorm.DB, chainID int64, runtime *Ru
 
 	dbc := db.WithContext(ctx)
 
+	readyStartedAt := time.Now()
 	if err := handler.ensureReady(ctx, dbc, chainID); err != nil {
 		return 0, err
 	}
+	readyCost := time.Since(readyStartedAt)
+	logrus.Debugf("store fullblock ready check. height:%v hash:%v cost:%v", height, hash, readyCost)
 
+	blockRowStartedAt := time.Now()
 	blockID, err := handler.insertOrReuseBlock(ctx, dbc)
 	if err != nil {
 		return 0, err
 	}
+	blockRowCost := time.Since(blockRowStartedAt)
+	logrus.Debugf("store fullblock block row. height:%v hash:%v block_id:%v cost:%v", height, hash, blockID, blockRowCost)
 	handler.assignBlockID(blockID)
 
 	allTasks := handler.buildTasks(runtime.BatchSize(), runtime.NextTaskID)
+	dataStartedAt := time.Now()
 	if err := runtime.RunTasks(ctx, allTasks); err != nil {
 		if err == ErrStoreFullBlockFailed {
 			logrus.Errorf("store fullblock failed %v", height)
@@ -211,6 +218,8 @@ func StoreFullBlock(ctx context.Context, db *gorm.DB, chainID int64, runtime *Ru
 		logrus.Errorf("store block data failed. height:%v hash:%v block_id:%v tasks:%v cost:%v err:%v", height, hash, blockID, len(allTasks), time.Since(storeStartedAt).String(), err)
 		return 0, err
 	}
+	dataCost := time.Since(dataStartedAt)
+	logrus.Debugf("store fullblock data tasks. height:%v hash:%v block_id:%v tasks:%v cost:%v", height, hash, blockID, len(allTasks), dataCost)
 
 	if err := ctx.Err(); err != nil {
 		return 0, err
@@ -222,8 +231,10 @@ func StoreFullBlock(ctx context.Context, db *gorm.DB, chainID int64, runtime *Ru
 		logrus.Errorf("finalize store fullblock failed %v", err)
 		return 0, err
 	}
+	finalizeCost := time.Since(finalizeStartTime)
+	totalCost := time.Since(storeStartedAt)
 
-	logrus.Infof("store block. height:%v hash:%v block_id:%v message_id:%v txs:%v internal_txs:%v event_logs:%v erc20_events:%v erc721_events:%v erc1155_events:%v contracts:%v erc20_contracts:%v erc721_contracts:%v native_balances:%v erc20_balances:%v erc1155_balances:%v tokens_erc721:%v tasks:%v finalize_cost:%v total_cost:%v",
+	logrus.Infof("store fullblock. height:%v hash:%v block_id:%v message_id:%v txs:%v internal_txs:%v event_logs:%v erc20_events:%v erc721_events:%v erc1155_events:%v contracts:%v erc20_contracts:%v erc721_contracts:%v native_balances:%v erc20_balances:%v erc1155_balances:%v tokens_erc721:%v tasks:%v ready_cost:%v block_row_cost:%v data_cost:%v finalize_cost:%v total_cost:%v",
 		height,
 		hash,
 		blockID,
@@ -242,8 +253,11 @@ func StoreFullBlock(ctx context.Context, db *gorm.DB, chainID int64, runtime *Ru
 		len(handler.BalanceErc1155List),
 		len(handler.TokenErc721List),
 		len(allTasks),
-		time.Since(finalizeStartTime).String(),
-		time.Since(storeStartedAt).String(),
+		readyCost.String(),
+		blockRowCost.String(),
+		dataCost.String(),
+		finalizeCost.String(),
+		totalCost.String(),
 	)
 	return messageID, nil
 }

@@ -121,7 +121,7 @@ func (deps RuntimeDeps) fetchBodyByHash(ctx context.Context, hash string, height
 		return nil, nil, false
 	}
 	nodeIDs := nodeOperatorIDs(nodeOps)
-	logrus.Infof("body sync start. height:%v hash:%v valid_nodes:%v node_ids:%v", height, hash, len(nodeOps), nodeIDs)
+	logrus.Debugf("body sync start. height:%v hash:%v valid_nodes:%v node_ids:%v", height, hash, len(nodeOps), nodeIDs)
 	startTime := time.Now()
 	result := deps.Fetcher.FetchFullBlockWithAttempts(ctx, nodeOps, int(height), header)
 	cost := time.Since(startTime).Microseconds()
@@ -209,12 +209,15 @@ func (deps RuntimeDeps) InsertTreeHeader(header *fetcherpkg.BlockHeaderJson) {
 }
 
 func (deps RuntimeDeps) SyncHeaderByHeight(ctx context.Context, height uint64) *fetcherpkg.BlockHeaderJson {
+	startedAt := time.Now()
 	header := deps.FetchHeaderByHeight(ctx, height)
 	if header == nil {
+		logrus.Warnf("header sync failed. height:%v cost_us:%v", height, time.Since(startedAt).Microseconds())
 		return nil
 	}
 	deps.InsertTreeHeader(header)
 	deps.setPendingHeader(header.Hash, header)
+	logrus.Infof("header sync success. height:%v hash:%v parent_hash:%v cost_us:%v", height, util.NormalizeHash(header.Hash), util.NormalizeHash(header.ParentHash), time.Since(startedAt).Microseconds())
 	return header
 }
 
@@ -227,12 +230,16 @@ func (deps RuntimeDeps) FetchAndInsertHeaderByHeight(height uint64) *fetcherpkg.
 }
 
 func (deps RuntimeDeps) SyncHeaderByHash(ctx context.Context, hash string) bool {
+	startedAt := time.Now()
 	header := deps.FetchHeaderByHash(ctx, hash)
 	if header == nil {
+		logrus.Warnf("header sync by hash failed. hash:%v cost_us:%v", hash, time.Since(startedAt).Microseconds())
 		return false
 	}
 	deps.InsertTreeHeader(header)
 	deps.setPendingHeader(header.Hash, header)
+	height, _ := headerHeight(header)
+	logrus.Infof("header sync by hash success. height:%v hash:%v parent_hash:%v cost_us:%v", height, util.NormalizeHash(header.Hash), util.NormalizeHash(header.ParentHash), time.Since(startedAt).Microseconds())
 	return true
 }
 

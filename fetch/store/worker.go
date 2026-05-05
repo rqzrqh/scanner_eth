@@ -43,6 +43,39 @@ type Complete struct {
 	Err    error
 }
 
+func (tt TaskType) String() string {
+	switch tt {
+	case Tx:
+		return "txs"
+	case TxInternalRow:
+		return "internal_txs"
+	case EventLog:
+		return "event_logs"
+	case EventErc20Transfer:
+		return "erc20_events"
+	case EventErc721Transfer:
+		return "erc721_events"
+	case EventErc1155Transfer:
+		return "erc1155_events"
+	case BalanceNative:
+		return "native_balances"
+	case BalanceErc20:
+		return "erc20_balances"
+	case BalanceErc1155:
+		return "erc1155_balances"
+	case TokenErc721:
+		return "tokens_erc721"
+	case Contract:
+		return "contracts"
+	case ContractErc20:
+		return "erc20_contracts"
+	case ContractErc721:
+		return "erc721_contracts"
+	default:
+		return "unknown"
+	}
+}
+
 type Worker struct {
 	ID                   int
 	DB                   *gorm.DB
@@ -168,6 +201,9 @@ func (sw *Worker) Run() {
 						time.Sleep(100 * time.Millisecond)
 						goto Retry
 					}
+				} else {
+					logrus.Debugf("store data type success. type:%v rows:%v worker:%v height:%v task_id:%v try_count:%v cost:%v",
+						taskType.String(), len(tsk.Data), sw.ID, height, taskID, tryCount, time.Since(startTime).String())
 				}
 
 				sw.StoreCompleteChannel <- &Complete{TaskID: taskID, Err: err}

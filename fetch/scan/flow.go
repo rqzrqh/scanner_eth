@@ -202,7 +202,7 @@ func (sf *Flow) logScanStageEvent(event scanStageEvent) {
 	sf.recordScanStageEvent(event)
 	stage := scanStageName(event.stage)
 	if event.success {
-		logrus.Infof("scan stage event stage:%s target:%v target_count:%v success:%v duration:%v", stage, event.target, event.targetCount, event.success, event.duration)
+		logrus.Debugf("scan stage event stage:%s target:%v target_count:%v success:%v duration:%v", stage, event.target, event.targetCount, event.success, event.duration)
 		return
 	}
 	logrus.Warnf("scan stage event stage:%s target:%v target_count:%v success:%v duration:%v err:%v", stage, event.target, event.targetCount, event.success, event.duration, event.errMsg)
@@ -260,8 +260,8 @@ func (sf *Flow) inspectBlockTreeState(stage string) {
 	}
 	start, end, ok := sf.blockTree.HeightRange()
 	if !ok {
-		logrus.Infof("scan stage:%s blocktree empty", stage)
+		logrus.Debugf("scan stage:%s blocktree empty", stage)
 		return
 	}
-	logrus.Infof("scan stage:%s blocktree range:[%v,%v] unlinked:%v", stage, start, end, len(sf.blockTree.UnlinkedNodes()))
+	logrus.Debugf("scan stage:%s blocktree range:[%v,%v] unlinked:%v", stage, start, end, len(sf.blockTree.UnlinkedNodes()))
 }

@@ -176,20 +176,20 @@ func (deps PruneRuntimeDeps) PruneStoredBlocks(ctx context.Context, irreversible
 	}
 
 	logPruneSnapshot("before", beforeState)
-	logrus.Infof("prune blocktree nodes. pruned:%v keep:%v", len(prunedNodes), keep)
+	logrus.Debugf("prune blocktree nodes. pruned:%v keep:%v", len(prunedNodes), keep)
 	logPruneSnapshot("after", afterState)
 }
 
 func logPruneSnapshot(stage string, snapshot *pruneStateSnapshot) {
 	if snapshot == nil {
-		logrus.Infof("prune %s snapshot root:null branchs:0", stage)
+		logrus.Debugf("prune %s snapshot root:null branchs:0", stage)
 		return
 	}
 
 	if snapshot.Root == nil {
-		logrus.Infof("prune %s snapshot root:null branchs:0", stage)
+		logrus.Debugf("prune %s snapshot root:null branchs:0", stage)
 	} else {
-		logrus.Infof(
+		logrus.Debugf(
 			"prune %s snapshot root height:%v hash:%v weight:%v branchs:%v",
 			stage,
 			snapshot.Root.Height,
@@ -200,7 +200,7 @@ func logPruneSnapshot(stage string, snapshot *pruneStateSnapshot) {
 	}
 
 	for i, branch := range snapshot.Branches {
-		logrus.Infof(
+		logrus.Debugf(
 			"prune %s snapshot branch[%v] header_height:%v header_hash:%v header_weight:%v node_count:%v",
 			stage,
 			i,

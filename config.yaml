@@ -29,9 +29,17 @@ redis:
 
 fetch:
   rpc_nodes:
-    #- "http://127.0.0.1:8545"
-    - "https://bnb-testnet.g.alchemy.com/v2/fTJySYmIh0pJR0J_-_Q9z60YqerqYf6i"
     - "wss://bsc-testnet-rpc.publicnode.com"
+    - "https://api.zan.top/bsc-testnet"
+    - "https://bnb-testnet.api.onfinality.io/public"
+    - "https://bsc-testnet.drpc.org"
+    - "https://bnb-testnet.api.onfinality.io/public"
+    - "https://data-seed-prebsc-1-s1.bnbchain.org:8545"
+    - "https://data-seed-prebsc-2-s1.bnbchain.org:8545"
+    - "https://data-seed-prebsc-1-s2.bnbchain.org:8545"
+    - "https://data-seed-prebsc-2-s2.bnbchain.org:8545"
+    - "https://data-seed-prebsc-1-s3.bnbchain.org:8545"
+    - "https://data-seed-prebsc-2-s3.bnbchain.org:8545"
 
   timeout: 10s
   start_height: 103340305 #if db has blocks, this config would be ignored
@@ -77,11 +85,11 @@ metrics:
 log:
   console:
     enable: true
-    level: info
+    level: debug
   file:
     enable: true
     name: "./logs/app.log"
     max_size: 100 #MB
     max_backups: 30
     max_age: 30 #day
-    level: info
+    level: debug

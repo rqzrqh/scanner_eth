@@ -21,25 +21,34 @@ type Options struct {
 }
 
 type Report struct {
-	Title         string
-	GeneratedAt   time.Time
-	Sources       []string
-	WindowStart   time.Time
-	WindowEnd     time.Time
-	LinesTotal    uint64
-	LinesParsed   uint64
-	Warnings      []string
-	Summary       Summary
-	Nodes         []NodeStats
-	Methods       []MethodStats
-	TaskPool      TaskPoolStats
-	BodySync      BodySyncStats
-	NodeSelection NodeSelectionStats
-	ScanStages    []ScanStageStats
-	Store         StoreStats
-	RuntimeLatest RuntimeSnapshot
-	RuntimeSeries []RuntimeSnapshot
-	Anomalies     []Anomaly
+	Title                 string
+	GeneratedAt           time.Time
+	Sources               []string
+	WindowStart           time.Time
+	WindowEnd             time.Time
+	LinesTotal            uint64
+	LinesParsed           uint64
+	Warnings              []string
+	Summary               Summary
+	Nodes                 []NodeStats
+	Methods               []MethodStats
+	NodeOperatorMethods   []NodeOperatorMethodStats
+	TaskPool              TaskPoolStats
+	HeaderSync            HeaderSyncStats
+	BodySync              BodySyncStats
+	BodyItems             []BodyItemStats
+	NodeSelection         NodeSelectionStats
+	ScanStages            []ScanStageStats
+	Store                 StoreStats
+	StoreDataTypes        []StoreDataTypeStats
+	FullBlockStore        FullBlockStoreStats
+	RuntimeLatest         RuntimeSnapshot
+	RuntimeSeries         []RuntimeSnapshot
+	BlockTiming           BlockTimingStats
+	BlockStoreDurations   []BlockStoreDuration
+	BlockProgress         []BlockProgressInterval
+	BlockProgressOutliers []BlockProgressInterval
+	Anomalies             []Anomaly
 }
 
 type Summary struct {
@@ -54,8 +63,22 @@ type Summary struct {
 	StoreFailed       uint64
 	StoreSuccessRate  string
 	RemoteLatest      uint64
+	StoredHeight      uint64
 	StoredCount       uint64
 	Lag               string
+}
+
+type HeaderSyncStats struct {
+	Started     uint64
+	Succeeded   uint64
+	Failed      uint64
+	SuccessRate string
+	AvgCostUS   uint64
+	MaxCostUS   uint64
+	LastHeight  uint64
+	LastHash    string
+	costTotalUS uint64
+	costSamples uint64
 }
 
 type BodySyncStats struct {
@@ -72,6 +95,18 @@ type BodySyncStats struct {
 	costSamples uint64
 	txTotal     uint64
 	txSamples   uint64
+}
+
+type BodyItemStats struct {
+	Item          string
+	Blocks        uint64
+	Items         uint64
+	TotalCostUS   uint64
+	AvgCostUS     uint64
+	AvgItemCostUS uint64
+	MaxCostUS     uint64
+	LastHeight    uint64
+	LastHash      string
 }
 
 type NodeSelectionStats struct {
@@ -119,6 +154,19 @@ type MethodStats struct {
 	costSamples uint64
 }
 
+type NodeOperatorMethodStats struct {
+	NodeID          int
+	Method          string
+	Calls           uint64
+	TotalCostUS     uint64
+	AvgCostUS       uint64
+	MaxCostUS       uint64
+	ArraySamples    uint64
+	ArrayItemsTotal uint64
+	AvgArrayItems   uint64
+	MaxArrayItems   uint64
+}
+
 type TaskKindStats struct {
 	Name        string
 	Enqueued    uint64
@@ -132,15 +180,20 @@ type TaskKindStats struct {
 }
 
 type TaskPoolStats struct {
-	Totals              TaskKindStats
-	Kinds               []TaskKindStats
-	PendingHigh         uint64
-	PendingNormal       uint64
-	Tracked             uint64
-	WorkerCount         uint64
-	MaxRetry            uint64
-	HighQueueCapacity   uint64
-	NormalQueueCapacity uint64
+	Totals                       TaskKindStats
+	Kinds                        []TaskKindStats
+	PendingHigh                  uint64
+	PendingNormal                uint64
+	Tracked                      uint64
+	WorkerCount                  uint64
+	MaxRetry                     uint64
+	HighQueueCapacity            uint64
+	NormalQueueCapacity          uint64
+	TrackedOldestAgeUS           uint64
+	TrackedAvgAgeUS              uint64
+	TrackedBodyOldestAgeUS       uint64
+	TrackedHeaderHOldestAgeUS    uint64
+	TrackedHeaderHashOldestAgeUS uint64
 }
 
 type ScanStageStats struct {
@@ -166,6 +219,39 @@ type StoreStats struct {
 	SkippedParentNotReady uint64
 	FailedDB              uint64
 	SuccessRate           string
+	DurationSamples       uint64
+	DurationTotalUS       uint64
+	DurationAvgUS         uint64
+	DurationLastUS        uint64
+	DurationMaxUS         uint64
+}
+
+type StoreDataTypeStats struct {
+	Type            string
+	Writes          uint64
+	Tasks           uint64
+	Failures        uint64
+	RetriedAttempts uint64
+	TotalCostUS     uint64
+	AvgCostUS       uint64
+	AvgWriteCostUS  uint64
+	MaxCostUS       uint64
+	FailedCostUS    uint64
+	AvgFailedCostUS uint64
+	MaxFailedCostUS uint64
+}
+
+type FullBlockStoreStats struct {
+	Count         uint64
+	AvgTotalUS    uint64
+	MaxTotalUS    uint64
+	P95TotalUS    uint64
+	AvgDataUS     uint64
+	MaxDataUS     uint64
+	AvgFinalizeUS uint64
+	MaxFinalizeUS uint64
+	AvgReadyUS    uint64
+	AvgBlockRowUS uint64
 }
 
 type RuntimeSnapshot struct {
@@ -175,6 +261,7 @@ type RuntimeSnapshot struct {
 	NodeTotal         uint64
 	BlocktreeStart    uint64
 	BlocktreeEnd      uint64
+	StoredHeight      uint64
 	Linked            uint64
 	Leaves            uint64
 	Branches          uint64
@@ -198,6 +285,58 @@ type RuntimeSnapshot struct {
 	StoreQueuePending uint64
 }
 
+type BlockProgressInterval struct {
+	Height         uint64
+	Hash           string
+	BodySyncedAt   time.Time
+	HasBodySyncGap bool
+	BodySyncGapUS  int64
+	BodyCostUS     uint64
+	StoredAt       time.Time
+	HasStoreGap    bool
+	StoreGapUS     int64
+	StoreTotalUS   uint64
+}
+
+type BlockTimingStats struct {
+	Blocks                    uint64
+	PrevStoreToTaskSamples    uint64
+	HeaderStageSamples        uint64
+	BodyStageSamples          uint64
+	StoreStageSamples         uint64
+	EndToEndSamples           uint64
+	TaskQueueSamples          uint64
+	AvgPrevStoreToTaskUS      uint64
+	AvgFirstTaskToHeaderUS    uint64
+	AvgHeaderToBodyUS         uint64
+	AvgBodyToStoreUS          uint64
+	AvgFirstTaskToStoreUS     uint64
+	P95FirstTaskToStoreUS     uint64
+	MaxFirstTaskToStoreUS     uint64
+	AvgTaskQueueWaitUS        uint64
+	AvgHeaderSyncCostUS       uint64
+	AvgBodySyncCostUS         uint64
+	AvgFullBlockStoreCostUS   uint64
+	AvgUnattributedOverheadUS uint64
+}
+
+type blockTimingSegment struct {
+	Label string
+	Class string
+	Value uint64
+}
+
+type BlockStoreDuration struct {
+	Height     uint64
+	Hash       string
+	StoredAt   time.Time
+	ReadyUS    uint64
+	BlockRowUS uint64
+	DataUS     uint64
+	FinalizeUS uint64
+	TotalUS    uint64
+}
+
 type Anomaly struct {
 	Level      string
 	Category   string
@@ -207,14 +346,43 @@ type Anomaly struct {
 }
 
 type analyzer struct {
-	report       *Report
-	nodes        map[int]*NodeStats
-	methodTotals map[string]*MethodStats
-	taskWindow   *taskPoolWindow
-	storeWindow  *storeWindow
-	scanStages   map[string]*ScanStageStats
-	anomalyIndex map[string]*Anomaly
-	now          time.Time
+	report                *Report
+	nodes                 map[int]*NodeStats
+	methodTotals          map[string]*MethodStats
+	taskWindow            *taskPoolWindow
+	storeWindow           *storeWindow
+	scanStages            map[string]*ScanStageStats
+	nodeOperatorWindows   map[string]*nodeOperatorMethodWindow
+	storeDataTypes        map[string]*StoreDataTypeStats
+	bodyItems             map[string]*BodyItemStats
+	anomalyIndex          map[string]*Anomaly
+	fullBlockStoreSamples []fullBlockStoreSample
+	blockProgress         map[uint64]*blockProgressEvent
+	blockProgressByHash   map[string]*blockProgressEvent
+	storedHeight          uint64
+	now                   time.Time
+}
+
+type blockProgressEvent struct {
+	Height               uint64
+	Hash                 string
+	FirstTaskCreatedAt   time.Time
+	HeaderSyncedAt       time.Time
+	HeaderCostUS         uint64
+	BodySyncedAt         time.Time
+	BodyCostUS           uint64
+	StoredAt             time.Time
+	StoreTotalUS         uint64
+	TaskQueueWaitTotalUS uint64
+	TaskQueueWaitSamples uint64
+}
+
+type fullBlockStoreSample struct {
+	ReadyUS    uint64
+	BlockRowUS uint64
+	DataUS     uint64
+	FinalizeUS uint64
+	TotalUS    uint64
 }
 
 type counterWindow struct {
@@ -222,6 +390,24 @@ type counterWindow struct {
 	samples uint64
 	first   uint64
 	last    uint64
+}
+
+type nodeOperatorMethodSnapshot struct {
+	Calls           uint64
+	TotalCostUS     uint64
+	MaxCostUS       uint64
+	ArraySamples    uint64
+	ArrayItemsTotal uint64
+	MaxArrayItems   uint64
+}
+
+type nodeOperatorMethodWindow struct {
+	NodeID  int
+	Method  string
+	seen    bool
+	samples uint64
+	first   nodeOperatorMethodSnapshot
+	last    nodeOperatorMethodSnapshot
 }
 
 type taskPoolSnapshot struct {
@@ -249,6 +435,10 @@ type storeSnapshot struct {
 	SkippedMissingBody    uint64
 	SkippedParentNotReady uint64
 	FailedDB              uint64
+	DurationTotalUS       uint64
+	DurationLastUS        uint64
+	DurationAvgUS         uint64
+	DurationMaxUS         uint64
 }
 
 type storeWindow struct {
@@ -258,27 +448,38 @@ type storeWindow struct {
 	last    storeSnapshot
 }
 
+const blockProgressIntervalOutlierUS = int64(10 * time.Second / time.Microsecond)
+
 var (
-	ansiRE             = regexp.MustCompile(`\x1b\[[0-9;]*m`)
-	timePrefixRE       = regexp.MustCompile(`^([A-Z][a-z]{2}\s+\d{1,2}\s+\d\d:\d\d:\d\d\.\d{3})`)
-	intPairRE          = regexp.MustCompile(`([A-Za-z_]+):([0-9]+)`)
-	taskPoolRE         = regexp.MustCompile(`task pool stats enqueued:(\d+)\(body:(\d+) hh:(\d+) hs:(\d+)\) dequeued:(\d+)\(body:(\d+) hh:(\d+) hs:(\d+)\) succeeded:(\d+)\(body:(\d+) hh:(\d+) hs:(\d+)\) failed:(\d+)\(body:(\d+) hh:(\d+) hs:(\d+)\) retried:(\d+)\(body:(\d+) hh:(\d+) hs:(\d+)\) dropped:(\d+)\(body:(\d+) hh:(\d+) hs:(\d+)\) pending_high:(\d+) pending_normal:(\d+) tracked:(\d+)\(body:(\d+) hh:(\d+) hs:(\d+)\) workers:(\d+) max_retry:(\d+)`)
-	scanStageRE        = regexp.MustCompile(`scan stage event stage:([^ ]+) target:([^ ]*) ?(?:target_count:(\d+) )?success:(true|false) duration:([^ ]+)(?: err:(.*?))?(?: @|$)`)
-	nodeRPCStatsRE     = regexp.MustCompile(`\[nodeOperator RPC\] nodeId=(\d+) (.*?)(?: @|$)`)
-	fullRPCSuccessRE   = regexp.MustCompile(`fetch full block rpc success\. op:([^ ]+) nodeId:(\d+) taskId:[^ ]+ height:[^ ]+ attempts:(\d+) retries:[^ ]+ selected_node_ids:[^ ]* cost_us:(\d+)`)
-	fullRPCFailedRE    = regexp.MustCompile(`fetch full block rpc failed\. op:([^ ]+) nodeId:(\d+) taskId:[^ ]+ height:[^ ]+ attempt:(\d+) retries:[^ ]+ err:(.*?)(?: @|$)`)
-	fullRPCExhaustedRE = regexp.MustCompile(`fetch full block rpc exhausted retries\. op:([^ ]+) taskId:[^ ]+ height:[^ ]+ attempts:(\d+) retries:[^ ]+ selected_node_ids:([^ ]*) cost_us:(\d+) err:(.*?)(?: @|$)`)
-	headerFailRE       = regexp.MustCompile(`fetch header(?: by hash)? failed\. nodeId:(\d+) .*? error:(.*?)(?: height:| hash:| @|$)`)
-	headerSuccessRE    = regexp.MustCompile(`fetch header(?: by hash)? success\. nodeId:(\d+) .*? cost:([^ ]+)`)
-	bodySyncStartRE    = regexp.MustCompile(`body sync start\. height:(\d+) hash:([^ ]+) valid_nodes:(\d+)`)
-	bodySyncSuccessRE  = regexp.MustCompile(`body sync success\. height:(\d+) hash:([^ ]+) valid_nodes:(\d+) node_ids:[^ ]* txs:(\d+) cost_us:(\d+)`)
-	bodySyncFailedRE   = regexp.MustCompile(`body sync failed\. height:(\d+) hash:([^ ]+) valid_nodes:(\d+) node_ids:[^ ]* cost_us:(\d+)`)
-	bodyNoValidNodesRE = regexp.MustCompile(`body sync no valid nodes\. height:(\d+) hash:([^ ]+)`)
-	storeStatsRE       = regexp.MustCompile(`store block worker stats submitted:(\d+) skipped:(\d+) succeeded:(\d+) failed:(\d+) canceled:(\d+) queue_pending:(\d+) processing:(\d+) skipped_missing_body:(\d+) skipped_parent_not_ready:(\d+) failed_db:(\d+)`)
-	runtimeHealthRE    = regexp.MustCompile(`runtime health stats remote_latest:(\d+) node_ready:(\d+)/(\d+) blocktree_range:\[(\d+),(\d+)\] linked:(\d+) leaves:(\d+) branches:(\d+) orphans:(\d+) orphan_parents:(\d+) staging_blocks:(\d+) pending_headers:(\d+) pending_bodies:(\d+) complete_blocks:(\d+) stored_count:(\d+) task_pending_high:(\d+) task_pending_normal:(\d+) task_tracked:(\d+) task_succeeded:(\d+) task_failed:(\d+) task_retried:(\d+) store_submitted:(\d+) store_succeeded:(\d+) store_failed:(\d+) store_skipped:(\d+) store_queue_pending:(\d+)`)
-	validNodesRE       = regexp.MustCompile(`valid node operators selected\.`)
-	duplicateRE        = regexp.MustCompile(`(?i)(duplicate|Error 1062|Duplicate entry)`)
-	deadlockRE         = regexp.MustCompile(`(?i)(deadlock|lock wait timeout)`)
+	ansiRE               = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+	timePrefixRE         = regexp.MustCompile(`^([A-Z][a-z]{2}\s+\d{1,2}\s+\d\d:\d\d:\d\d\.\d{3})`)
+	intPairRE            = regexp.MustCompile(`([A-Za-z_]+):([0-9]+)`)
+	taskPoolRE           = regexp.MustCompile(`task pool stats enqueued:(\d+)\(body:(\d+) hh:(\d+) hs:(\d+)\) dequeued:(\d+)\(body:(\d+) hh:(\d+) hs:(\d+)\) succeeded:(\d+)\(body:(\d+) hh:(\d+) hs:(\d+)\) failed:(\d+)\(body:(\d+) hh:(\d+) hs:(\d+)\) retried:(\d+)\(body:(\d+) hh:(\d+) hs:(\d+)\) dropped:(\d+)\(body:(\d+) hh:(\d+) hs:(\d+)\) pending_high:(\d+) pending_normal:(\d+) tracked:(\d+)\(body:(\d+) hh:(\d+) hs:(\d+)\) workers:(\d+) max_retry:(\d+)`)
+	scanStageRE          = regexp.MustCompile(`scan stage event stage:([^ ]+) target:([^ ]*) ?(?:target_count:(\d+) )?success:(true|false) duration:([^ ]+)(?: err:(.*?))?(?: @|$)`)
+	nodeRPCStatsRE       = regexp.MustCompile(`\[nodeOperator RPC\] nodeId=(\d+) (.*?)(?: @|$)`)
+	nodeOperatorMethodRE = regexp.MustCompile(`\[nodeOperator Method\] nodeId=(\d+) method=([^ ]+) calls=(\d+) total_us=(\d+) avg_us=\d+ max_us=(\d+) array_samples=(\d+) array_items_total=(\d+) avg_array_items=\d+ max_array_items=(\d+)`)
+	fullRPCSuccessRE     = regexp.MustCompile(`fetch full block rpc success\. op:([^ ]+) nodeId:(\d+) taskId:[^ ]+ height:[^ ]+ attempts:(\d+) retries:[^ ]+ selected_node_ids:[^ ]* cost_us:(\d+)`)
+	fullRPCFailedRE      = regexp.MustCompile(`fetch full block rpc failed\. op:([^ ]+) nodeId:(\d+) taskId:[^ ]+ height:[^ ]+ attempt:(\d+) retries:[^ ]+ err:(.*?)(?: @|$)`)
+	fullRPCExhaustedRE   = regexp.MustCompile(`fetch full block rpc exhausted retries\. op:([^ ]+) taskId:[^ ]+ height:[^ ]+ attempts:(\d+) retries:[^ ]+ selected_node_ids:([^ ]*) cost_us:(\d+) err:(.*?)(?: @|$)`)
+	headerFailRE         = regexp.MustCompile(`fetch header(?: by hash)? failed\. nodeId:(\d+) .*? error:(.*?)(?: height:| hash:| @|$)`)
+	headerSuccessRE      = regexp.MustCompile(`fetch header(?: by hash)? success\. nodeId:(\d+) .*? cost:([^ ]+)`)
+	headerSyncSuccessRE  = regexp.MustCompile(`header sync(?: by hash)? success\. height:(\d+) hash:([^ ]+) parent_hash:[^ ]+ cost_us:(\d+)`)
+	headerSyncFailedRE   = regexp.MustCompile(`header sync(?: by hash)? failed\. (?:height:(\d+)|hash:([^ ]+)) cost_us:(\d+)`)
+	bodySyncStartRE      = regexp.MustCompile(`body sync start\. height:(\d+) hash:([^ ]+) valid_nodes:(\d+)`)
+	bodySyncSuccessRE    = regexp.MustCompile(`body sync success\. height:(\d+) hash:([^ ]+) valid_nodes:(\d+) node_ids:[^ ]* txs:(\d+) cost_us:(\d+)`)
+	bodySyncFailedRE     = regexp.MustCompile(`body sync failed\. height:(\d+) hash:([^ ]+) valid_nodes:(\d+) node_ids:[^ ]* cost_us:(\d+)`)
+	bodyNoValidNodesRE   = regexp.MustCompile(`body sync no valid nodes\. height:(\d+) hash:([^ ]+)`)
+	bodyItemCostRE       = regexp.MustCompile(`fetch full block item cost\. height:(\d+) hash:([^ ]+) item:([^ ]+) count:(\d+) cost_us:(\d+)`)
+	storedBlockRE        = regexp.MustCompile(`store fullblock\. height:(\d+)(?: hash:([^ ]+))?`)
+	storeDataTypeRE      = regexp.MustCompile(`store data type success\. type:([^ ]+) rows:(\d+) .*? cost:([^ ]+)`)
+	storeDataTypeFailRE  = regexp.MustCompile(`store failed err:.*? height:(\d+) type:([^ ]+) task_id:[^ ]+ try_count:(\d+) cost:([^ ]+)`)
+	durationFieldRE      = regexp.MustCompile(`([A-Za-z_]+_cost):([^ ]+)`)
+	storeDurationFieldRE = regexp.MustCompile(`(store_duration_(?:total|last|avg|max)):([^ ]+)`)
+	storeStatsRE         = regexp.MustCompile(`store block worker stats submitted:(\d+) skipped:(\d+) succeeded:(\d+) failed:(\d+) canceled:(\d+) queue_pending:(\d+) processing:(\d+) skipped_missing_body:(\d+) skipped_parent_not_ready:(\d+) failed_db:(\d+)`)
+	runtimeHealthRE      = regexp.MustCompile(`runtime health stats remote_latest:(\d+) node_ready:(\d+)/(\d+) blocktree_range:\[(\d+),(\d+)\] linked:(\d+) leaves:(\d+) branches:(\d+) orphans:(\d+) orphan_parents:(\d+) staging_blocks:(\d+) pending_headers:(\d+) pending_bodies:(\d+) complete_blocks:(\d+) stored_count:(\d+) task_pending_high:(\d+) task_pending_normal:(\d+) task_tracked:(\d+) task_succeeded:(\d+) task_failed:(\d+) task_retried:(\d+) store_submitted:(\d+) store_succeeded:(\d+) store_failed:(\d+) store_skipped:(\d+) store_queue_pending:(\d+)`)
+	validNodesRE         = regexp.MustCompile(`valid node operators selected\.`)
+	duplicateRE          = regexp.MustCompile(`(?i)(duplicate|Error 1062|Duplicate entry)`)
+	deadlockRE           = regexp.MustCompile(`(?i)(deadlock|lock wait timeout)`)
 )
 
 func AnalyzeFiles(paths []string, opts Options) (*Report, error) {
@@ -319,13 +520,18 @@ func newAnalyzer(sources []string, opts Options) *analyzer {
 			GeneratedAt: now,
 			Sources:     sources,
 		},
-		nodes:        make(map[int]*NodeStats),
-		methodTotals: make(map[string]*MethodStats),
-		taskWindow:   &taskPoolWindow{},
-		storeWindow:  &storeWindow{},
-		scanStages:   make(map[string]*ScanStageStats),
-		anomalyIndex: make(map[string]*Anomaly),
-		now:          now,
+		nodes:               make(map[int]*NodeStats),
+		methodTotals:        make(map[string]*MethodStats),
+		taskWindow:          &taskPoolWindow{},
+		storeWindow:         &storeWindow{},
+		scanStages:          make(map[string]*ScanStageStats),
+		nodeOperatorWindows: make(map[string]*nodeOperatorMethodWindow),
+		storeDataTypes:      make(map[string]*StoreDataTypeStats),
+		bodyItems:           make(map[string]*BodyItemStats),
+		anomalyIndex:        make(map[string]*Anomaly),
+		blockProgress:       make(map[uint64]*blockProgressEvent),
+		blockProgressByHash: make(map[string]*blockProgressEvent),
+		now:                 now,
 	}
 }
 
@@ -393,32 +599,48 @@ func (a *analyzer) extendWindow(ts time.Time) {
 
 func (a *analyzer) parseLine(line string, ts time.Time) bool {
 	switch {
+	case strings.Contains(line, "task lifecycle event"):
+		return a.parseTaskLifecycle(line, ts)
 	case strings.Contains(line, "task pool stats"):
 		return a.parseTaskPool(line)
 	case strings.Contains(line, "store block worker stats"):
 		return a.parseStore(line)
+	case strings.Contains(line, "store data type success"):
+		return a.parseStoreDataType(line)
+	case strings.Contains(line, "store failed err:"):
+		return a.parseStoreDataTypeFailure(line)
+	case strings.Contains(line, "store fullblock. height:"):
+		return a.parseStoredBlock(line, ts)
 	case strings.Contains(line, "scan stage event stage:"):
 		return a.parseScanStage(line)
 	case strings.Contains(line, "runtime health stats"):
 		return a.parseRuntime(line, ts)
 	case strings.Contains(line, "[nodeOperator RPC]"):
 		return a.parseNodeRPCStats(line)
+	case strings.Contains(line, "[nodeOperator Method]"):
+		return a.parseNodeOperatorMethodStats(line)
 	case strings.Contains(line, "fetch full block rpc success"):
 		return a.parseFullRPCSuccess(line)
 	case strings.Contains(line, "fetch full block rpc failed"):
 		return a.parseFullRPCFailed(line)
 	case strings.Contains(line, "fetch full block rpc exhausted retries"):
 		return a.parseFullRPCExhausted(line)
+	case strings.Contains(line, "fetch full block item cost"):
+		return a.parseBodyItemCost(line)
 	case strings.Contains(line, "fetch header failed") || strings.Contains(line, "fetch header by hash failed"):
 		return a.parseHeaderFailure(line)
 	case strings.Contains(line, "fetch header success") || strings.Contains(line, "fetch header by hash success"):
 		return a.parseHeaderSuccess(line)
+	case strings.Contains(line, "header sync success") || strings.Contains(line, "header sync by hash success"):
+		return a.parseHeaderSyncSuccess(line, ts)
+	case strings.Contains(line, "header sync failed") || strings.Contains(line, "header sync by hash failed"):
+		return a.parseHeaderSyncFailed(line)
 	case strings.Contains(line, "valid node operators selected"):
 		return a.parseValidNodes(line)
 	case strings.Contains(line, "body sync start"):
 		return a.parseBodySyncStart(line)
 	case strings.Contains(line, "body sync success"):
-		return a.parseBodySyncSuccess(line)
+		return a.parseBodySyncSuccess(line, ts)
 	case strings.Contains(line, "body sync failed"):
 		return a.parseBodySyncFailed(line)
 	case strings.Contains(line, "body sync no valid nodes"):
@@ -459,6 +681,12 @@ func (a *analyzer) parseTaskPool(line string) bool {
 	a.report.TaskPool.Tracked = vals[26]
 	a.report.TaskPool.WorkerCount = vals[30]
 	a.report.TaskPool.MaxRetry = vals[31]
+	extra := keyUintPairs(line)
+	a.report.TaskPool.TrackedOldestAgeUS = extra["tracked_oldest_age_us"]
+	a.report.TaskPool.TrackedAvgAgeUS = extra["tracked_avg_age_us"]
+	a.report.TaskPool.TrackedBodyOldestAgeUS = extra["tracked_body_oldest_age_us"]
+	a.report.TaskPool.TrackedHeaderHOldestAgeUS = extra["tracked_hh_oldest_age_us"]
+	a.report.TaskPool.TrackedHeaderHashOldestAgeUS = extra["tracked_hs_oldest_age_us"]
 	if vals[20] > 0 {
 		a.addAnomaly("medium", "taskpool_drop", "Task pool dropped tasks", delta(a.taskWindow.first.total.Dropped, vals[20]), "Check queue capacity, worker count, and RPC throughput.")
 	}
@@ -496,9 +724,11 @@ func (a *analyzer) parseStore(line string) bool {
 		return false
 	}
 	vals := parseUintGroups(m[1:])
+	durations := storeDurationPairs(line)
 	s := storeSnapshot{
 		Submitted: vals[0], Skipped: vals[1], Succeeded: vals[2], Failed: vals[3], Canceled: vals[4],
 		QueuePending: vals[5], Processing: vals[6], SkippedMissingBody: vals[7], SkippedParentNotReady: vals[8], FailedDB: vals[9],
+		DurationTotalUS: durations["store_duration_total"], DurationLastUS: durations["store_duration_last"], DurationAvgUS: durations["store_duration_avg"], DurationMaxUS: durations["store_duration_max"],
 	}
 	if !a.storeWindow.seen {
 		a.storeWindow.first = s
@@ -518,6 +748,212 @@ func (a *analyzer) parseStore(line string) bool {
 	return true
 }
 
+func (a *analyzer) parseStoreDataType(line string) bool {
+	m := storeDataTypeRE.FindStringSubmatch(line)
+	if len(m) != 4 {
+		return false
+	}
+	dataType := m[1]
+	stats := a.storeDataTypes[dataType]
+	if stats == nil {
+		stats = &StoreDataTypeStats{Type: dataType}
+		a.storeDataTypes[dataType] = stats
+	}
+	rows := parseUint(m[2])
+	cost := durationToMicros(m[3])
+	stats.Writes += rows
+	stats.Tasks++
+	stats.TotalCostUS += cost
+	if cost > stats.MaxCostUS {
+		stats.MaxCostUS = cost
+	}
+	return true
+}
+
+func (a *analyzer) parseStoreDataTypeFailure(line string) bool {
+	m := storeDataTypeFailRE.FindStringSubmatch(line)
+	if len(m) != 5 {
+		return false
+	}
+	dataType := m[2]
+	stats := a.storeDataTypes[dataType]
+	if stats == nil {
+		stats = &StoreDataTypeStats{Type: dataType}
+		a.storeDataTypes[dataType] = stats
+	}
+	tryCount := parseUint(m[3])
+	cost := durationToMicros(m[4])
+	stats.Failures++
+	if tryCount > 1 {
+		stats.RetriedAttempts++
+	}
+	stats.FailedCostUS += cost
+	if cost > stats.MaxFailedCostUS {
+		stats.MaxFailedCostUS = cost
+	}
+	return true
+}
+
+func (a *analyzer) parseStoredBlock(line string, ts time.Time) bool {
+	m := storedBlockRE.FindStringSubmatch(line)
+	if len(m) != 3 {
+		return false
+	}
+	height := parseUint(m[1])
+	if height > a.storedHeight {
+		a.storedHeight = height
+	}
+	durations := keyDurationPairs(line)
+	totalCost := durations["total_cost"]
+	if totalCost > 0 {
+		a.fullBlockStoreSamples = append(a.fullBlockStoreSamples, fullBlockStoreSample{
+			ReadyUS:    durations["ready_cost"],
+			BlockRowUS: durations["block_row_cost"],
+			DataUS:     durations["data_cost"],
+			FinalizeUS: durations["finalize_cost"],
+			TotalUS:    totalCost,
+		})
+		a.report.BlockStoreDurations = append(a.report.BlockStoreDurations, BlockStoreDuration{
+			Height:     height,
+			Hash:       m[2],
+			StoredAt:   ts,
+			ReadyUS:    durations["ready_cost"],
+			BlockRowUS: durations["block_row_cost"],
+			DataUS:     durations["data_cost"],
+			FinalizeUS: durations["finalize_cost"],
+			TotalUS:    totalCost,
+		})
+	}
+	progress := a.progressEventForHeightHash(height, m[2])
+	if m[2] != "" {
+		progress.Hash = m[2]
+	}
+	if !ts.IsZero() {
+		progress.StoredAt = ts
+	}
+	progress.StoreTotalUS = totalCost
+	return true
+}
+
+func (a *analyzer) parseTaskLifecycle(line string, ts time.Time) bool {
+	fields := colonFields(line)
+	if fields["action"] == "" || fields["kind"] == "" {
+		return false
+	}
+	height := parseUint(fields["height"])
+	hash := fields["hash"]
+	event := a.progressEventForTask(fields["kind"], height, hash, fields["key"])
+	if event == nil {
+		return true
+	}
+	if !ts.IsZero() && (event.FirstTaskCreatedAt.IsZero() || ts.Before(event.FirstTaskCreatedAt)) {
+		event.FirstTaskCreatedAt = ts
+	}
+	if fields["action"] == "started" {
+		queueWait := parseUint(fields["queue_wait_us"])
+		if queueWait > 0 {
+			event.TaskQueueWaitTotalUS += queueWait
+			event.TaskQueueWaitSamples++
+		}
+	}
+	return true
+}
+
+func (a *analyzer) progressEvent(height uint64) *blockProgressEvent {
+	event := a.blockProgress[height]
+	if event == nil {
+		event = &blockProgressEvent{Height: height}
+		a.blockProgress[height] = event
+	}
+	return event
+}
+
+func (a *analyzer) progressEventByHash(hash string) *blockProgressEvent {
+	hash = strings.TrimSpace(hash)
+	if hash == "" {
+		return nil
+	}
+	event := a.blockProgressByHash[hash]
+	if event == nil {
+		event = &blockProgressEvent{Hash: hash}
+		a.blockProgressByHash[hash] = event
+	}
+	return event
+}
+
+func (a *analyzer) progressEventForTask(kind string, height uint64, hash string, key string) *blockProgressEvent {
+	switch kind {
+	case "header_height":
+		if height == 0 {
+			height = parseHeaderHeightTaskKey(key)
+		}
+		if height == 0 {
+			return nil
+		}
+		return a.progressEvent(height)
+	case "body", "header_hash":
+		if hash == "" && kind == "body" {
+			hash = key
+		}
+		if hash == "" && kind == "header_hash" {
+			hash = strings.TrimPrefix(key, "header_hash:")
+		}
+		return a.progressEventByHash(hash)
+	default:
+		return nil
+	}
+}
+
+func (a *analyzer) progressEventForHeightHash(height uint64, hash string) *blockProgressEvent {
+	heightEvent := a.progressEvent(height)
+	if hash == "" {
+		return heightEvent
+	}
+	hashEvent := a.progressEventByHash(hash)
+	if hashEvent == nil || hashEvent == heightEvent {
+		heightEvent.Hash = hash
+		a.blockProgressByHash[hash] = heightEvent
+		return heightEvent
+	}
+	a.mergeProgressEvents(heightEvent, hashEvent)
+	heightEvent.Hash = hash
+	heightEvent.Height = height
+	a.blockProgressByHash[hash] = heightEvent
+	return heightEvent
+}
+
+func (a *analyzer) mergeProgressEvents(dst, src *blockProgressEvent) {
+	if dst == nil || src == nil {
+		return
+	}
+	if dst.Hash == "" {
+		dst.Hash = src.Hash
+	}
+	if dst.FirstTaskCreatedAt.IsZero() || (!src.FirstTaskCreatedAt.IsZero() && src.FirstTaskCreatedAt.Before(dst.FirstTaskCreatedAt)) {
+		dst.FirstTaskCreatedAt = src.FirstTaskCreatedAt
+	}
+	if dst.HeaderSyncedAt.IsZero() {
+		dst.HeaderSyncedAt = src.HeaderSyncedAt
+	}
+	if dst.HeaderCostUS == 0 {
+		dst.HeaderCostUS = src.HeaderCostUS
+	}
+	if dst.BodySyncedAt.IsZero() {
+		dst.BodySyncedAt = src.BodySyncedAt
+	}
+	if dst.BodyCostUS == 0 {
+		dst.BodyCostUS = src.BodyCostUS
+	}
+	if dst.StoredAt.IsZero() {
+		dst.StoredAt = src.StoredAt
+	}
+	if dst.StoreTotalUS == 0 {
+		dst.StoreTotalUS = src.StoreTotalUS
+	}
+	dst.TaskQueueWaitTotalUS += src.TaskQueueWaitTotalUS
+	dst.TaskQueueWaitSamples += src.TaskQueueWaitSamples
+}
+
 func (a *analyzer) parseRuntime(line string, ts time.Time) bool {
 	m := runtimeHealthRE.FindStringSubmatch(line)
 	if len(m) != 27 {
@@ -525,7 +961,7 @@ func (a *analyzer) parseRuntime(line string, ts time.Time) bool {
 	}
 	v := parseUintGroups(m[1:])
 	s := RuntimeSnapshot{
-		Time: ts, RemoteLatest: v[0], NodeReady: v[1], NodeTotal: v[2], BlocktreeStart: v[3], BlocktreeEnd: v[4],
+		Time: ts, RemoteLatest: v[0], NodeReady: v[1], NodeTotal: v[2], BlocktreeStart: v[3], BlocktreeEnd: v[4], StoredHeight: a.storedHeight,
 		Linked: v[5], Leaves: v[6], Branches: v[7], Orphans: v[8], OrphanParents: v[9], StagingBlocks: v[10],
 		PendingHeaders: v[11], PendingBodies: v[12], CompleteBlocks: v[13], StoredCount: v[14],
 		TaskPendingHigh: v[15], TaskPendingNormal: v[16], TaskTracked: v[17], TaskSucceeded: v[18], TaskFailed: v[19], TaskRetried: v[20],
@@ -572,6 +1008,36 @@ func (a *analyzer) parseNodeRPCStats(line string) bool {
 		w.samples++
 		w.last = count
 	}
+	return true
+}
+
+func (a *analyzer) parseNodeOperatorMethodStats(line string) bool {
+	m := nodeOperatorMethodRE.FindStringSubmatch(line)
+	if len(m) != 9 {
+		return false
+	}
+	nodeID := int(parseUint(m[1]))
+	method := m[2]
+	key := strconv.Itoa(nodeID) + ":" + method
+	w := a.nodeOperatorWindows[key]
+	if w == nil {
+		w = &nodeOperatorMethodWindow{NodeID: nodeID, Method: method}
+		a.nodeOperatorWindows[key] = w
+	}
+	snap := nodeOperatorMethodSnapshot{
+		Calls:           parseUint(m[3]),
+		TotalCostUS:     parseUint(m[4]),
+		MaxCostUS:       parseUint(m[5]),
+		ArraySamples:    parseUint(m[6]),
+		ArrayItemsTotal: parseUint(m[7]),
+		MaxArrayItems:   parseUint(m[8]),
+	}
+	if !w.seen {
+		w.first = snap
+		w.seen = true
+	}
+	w.samples++
+	w.last = snap
 	return true
 }
 
@@ -645,6 +1111,56 @@ func (a *analyzer) parseHeaderSuccess(line string) bool {
 	return true
 }
 
+func (a *analyzer) parseHeaderSyncSuccess(line string, ts time.Time) bool {
+	m := headerSyncSuccessRE.FindStringSubmatch(line)
+	if len(m) != 4 {
+		return false
+	}
+	header := &a.report.HeaderSync
+	header.Succeeded++
+	header.LastHeight = parseUint(m[1])
+	header.LastHash = m[2]
+	cost := parseUint(m[3])
+	if cost > 0 {
+		header.costTotalUS += cost
+		header.costSamples++
+		if cost > header.MaxCostUS {
+			header.MaxCostUS = cost
+		}
+	}
+	progress := a.progressEventForHeightHash(header.LastHeight, header.LastHash)
+	if !ts.IsZero() {
+		progress.HeaderSyncedAt = ts
+	}
+	progress.HeaderCostUS = cost
+	return true
+}
+
+func (a *analyzer) parseHeaderSyncFailed(line string) bool {
+	m := headerSyncFailedRE.FindStringSubmatch(line)
+	if len(m) != 4 {
+		return false
+	}
+	header := &a.report.HeaderSync
+	header.Failed++
+	if m[1] != "" {
+		header.LastHeight = parseUint(m[1])
+	}
+	if m[2] != "" {
+		header.LastHash = m[2]
+	}
+	cost := parseUint(m[3])
+	if cost > 0 {
+		header.costTotalUS += cost
+		header.costSamples++
+		if cost > header.MaxCostUS {
+			header.MaxCostUS = cost
+		}
+	}
+	a.addAnomaly("medium", "header_sync_failed", "Header sync failed", 1, "Check header RPC failures, node health, and chain progress.")
+	return true
+}
+
 func (a *analyzer) parseValidNodes(line string) bool {
 	if !validNodesRE.MatchString(line) {
 		return false
@@ -686,7 +1202,7 @@ func (a *analyzer) parseBodySyncStart(line string) bool {
 	return true
 }
 
-func (a *analyzer) parseBodySyncSuccess(line string) bool {
+func (a *analyzer) parseBodySyncSuccess(line string, ts time.Time) bool {
 	m := bodySyncSuccessRE.FindStringSubmatch(line)
 	if len(m) != 6 {
 		return false
@@ -706,6 +1222,12 @@ func (a *analyzer) parseBodySyncSuccess(line string) bool {
 			body.MaxCostUS = cost
 		}
 	}
+	progress := a.progressEventForHeightHash(body.LastHeight, body.LastHash)
+	progress.Hash = body.LastHash
+	if !ts.IsZero() {
+		progress.BodySyncedAt = ts
+	}
+	progress.BodyCostUS = cost
 	return true
 }
 
@@ -741,6 +1263,29 @@ func (a *analyzer) parseBodyNoValidNodes(line string) bool {
 	body.LastHash = m[2]
 	a.report.NodeSelection.NoValidNodes++
 	a.addAnomaly("high", "body_no_valid_nodes", "Body sync has no valid nodes", 1, "Check node readiness, remote height, and cooldown state.")
+	return true
+}
+
+func (a *analyzer) parseBodyItemCost(line string) bool {
+	m := bodyItemCostRE.FindStringSubmatch(line)
+	if len(m) != 6 {
+		return false
+	}
+	itemName := m[3]
+	item := a.bodyItems[itemName]
+	if item == nil {
+		item = &BodyItemStats{Item: itemName}
+		a.bodyItems[itemName] = item
+	}
+	item.Blocks++
+	item.Items += parseUint(m[4])
+	cost := parseUint(m[5])
+	item.TotalCostUS += cost
+	if cost > item.MaxCostUS {
+		item.MaxCostUS = cost
+	}
+	item.LastHeight = parseUint(m[1])
+	item.LastHash = m[2]
 	return true
 }
 
@@ -838,12 +1383,28 @@ func (a *analyzer) addAnomaly(level, category, message string, count uint64, sug
 func (a *analyzer) finish() {
 	a.finishTaskPool()
 	a.finishStore()
+	a.finishStoreDataTypes()
+	a.finishFullBlockStore()
+	a.finishHeaderSync()
 	a.finishBodySync()
+	a.finishBodyItems()
+	a.finishBlockProgress()
+	a.finishBlockTiming()
 	a.finishNodeRPCSnapshots()
+	a.finishNodeOperatorMethods()
 	a.finishScanStages()
 	a.finishMethods()
 	a.finishAnomalies()
 	a.finishSummary()
+}
+
+func (a *analyzer) finishHeaderSync() {
+	header := &a.report.HeaderSync
+	header.Started = header.Succeeded + header.Failed
+	header.SuccessRate = percent(header.Succeeded, header.Started)
+	if header.costSamples > 0 {
+		header.AvgCostUS = header.costTotalUS / header.costSamples
+	}
 }
 
 func (a *analyzer) finishBodySync() {
@@ -855,6 +1416,164 @@ func (a *analyzer) finishBodySync() {
 	if body.txSamples > 0 {
 		body.AvgTxs = body.txTotal / body.txSamples
 	}
+}
+
+func (a *analyzer) finishBodyItems() {
+	items := make([]BodyItemStats, 0, len(a.bodyItems))
+	for _, item := range a.bodyItems {
+		if item.Blocks > 0 {
+			item.AvgCostUS = item.TotalCostUS / item.Blocks
+		}
+		if item.Items > 0 {
+			item.AvgItemCostUS = item.TotalCostUS / item.Items
+		}
+		items = append(items, *item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].TotalCostUS == items[j].TotalCostUS {
+			return items[i].Item < items[j].Item
+		}
+		return items[i].TotalCostUS > items[j].TotalCostUS
+	})
+	a.report.BodyItems = items
+}
+
+func (a *analyzer) finishBlockProgress() {
+	if len(a.blockProgress) == 0 {
+		return
+	}
+	heights := make([]uint64, 0, len(a.blockProgress))
+	for height := range a.blockProgress {
+		heights = append(heights, height)
+	}
+	sort.Slice(heights, func(i, j int) bool {
+		return heights[i] < heights[j]
+	})
+
+	rows := make([]BlockProgressInterval, 0, len(heights))
+	outliers := make([]BlockProgressInterval, 0)
+	var prevBodyAt, prevStoreAt time.Time
+	for _, height := range heights {
+		event := a.blockProgress[height]
+		row := BlockProgressInterval{
+			Height:       event.Height,
+			Hash:         event.Hash,
+			BodySyncedAt: event.BodySyncedAt,
+			BodyCostUS:   event.BodyCostUS,
+			StoredAt:     event.StoredAt,
+			StoreTotalUS: event.StoreTotalUS,
+		}
+		if !event.BodySyncedAt.IsZero() && !prevBodyAt.IsZero() {
+			row.HasBodySyncGap = true
+			row.BodySyncGapUS = event.BodySyncedAt.Sub(prevBodyAt).Microseconds()
+		}
+		if !event.StoredAt.IsZero() && !prevStoreAt.IsZero() {
+			row.HasStoreGap = true
+			row.StoreGapUS = event.StoredAt.Sub(prevStoreAt).Microseconds()
+		}
+		if !event.BodySyncedAt.IsZero() {
+			prevBodyAt = event.BodySyncedAt
+		}
+		if !event.StoredAt.IsZero() {
+			prevStoreAt = event.StoredAt
+		}
+		if isBlockProgressOutlier(row) {
+			outliers = append(outliers, row)
+			continue
+		}
+		rows = append(rows, row)
+	}
+	a.report.BlockProgress = rows
+	a.report.BlockProgressOutliers = outliers
+}
+
+func isBlockProgressOutlier(row BlockProgressInterval) bool {
+	return (row.HasBodySyncGap && row.BodySyncGapUS > blockProgressIntervalOutlierUS) ||
+		(row.HasStoreGap && row.StoreGapUS > blockProgressIntervalOutlierUS)
+}
+
+func (a *analyzer) finishBlockTiming() {
+	if len(a.blockProgress) == 0 {
+		return
+	}
+	var stats BlockTimingStats
+	var prevStoreToTaskTotal, headerStageTotal, bodyStageTotal, storeStageTotal uint64
+	var endToEndTotal, taskQueueTotal, directCostTotal uint64
+	endToEndValues := make([]uint64, 0)
+	heights := make([]uint64, 0, len(a.blockProgress))
+	for height := range a.blockProgress {
+		heights = append(heights, height)
+	}
+	sort.Slice(heights, func(i, j int) bool {
+		return heights[i] < heights[j]
+	})
+	var prevHeight uint64
+	var prevStoredAt time.Time
+	for _, height := range heights {
+		event := a.blockProgress[height]
+		if event == nil || event.FirstTaskCreatedAt.IsZero() {
+			continue
+		}
+		stats.Blocks++
+		if prevHeight+1 == event.Height && !prevStoredAt.IsZero() {
+			if d, ok := positiveDurationMicros(prevStoredAt, event.FirstTaskCreatedAt); ok {
+				prevStoreToTaskTotal += d
+				stats.PrevStoreToTaskSamples++
+			}
+		}
+		if !event.FirstTaskCreatedAt.IsZero() && !event.HeaderSyncedAt.IsZero() {
+			if d, ok := positiveDurationMicros(event.FirstTaskCreatedAt, event.HeaderSyncedAt); ok {
+				headerStageTotal += d
+				stats.HeaderStageSamples++
+			}
+		}
+		if !event.HeaderSyncedAt.IsZero() && !event.BodySyncedAt.IsZero() {
+			if d, ok := positiveDurationMicros(event.HeaderSyncedAt, event.BodySyncedAt); ok {
+				bodyStageTotal += d
+				stats.BodyStageSamples++
+			}
+		}
+		if !event.BodySyncedAt.IsZero() && !event.StoredAt.IsZero() {
+			if d, ok := positiveDurationMicros(event.BodySyncedAt, event.StoredAt); ok {
+				storeStageTotal += d
+				stats.StoreStageSamples++
+			}
+		}
+		if !event.FirstTaskCreatedAt.IsZero() && !event.StoredAt.IsZero() {
+			if d, ok := positiveDurationMicros(event.FirstTaskCreatedAt, event.StoredAt); ok {
+				endToEndTotal += d
+				endToEndValues = append(endToEndValues, d)
+				stats.EndToEndSamples++
+				directCostTotal += event.HeaderCostUS + event.BodyCostUS + event.StoreTotalUS
+				if d > stats.MaxFirstTaskToStoreUS {
+					stats.MaxFirstTaskToStoreUS = d
+				}
+			}
+		}
+		taskQueueTotal += event.TaskQueueWaitTotalUS
+		stats.TaskQueueSamples += event.TaskQueueWaitSamples
+		if !event.StoredAt.IsZero() {
+			prevHeight = event.Height
+			prevStoredAt = event.StoredAt
+		}
+	}
+	stats.AvgPrevStoreToTaskUS = averageUint(prevStoreToTaskTotal, stats.PrevStoreToTaskSamples)
+	stats.AvgFirstTaskToHeaderUS = averageUint(headerStageTotal, stats.HeaderStageSamples)
+	stats.AvgHeaderToBodyUS = averageUint(bodyStageTotal, stats.BodyStageSamples)
+	stats.AvgBodyToStoreUS = averageUint(storeStageTotal, stats.StoreStageSamples)
+	stats.AvgFirstTaskToStoreUS = averageUint(endToEndTotal, stats.EndToEndSamples)
+	stats.P95FirstTaskToStoreUS = percentile95(endToEndValues)
+	stats.AvgTaskQueueWaitUS = averageUint(taskQueueTotal, stats.TaskQueueSamples)
+	stats.AvgHeaderSyncCostUS = a.report.HeaderSync.AvgCostUS
+	stats.AvgBodySyncCostUS = a.report.BodySync.AvgCostUS
+	stats.AvgFullBlockStoreCostUS = a.report.FullBlockStore.AvgTotalUS
+	if stats.EndToEndSamples > 0 {
+		avgDirectCost := directCostTotal / stats.EndToEndSamples
+		if stats.AvgFirstTaskToStoreUS > avgDirectCost {
+			stats.AvgUnattributedOverheadUS = stats.AvgFirstTaskToStoreUS - avgDirectCost
+		}
+	}
+	a.report.BlockTiming = stats
 }
 
 func (a *analyzer) finishTaskPool() {
@@ -898,8 +1617,69 @@ func (a *analyzer) finishStore() {
 		SkippedMissingBody:    delta(first.SkippedMissingBody, last.SkippedMissingBody),
 		SkippedParentNotReady: delta(first.SkippedParentNotReady, last.SkippedParentNotReady),
 		FailedDB:              delta(first.FailedDB, last.FailedDB),
+		DurationSamples:       delta(first.Succeeded, last.Succeeded) + delta(first.Failed, last.Failed),
+		DurationTotalUS:       delta(first.DurationTotalUS, last.DurationTotalUS),
+		DurationAvgUS:         last.DurationAvgUS,
+		DurationLastUS:        last.DurationLastUS,
+		DurationMaxUS:         last.DurationMaxUS,
 	}
 	a.report.Store.SuccessRate = percent(a.report.Store.Succeeded, a.report.Store.Succeeded+a.report.Store.Failed)
+}
+
+func (a *analyzer) finishStoreDataTypes() {
+	stats := make([]StoreDataTypeStats, 0, len(a.storeDataTypes))
+	for _, item := range a.storeDataTypes {
+		if item.Tasks > 0 {
+			item.AvgCostUS = item.TotalCostUS / item.Tasks
+		}
+		if item.Writes > 0 {
+			item.AvgWriteCostUS = item.TotalCostUS / item.Writes
+		}
+		if item.Failures > 0 {
+			item.AvgFailedCostUS = item.FailedCostUS / item.Failures
+		}
+		stats = append(stats, *item)
+	}
+	sort.Slice(stats, func(i, j int) bool {
+		if stats[i].Writes == stats[j].Writes {
+			return stats[i].Type < stats[j].Type
+		}
+		return stats[i].Writes > stats[j].Writes
+	})
+	a.report.StoreDataTypes = stats
+}
+
+func (a *analyzer) finishFullBlockStore() {
+	if len(a.fullBlockStoreSamples) == 0 {
+		return
+	}
+	var totalSum, dataSum, finalizeSum, readySum, blockRowSum uint64
+	var totalValues []uint64
+	for _, sample := range a.fullBlockStoreSamples {
+		totalSum += sample.TotalUS
+		dataSum += sample.DataUS
+		finalizeSum += sample.FinalizeUS
+		readySum += sample.ReadyUS
+		blockRowSum += sample.BlockRowUS
+		if sample.TotalUS > a.report.FullBlockStore.MaxTotalUS {
+			a.report.FullBlockStore.MaxTotalUS = sample.TotalUS
+		}
+		if sample.DataUS > a.report.FullBlockStore.MaxDataUS {
+			a.report.FullBlockStore.MaxDataUS = sample.DataUS
+		}
+		if sample.FinalizeUS > a.report.FullBlockStore.MaxFinalizeUS {
+			a.report.FullBlockStore.MaxFinalizeUS = sample.FinalizeUS
+		}
+		totalValues = append(totalValues, sample.TotalUS)
+	}
+	count := uint64(len(a.fullBlockStoreSamples))
+	a.report.FullBlockStore.Count = count
+	a.report.FullBlockStore.AvgTotalUS = totalSum / count
+	a.report.FullBlockStore.P95TotalUS = percentile95(totalValues)
+	a.report.FullBlockStore.AvgDataUS = dataSum / count
+	a.report.FullBlockStore.AvgFinalizeUS = finalizeSum / count
+	a.report.FullBlockStore.AvgReadyUS = readySum / count
+	a.report.FullBlockStore.AvgBlockRowUS = blockRowSum / count
 }
 
 func (a *analyzer) finishNodeRPCSnapshots() {
@@ -929,6 +1709,51 @@ func (a *analyzer) finishNodeRPCSnapshots() {
 			}
 		}
 	}
+}
+
+func (a *analyzer) finishNodeOperatorMethods() {
+	methods := make([]NodeOperatorMethodStats, 0, len(a.nodeOperatorWindows))
+	for _, w := range a.nodeOperatorWindows {
+		if !w.seen {
+			continue
+		}
+		first := w.first
+		if w.samples == 1 {
+			first = nodeOperatorMethodSnapshot{}
+		}
+		calls := delta(first.Calls, w.last.Calls)
+		if calls == 0 {
+			continue
+		}
+		arraySamples := delta(first.ArraySamples, w.last.ArraySamples)
+		item := NodeOperatorMethodStats{
+			NodeID:          w.NodeID,
+			Method:          w.Method,
+			Calls:           calls,
+			TotalCostUS:     delta(first.TotalCostUS, w.last.TotalCostUS),
+			MaxCostUS:       w.last.MaxCostUS,
+			ArraySamples:    arraySamples,
+			ArrayItemsTotal: delta(first.ArrayItemsTotal, w.last.ArrayItemsTotal),
+			MaxArrayItems:   w.last.MaxArrayItems,
+		}
+		if item.Calls > 0 {
+			item.AvgCostUS = item.TotalCostUS / item.Calls
+		}
+		if item.ArraySamples > 0 {
+			item.AvgArrayItems = item.ArrayItemsTotal / item.ArraySamples
+		}
+		methods = append(methods, item)
+	}
+	sort.Slice(methods, func(i, j int) bool {
+		if methods[i].NodeID != methods[j].NodeID {
+			return methods[i].NodeID < methods[j].NodeID
+		}
+		if methods[i].Calls == methods[j].Calls {
+			return methods[i].Method < methods[j].Method
+		}
+		return methods[i].Calls > methods[j].Calls
+	})
+	a.report.NodeOperatorMethods = methods
 }
 
 func (a *analyzer) finishScanStages() {
@@ -1018,9 +1843,10 @@ func (a *analyzer) finishSummary() {
 	a.report.Summary.StoreFailed = a.report.Store.Failed
 	a.report.Summary.StoreSuccessRate = percent(a.report.Store.Succeeded, a.report.Store.Succeeded+a.report.Store.Failed)
 	a.report.Summary.RemoteLatest = a.report.RuntimeLatest.RemoteLatest
+	a.report.Summary.StoredHeight = a.report.RuntimeLatest.StoredHeight
 	a.report.Summary.StoredCount = a.report.RuntimeLatest.StoredCount
-	if a.report.RuntimeLatest.RemoteLatest > 0 && a.report.RuntimeLatest.StoredCount > 0 {
-		a.report.Summary.Lag = strconv.FormatUint(a.report.RuntimeLatest.RemoteLatest-a.report.RuntimeLatest.StoredCount, 10)
+	if a.report.RuntimeLatest.RemoteLatest > 0 && a.report.RuntimeLatest.StoredHeight > 0 && a.report.RuntimeLatest.RemoteLatest >= a.report.RuntimeLatest.StoredHeight {
+		a.report.Summary.Lag = strconv.FormatUint(a.report.RuntimeLatest.RemoteLatest-a.report.RuntimeLatest.StoredHeight, 10)
 	} else {
 		a.report.Summary.Lag = "no data"
 	}
@@ -1045,12 +1871,50 @@ func keyUintPairs(line string) map[string]uint64 {
 	return result
 }
 
+func colonFields(line string) map[string]string {
+	result := make(map[string]string)
+	for _, field := range strings.Fields(line) {
+		parts := strings.SplitN(field, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		result[parts[0]] = parts[1]
+	}
+	return result
+}
+
+func keyDurationPairs(line string) map[string]uint64 {
+	result := make(map[string]uint64)
+	for _, match := range durationFieldRE.FindAllStringSubmatch(line, -1) {
+		if len(match) != 3 {
+			continue
+		}
+		result[match[1]] = durationToMicros(match[2])
+	}
+	return result
+}
+
+func storeDurationPairs(line string) map[string]uint64 {
+	result := make(map[string]uint64)
+	for _, match := range storeDurationFieldRE.FindAllStringSubmatch(line, -1) {
+		if len(match) != 3 {
+			continue
+		}
+		result[match[1]] = durationToMicros(match[2])
+	}
+	return result
+}
+
 func parseUint(s string) uint64 {
 	if strings.TrimSpace(s) == "" {
 		return 0
 	}
 	v, _ := strconv.ParseUint(strings.TrimSpace(s), 10, 64)
 	return v
+}
+
+func parseHeaderHeightTaskKey(key string) uint64 {
+	return parseUint(strings.TrimPrefix(strings.TrimSpace(key), "header_height:"))
 }
 
 func durationToMicros(s string) uint64 {
@@ -1081,11 +1945,41 @@ func delta(first, last uint64) uint64 {
 	return last
 }
 
+func averageUint(total, samples uint64) uint64 {
+	if samples == 0 {
+		return 0
+	}
+	return total / samples
+}
+
+func positiveDurationMicros(start, end time.Time) (uint64, bool) {
+	if start.IsZero() || end.IsZero() || end.Before(start) {
+		return 0, false
+	}
+	return uint64(end.Sub(start).Microseconds()), true
+}
+
 func percent(part, total uint64) string {
 	if total == 0 {
 		return "no data"
 	}
 	return fmt.Sprintf("%.2f%%", float64(part)*100/float64(total))
+}
+
+func percentile95(values []uint64) uint64 {
+	if len(values) == 0 {
+		return 0
+	}
+	values = append([]uint64(nil), values...)
+	sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
+	idx := (len(values)*95 + 99) / 100
+	if idx == 0 {
+		return values[0]
+	}
+	if idx > len(values) {
+		idx = len(values)
+	}
+	return values[idx-1]
 }
 
 func topKey(values map[string]uint64) string {
@@ -1132,5 +2026,577 @@ func TemplateFuncs() template.FuncMap {
 			}
 			return t.Format("2006-01-02 15:04:05")
 		},
+		"formatClock": func(t time.Time) string {
+			if t.IsZero() {
+				return "no data"
+			}
+			return t.Format("15:04:05.000")
+		},
+		"microsToMillis": func(us uint64) string {
+			return fmt.Sprintf("%.3f", float64(us)/1000)
+		},
+		"formatSignedMicros":         formatSignedMicros,
+		"syncProgressChart":          renderSyncProgressChart,
+		"blocktreeLagChart":          renderBlocktreeLagChart,
+		"blockProgressIntervalChart": renderBlockProgressIntervalChart,
+		"bodySyncIntervalChart":      renderBodySyncIntervalChart,
+		"storeIntervalChart":         renderStoreIntervalChart,
+		"blockTimingChart":           renderBlockTimingChart,
+		"nodeSyncChart":              renderNodeSyncChart,
 	}
+}
+
+func formatSignedMicros(us int64) string {
+	sign := ""
+	if us < 0 {
+		sign = "-"
+		us = -us
+	}
+	switch {
+	case us >= 1_000_000:
+		return fmt.Sprintf("%s%.3fs", sign, float64(us)/1_000_000)
+	case us >= 1_000:
+		return fmt.Sprintf("%s%.3fms", sign, float64(us)/1_000)
+	default:
+		return fmt.Sprintf("%s%dµs", sign, us)
+	}
+}
+
+func renderBlockTimingChart(stats BlockTimingStats) template.HTML {
+	if stats.Blocks == 0 {
+		return ""
+	}
+
+	stageSegments := []blockTimingSegment{
+		{Label: "Task -> Header", Class: "stage-header", Value: stats.AvgFirstTaskToHeaderUS},
+		{Label: "Header -> Body", Class: "stage-body", Value: stats.AvgHeaderToBodyUS},
+		{Label: "Body -> Store", Class: "stage-store", Value: stats.AvgBodyToStoreUS},
+	}
+	costSegments := []blockTimingSegment{
+		{Label: "Task Queue", Class: "task-queue", Value: stats.AvgTaskQueueWaitUS},
+		{Label: "Header RPC", Class: "rpc-header", Value: stats.AvgHeaderSyncCostUS},
+		{Label: "Body RPC", Class: "rpc-body", Value: stats.AvgBodySyncCostUS},
+		{Label: "Store Write", Class: "store-write", Value: stats.AvgFullBlockStoreCostUS},
+		{Label: "Other Wait", Class: "other-wait", Value: stats.AvgUnattributedOverheadUS},
+	}
+
+	stageTotal := sumSegments(stageSegments)
+	costTotal := sumSegments(costSegments)
+	maxValue := maxUint64(stageTotal, costTotal)
+	maxValue = maxUint64(maxValue, stats.AvgFirstTaskToStoreUS)
+	maxValue = maxUint64(maxValue, stats.P95FirstTaskToStoreUS)
+	if maxValue == 0 {
+		return ""
+	}
+
+	const (
+		width  = 960.0
+		height = 260.0
+		left   = 150.0
+		right  = 34.0
+		top    = 28.0
+		bottom = 54.0
+		plotW  = width - left - right
+		plotH  = height - top - bottom
+		barH   = 34.0
+	)
+	rowY := []float64{76, 152}
+	scaleX := func(value uint64) float64 {
+		return left + float64(value)*plotW/float64(maxValue)
+	}
+
+	var b strings.Builder
+	b.WriteString(`<svg class="progress-chart" viewBox="0 0 960 260" role="img" aria-label="Block timing distribution by stage and cost attribution">`)
+	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top+plotH, left+plotW, top+plotH))
+	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top, left, top+plotH))
+	for i := 0; i <= 4; i++ {
+		x := left + float64(i)*plotW/4
+		value := uint64(float64(maxValue) * float64(i) / 4)
+		b.WriteString(fmt.Sprintf(`<line class="gridline" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, x, top, x, top+plotH))
+		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">%s</text>`, x, height-18, template.HTMLEscapeString(formatSignedMicros(int64(value)))))
+	}
+	b.WriteString(fmt.Sprintf(`<text class="axis-title y-left-title" x="%.1f" y="%.1f">Duration</text>`, left, top-10))
+	b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">Avg stage timing</text>`, left-12, rowY[0]+5))
+	b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">Measured costs</text>`, left-12, rowY[1]+5))
+	writeStackedTimingBar(&b, stageSegments, left, rowY[0]-barH/2, barH, scaleX)
+	writeStackedTimingBar(&b, costSegments, left, rowY[1]-barH/2, barH, scaleX)
+	if stats.P95FirstTaskToStoreUS > 0 {
+		x := scaleX(stats.P95FirstTaskToStoreUS)
+		b.WriteString(fmt.Sprintf(`<line class="marker p95" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, x, top, x, top+plotH))
+		b.WriteString(fmt.Sprintf(`<text class="axis-label y-right-label" x="%.1f" y="%.1f">p95 E2E %sms</text>`, x+6, top+14, template.HTMLEscapeString(fmt.Sprintf("%.3f", float64(stats.P95FirstTaskToStoreUS)/1000))))
+	}
+	b.WriteString(`</svg>`)
+	return template.HTML(b.String())
+}
+
+func writeStackedTimingBar(b *strings.Builder, segments []blockTimingSegment, left, y, height float64, scaleX func(uint64) float64) {
+	var offset uint64
+	for _, segment := range segments {
+		if segment.Value == 0 {
+			continue
+		}
+		x1 := scaleX(offset)
+		offset += segment.Value
+		x2 := scaleX(offset)
+		width := x2 - x1
+		if width <= 0 {
+			continue
+		}
+		b.WriteString(fmt.Sprintf(`<rect class="bar %s" x="%.1f" y="%.1f" width="%.1f" height="%.1f"></rect>`, template.HTMLEscapeString(segment.Class), x1, y, width, height))
+		if width >= 86 {
+			label := fmt.Sprintf("%s %.1fms", segment.Label, float64(segment.Value)/1000)
+			b.WriteString(fmt.Sprintf(`<text class="bar-label" x="%.1f" y="%.1f">%s</text>`, x1+8, y+height/2+4, template.HTMLEscapeString(label)))
+		}
+	}
+}
+
+func sumSegments(segments []blockTimingSegment) uint64 {
+	var total uint64
+	for _, segment := range segments {
+		total += segment.Value
+	}
+	return total
+}
+
+func maxUint64(a, b uint64) uint64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func renderBlockProgressIntervalChart(rows []BlockProgressInterval) template.HTML {
+	if len(rows) == 0 {
+		return ""
+	}
+
+	maxGapUS := uint64(0)
+	for _, row := range rows {
+		if row.HasBodySyncGap && row.BodySyncGapUS > 0 && uint64(row.BodySyncGapUS) > maxGapUS {
+			maxGapUS = uint64(row.BodySyncGapUS)
+		}
+		if row.HasStoreGap && row.StoreGapUS > 0 && uint64(row.StoreGapUS) > maxGapUS {
+			maxGapUS = uint64(row.StoreGapUS)
+		}
+	}
+	if maxGapUS == 0 {
+		return ""
+	}
+
+	const (
+		width  = 960.0
+		height = 300.0
+		left   = 82.0
+		right  = 20.0
+		top    = 24.0
+		bottom = 52.0
+		plotW  = width - left - right
+		plotH  = height - top - bottom
+	)
+	scaleX := func(i int) float64 {
+		if len(rows) == 1 {
+			return left + plotW/2
+		}
+		return left + float64(i)*plotW/float64(len(rows)-1)
+	}
+	scaleY := func(value uint64) float64 {
+		return top + (float64(maxGapUS-value) * plotH / float64(maxGapUS))
+	}
+
+	var bodyPoints, storePoints strings.Builder
+	for i, row := range rows {
+		x := scaleX(i)
+		if row.HasBodySyncGap && row.BodySyncGapUS >= 0 {
+			if bodyPoints.Len() > 0 {
+				bodyPoints.WriteByte(' ')
+			}
+			bodyPoints.WriteString(fmt.Sprintf("%.1f,%.1f", x, scaleY(uint64(row.BodySyncGapUS))))
+		}
+		if row.HasStoreGap && row.StoreGapUS >= 0 {
+			if storePoints.Len() > 0 {
+				storePoints.WriteByte(' ')
+			}
+			storePoints.WriteString(fmt.Sprintf("%.1f,%.1f", x, scaleY(uint64(row.StoreGapUS))))
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString(`<svg class="progress-chart" viewBox="0 0 960 300" role="img" aria-label="Per-block sync and store intervals">`)
+	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top+plotH, left+plotW, top+plotH))
+	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top, left, top+plotH))
+	for i := 0; i <= 4; i++ {
+		y := top + float64(i)*plotH/4
+		value := maxGapUS - uint64(float64(maxGapUS)*float64(i)/4)
+		b.WriteString(fmt.Sprintf(`<line class="gridline" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, y, left+plotW, y))
+		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">%s</text>`, left-8, y+4, template.HTMLEscapeString(formatSignedMicros(int64(value)))))
+	}
+	b.WriteString(fmt.Sprintf(`<text class="axis-title y-left-title" x="%.1f" y="%.1f">Interval</text>`, left, top-8))
+	b.WriteString(fmt.Sprintf(`<text class="axis-label x-start" x="%.1f" y="%.1f">%d</text>`, left, height-16, rows[0].Height))
+	last := rows[len(rows)-1]
+	b.WriteString(fmt.Sprintf(`<text class="axis-label x-end" x="%.1f" y="%.1f">%d</text>`, left+plotW, height-16, last.Height))
+	b.WriteString(fmt.Sprintf(`<polyline class="line body-gap" points="%s"></polyline>`, bodyPoints.String()))
+	b.WriteString(fmt.Sprintf(`<polyline class="line store-gap" points="%s"></polyline>`, storePoints.String()))
+	b.WriteString(`</svg>`)
+
+	return template.HTML(b.String())
+}
+
+func renderBodySyncIntervalChart(rows []BlockProgressInterval) template.HTML {
+	return renderSingleBlockProgressIntervalChart(rows, "Body sync interval", "body-gap", func(row BlockProgressInterval) (int64, bool) {
+		return row.BodySyncGapUS, row.HasBodySyncGap && row.BodySyncGapUS >= 0
+	})
+}
+
+func renderStoreIntervalChart(rows []BlockProgressInterval) template.HTML {
+	return renderSingleBlockProgressIntervalChart(rows, "Store interval", "store-gap", func(row BlockProgressInterval) (int64, bool) {
+		return row.StoreGapUS, row.HasStoreGap && row.StoreGapUS >= 0
+	})
+}
+
+func renderSingleBlockProgressIntervalChart(rows []BlockProgressInterval, label, lineClass string, selector func(BlockProgressInterval) (int64, bool)) template.HTML {
+	if len(rows) == 0 {
+		return ""
+	}
+
+	maxGapUS := uint64(0)
+	for _, row := range rows {
+		value, ok := selector(row)
+		if ok && value > 0 && uint64(value) > maxGapUS {
+			maxGapUS = uint64(value)
+		}
+	}
+	if maxGapUS == 0 {
+		return ""
+	}
+
+	const (
+		width  = 960.0
+		height = 280.0
+		left   = 82.0
+		right  = 20.0
+		top    = 24.0
+		bottom = 52.0
+		plotW  = width - left - right
+		plotH  = height - top - bottom
+	)
+	scaleX := func(i int) float64 {
+		if len(rows) == 1 {
+			return left + plotW/2
+		}
+		return left + float64(i)*plotW/float64(len(rows)-1)
+	}
+	scaleY := func(value uint64) float64 {
+		return top + (float64(maxGapUS-value) * plotH / float64(maxGapUS))
+	}
+
+	var points strings.Builder
+	for i, row := range rows {
+		value, ok := selector(row)
+		if !ok {
+			continue
+		}
+		if points.Len() > 0 {
+			points.WriteByte(' ')
+		}
+		points.WriteString(fmt.Sprintf("%.1f,%.1f", scaleX(i), scaleY(uint64(value))))
+	}
+	if points.Len() == 0 {
+		return ""
+	}
+
+	escapedLabel := template.HTMLEscapeString(label)
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf(`<svg class="progress-chart" viewBox="0 0 960 280" role="img" aria-label="Per-block %s">`, escapedLabel))
+	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top+plotH, left+plotW, top+plotH))
+	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top, left, top+plotH))
+	for i := 0; i <= 4; i++ {
+		y := top + float64(i)*plotH/4
+		value := maxGapUS - uint64(float64(maxGapUS)*float64(i)/4)
+		b.WriteString(fmt.Sprintf(`<line class="gridline" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, y, left+plotW, y))
+		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">%s</text>`, left-8, y+4, template.HTMLEscapeString(formatSignedMicros(int64(value)))))
+	}
+	b.WriteString(fmt.Sprintf(`<text class="axis-title y-left-title" x="%.1f" y="%.1f">%s</text>`, left, top-8, escapedLabel))
+	b.WriteString(fmt.Sprintf(`<text class="axis-label x-start" x="%.1f" y="%.1f">%d</text>`, left, height-16, rows[0].Height))
+	last := rows[len(rows)-1]
+	b.WriteString(fmt.Sprintf(`<text class="axis-label x-end" x="%.1f" y="%.1f">%d</text>`, left+plotW, height-16, last.Height))
+	b.WriteString(fmt.Sprintf(`<polyline class="line %s" points="%s"></polyline>`, template.HTMLEscapeString(lineClass), points.String()))
+	b.WriteString(`</svg>`)
+
+	return template.HTML(b.String())
+}
+
+func renderNodeSyncChart(nodes []NodeStats) template.HTML {
+	if len(nodes) == 0 {
+		return ""
+	}
+
+	maxRequests := uint64(0)
+	maxCostUS := uint64(0)
+	for _, node := range nodes {
+		if node.Requests > maxRequests {
+			maxRequests = node.Requests
+		}
+		if node.AvgCostUS > maxCostUS {
+			maxCostUS = node.AvgCostUS
+		}
+	}
+	if maxRequests == 0 {
+		maxRequests = 1
+	}
+	if maxCostUS == 0 {
+		maxCostUS = 1
+	}
+
+	const (
+		width  = 960.0
+		height = 280.0
+		left   = 82.0
+		right  = 86.0
+		top    = 24.0
+		bottom = 52.0
+		plotW  = width - left - right
+		plotH  = height - top - bottom
+	)
+	barSlot := plotW / float64(len(nodes))
+	barW := barSlot * 0.46
+	if barW > 42 {
+		barW = 42
+	}
+	scaleReqY := func(value uint64) float64 {
+		return top + (float64(maxRequests-value) * plotH / float64(maxRequests))
+	}
+	scaleCostY := func(value uint64) float64 {
+		return top + (float64(maxCostUS-value) * plotH / float64(maxCostUS))
+	}
+
+	var costPoints strings.Builder
+	var b strings.Builder
+	b.WriteString(`<svg class="progress-chart" viewBox="0 0 960 280" role="img" aria-label="Node sync status by success, failure, and average cost">`)
+	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top+plotH, left+plotW, top+plotH))
+	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top, left, top+plotH))
+	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left+plotW, top, left+plotW, top+plotH))
+	for i := 0; i <= 4; i++ {
+		y := top + float64(i)*plotH/4
+		reqValue := maxRequests - uint64(float64(maxRequests)*float64(i)/4)
+		costValueMS := float64(maxCostUS-uint64(float64(maxCostUS)*float64(i)/4)) / 1000
+		b.WriteString(fmt.Sprintf(`<line class="gridline" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, y, left+plotW, y))
+		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">%d</text>`, left-8, y+4, reqValue))
+		b.WriteString(fmt.Sprintf(`<text class="axis-label y-right-label" x="%.1f" y="%.1f">%.1f</text>`, left+plotW+8, y+4, costValueMS))
+	}
+	b.WriteString(fmt.Sprintf(`<text class="axis-title y-left-title" x="%.1f" y="%.1f">Requests</text>`, left, top-8))
+	b.WriteString(fmt.Sprintf(`<text class="axis-title y-right-title" x="%.1f" y="%.1f">Avg cost (ms)</text>`, left+plotW, top-8))
+
+	baseY := top + plotH
+	for i, node := range nodes {
+		xCenter := left + float64(i)*barSlot + barSlot/2
+		successH := baseY - scaleReqY(node.Successes)
+		failureH := baseY - scaleReqY(node.Failures)
+		x := xCenter - barW/2
+		if successH > 0 {
+			b.WriteString(fmt.Sprintf(`<rect class="bar success" x="%.1f" y="%.1f" width="%.1f" height="%.1f"></rect>`, x, baseY-successH, barW, successH))
+		}
+		if failureH > 0 {
+			b.WriteString(fmt.Sprintf(`<rect class="bar failure" x="%.1f" y="%.1f" width="%.1f" height="%.1f"></rect>`, x, baseY-successH-failureH, barW, failureH))
+		}
+		yCost := scaleCostY(node.AvgCostUS)
+		if costPoints.Len() > 0 {
+			costPoints.WriteByte(' ')
+		}
+		costPoints.WriteString(fmt.Sprintf("%.1f,%.1f", xCenter, yCost))
+		b.WriteString(fmt.Sprintf(`<circle class="point cost" cx="%.1f" cy="%.1f" r="3.5"></circle>`, xCenter, yCost))
+		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">N%d</text>`, xCenter+8, height-16, node.ID))
+	}
+	b.WriteString(fmt.Sprintf(`<polyline class="line cost" points="%s"></polyline>`, costPoints.String()))
+	b.WriteString(`</svg>`)
+
+	return template.HTML(b.String())
+}
+
+func renderSyncProgressChart(series []RuntimeSnapshot) template.HTML {
+	if len(series) == 0 {
+		return ""
+	}
+
+	minHeight, maxHeight := uint64(0), uint64(0)
+	for _, snap := range series {
+		for _, height := range []uint64{snap.BlocktreeEnd, snap.StoredHeight} {
+			if height == 0 {
+				continue
+			}
+			if minHeight == 0 || height < minHeight {
+				minHeight = height
+			}
+			if height > maxHeight {
+				maxHeight = height
+			}
+		}
+	}
+	if maxHeight == 0 {
+		return ""
+	}
+	if minHeight == maxHeight {
+		minHeight--
+		maxHeight++
+	}
+
+	const (
+		width  = 960.0
+		height = 280.0
+		left   = 82.0
+		right  = 20.0
+		top    = 24.0
+		bottom = 42.0
+		plotW  = width - left - right
+		plotH  = height - top - bottom
+	)
+	scaleX := func(i int) float64 {
+		if len(series) == 1 {
+			return left + plotW/2
+		}
+		return left + float64(i)*plotW/float64(len(series)-1)
+	}
+	scaleHeightY := func(value uint64) float64 {
+		return top + (float64(maxHeight-value) * plotH / float64(maxHeight-minHeight))
+	}
+
+	var treePoints, storedPoints strings.Builder
+	for i, snap := range series {
+		x := scaleX(i)
+		if snap.BlocktreeEnd > 0 {
+			if treePoints.Len() > 0 {
+				treePoints.WriteByte(' ')
+			}
+			treePoints.WriteString(fmt.Sprintf("%.1f,%.1f", x, scaleHeightY(snap.BlocktreeEnd)))
+		}
+		if snap.StoredHeight > 0 {
+			if storedPoints.Len() > 0 {
+				storedPoints.WriteByte(' ')
+			}
+			storedPoints.WriteString(fmt.Sprintf("%.1f,%.1f", x, scaleHeightY(snap.StoredHeight)))
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString(`<svg class="progress-chart" viewBox="0 0 960 280" role="img" aria-label="Sync progress with local block heights">`)
+	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top+plotH, left+plotW, top+plotH))
+	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top, left, top+plotH))
+	for i := 0; i <= 4; i++ {
+		y := top + float64(i)*plotH/4
+		heightValue := maxHeight - uint64(float64(maxHeight-minHeight)*float64(i)/4)
+		b.WriteString(fmt.Sprintf(`<line class="gridline" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, y, left+plotW, y))
+		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">%d</text>`, left-8, y+4, heightValue))
+	}
+	b.WriteString(fmt.Sprintf(`<text class="axis-title y-left-title" x="%.1f" y="%.1f">Block height</text>`, left, top-8))
+	if !series[0].Time.IsZero() {
+		b.WriteString(fmt.Sprintf(`<text class="axis-label x-start" x="%.1f" y="%.1f">%s</text>`, left, height-12, template.HTMLEscapeString(series[0].Time.Format("15:04:05"))))
+	}
+	last := series[len(series)-1]
+	if !last.Time.IsZero() {
+		b.WriteString(fmt.Sprintf(`<text class="axis-label x-end" x="%.1f" y="%.1f">%s</text>`, left+plotW, height-12, template.HTMLEscapeString(last.Time.Format("15:04:05"))))
+	}
+	b.WriteString(fmt.Sprintf(`<polyline class="line tree" points="%s"></polyline>`, treePoints.String()))
+	b.WriteString(fmt.Sprintf(`<polyline class="line stored" points="%s"></polyline>`, storedPoints.String()))
+	b.WriteString(`</svg>`)
+
+	return template.HTML(b.String())
+}
+
+func renderStoredHeightChart(series []RuntimeSnapshot) template.HTML {
+	return renderLineChart(series, "Stored block height", "Height", "stored", func(s RuntimeSnapshot) uint64 {
+		return s.StoredHeight
+	})
+}
+
+func renderBlocktreeLagChart(series []RuntimeSnapshot) template.HTML {
+	return renderLineChart(series, "BlockTree lag from remote latest", "Blocks behind", "lag", func(s RuntimeSnapshot) uint64 {
+		return blocktreeLag(s)
+	})
+}
+
+func blocktreeLag(s RuntimeSnapshot) uint64 {
+	if s.RemoteLatest <= s.BlocktreeEnd {
+		return 0
+	}
+	return s.RemoteLatest - s.BlocktreeEnd
+}
+
+func renderLineChart(series []RuntimeSnapshot, ariaLabel, yTitle, lineClass string, selector func(RuntimeSnapshot) uint64) template.HTML {
+	if len(series) == 0 {
+		return ""
+	}
+
+	minValue, maxValue := uint64(0), uint64(0)
+	for _, snap := range series {
+		value := selector(snap)
+		if value == 0 {
+			continue
+		}
+		if minValue == 0 || value < minValue {
+			minValue = value
+		}
+		if value > maxValue {
+			maxValue = value
+		}
+	}
+	if maxValue == 0 {
+		return ""
+	}
+	if minValue == maxValue {
+		minValue--
+		maxValue++
+	}
+
+	const (
+		width  = 960.0
+		height = 260.0
+		left   = 70.0
+		right  = 20.0
+		top    = 20.0
+		bottom = 42.0
+		plotW  = width - left - right
+		plotH  = height - top - bottom
+	)
+	scaleX := func(i int) float64 {
+		if len(series) == 1 {
+			return left + plotW/2
+		}
+		return left + float64(i)*plotW/float64(len(series)-1)
+	}
+	scaleY := func(value uint64) float64 {
+		return top + (float64(maxValue-value) * plotH / float64(maxValue-minValue))
+	}
+	var points strings.Builder
+	for i, snap := range series {
+		value := selector(snap)
+		if value == 0 {
+			continue
+		}
+		if points.Len() > 0 {
+			points.WriteByte(' ')
+		}
+		points.WriteString(fmt.Sprintf("%.1f,%.1f", scaleX(i), scaleY(value)))
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf(`<svg class="progress-chart" viewBox="0 0 960 260" role="img" aria-label="%s">`, template.HTMLEscapeString(ariaLabel)))
+	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top+plotH, left+plotW, top+plotH))
+	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top, left, top+plotH))
+	for i := 0; i <= 4; i++ {
+		y := top + float64(i)*plotH/4
+		value := maxValue - uint64(float64(maxValue-minValue)*float64(i)/4)
+		b.WriteString(fmt.Sprintf(`<line class="gridline" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, y, left+plotW, y))
+		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">%d</text>`, left-8, y+4, value))
+	}
+	b.WriteString(fmt.Sprintf(`<text class="axis-title y-left-title" x="%.1f" y="%.1f">%s</text>`, left, top-7, template.HTMLEscapeString(yTitle)))
+	if !series[0].Time.IsZero() {
+		b.WriteString(fmt.Sprintf(`<text class="axis-label x-start" x="%.1f" y="%.1f">%s</text>`, left, height-12, template.HTMLEscapeString(series[0].Time.Format("15:04:05"))))
+	}
+	last := series[len(series)-1]
+	if !last.Time.IsZero() {
+		b.WriteString(fmt.Sprintf(`<text class="axis-label x-end" x="%.1f" y="%.1f">%s</text>`, left+plotW, height-12, template.HTMLEscapeString(last.Time.Format("15:04:05"))))
+	}
+	b.WriteString(fmt.Sprintf(`<polyline class="line %s" points="%s"></polyline>`, template.HTMLEscapeString(lineClass), points.String()))
+	b.WriteString(`</svg>`)
+
+	return template.HTML(b.String())
 }

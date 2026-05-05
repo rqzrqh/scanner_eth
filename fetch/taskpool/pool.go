@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"scanner_eth/util"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,49 +30,56 @@ const (
 )
 
 type SyncTask struct {
-	Key      string
-	Hash     string
-	Height   uint64
-	Kind     int
-	Priority int
-	Retry    int
+	Key        string
+	Hash       string
+	Height     uint64
+	Kind       int
+	Priority   int
+	Retry      int
+	CreatedAt  time.Time
+	EnqueuedAt time.Time
 }
 
 type TaskPoolStats struct {
-	Enqueued            uint64
-	EnqueuedBody        uint64
-	EnqueuedHeaderH     uint64
-	EnqueuedHeaderHash  uint64
-	Dequeued            uint64
-	DequeuedBody        uint64
-	DequeuedHeaderH     uint64
-	DequeuedHeaderHash  uint64
-	Succeeded           uint64
-	SucceededBody       uint64
-	SucceededHeaderH    uint64
-	SucceededHeaderHash uint64
-	Failed              uint64
-	FailedBody          uint64
-	FailedHeaderH       uint64
-	FailedHeaderHash    uint64
-	Retried             uint64
-	RetriedBody         uint64
-	RetriedHeaderH      uint64
-	RetriedHeaderHash   uint64
-	Dropped             uint64
-	DroppedBody         uint64
-	DroppedHeaderH      uint64
-	DroppedHeaderHash   uint64
-	PendingHigh         uint64
-	PendingNormal       uint64
-	Tracked             uint64
-	TrackedBody         uint64
-	TrackedHeaderH      uint64
-	TrackedHeaderHash   uint64
-	WorkerCount         uint64
-	HighQueueCapacity   uint64
-	NormalQueueCapacity uint64
-	MaxRetry            uint64
+	Enqueued                     uint64
+	EnqueuedBody                 uint64
+	EnqueuedHeaderH              uint64
+	EnqueuedHeaderHash           uint64
+	Dequeued                     uint64
+	DequeuedBody                 uint64
+	DequeuedHeaderH              uint64
+	DequeuedHeaderHash           uint64
+	Succeeded                    uint64
+	SucceededBody                uint64
+	SucceededHeaderH             uint64
+	SucceededHeaderHash          uint64
+	Failed                       uint64
+	FailedBody                   uint64
+	FailedHeaderH                uint64
+	FailedHeaderHash             uint64
+	Retried                      uint64
+	RetriedBody                  uint64
+	RetriedHeaderH               uint64
+	RetriedHeaderHash            uint64
+	Dropped                      uint64
+	DroppedBody                  uint64
+	DroppedHeaderH               uint64
+	DroppedHeaderHash            uint64
+	PendingHigh                  uint64
+	PendingNormal                uint64
+	Tracked                      uint64
+	TrackedBody                  uint64
+	TrackedHeaderH               uint64
+	TrackedHeaderHash            uint64
+	WorkerCount                  uint64
+	HighQueueCapacity            uint64
+	NormalQueueCapacity          uint64
+	MaxRetry                     uint64
+	TrackedOldestAgeUS           uint64
+	TrackedAvgAgeUS              uint64
+	TrackedBodyOldestAgeUS       uint64
+	TrackedHeaderHOldestAgeUS    uint64
+	TrackedHeaderHashOldestAgeUS uint64
 }
 
 type TaskPoolOptions struct {
@@ -117,6 +125,7 @@ type Pool struct {
 
 	HandleTaskFn     func(task *SyncTask, stopCh <-chan struct{}) bool
 	Tracked          map[string]struct{}
+	trackedSince     map[string]time.Time
 	QueueHigh        chan *SyncTask
 	QueueNormal      chan *SyncTask
 	StopCh           chan struct{}
@@ -156,6 +165,7 @@ func NewTaskPoolWithStop(options TaskPoolOptions, clientCount int, handleTaskFn 
 	return Pool{
 		HandleTaskFn:     handleTaskFn,
 		Tracked:          make(map[string]struct{}),
+		trackedSince:     make(map[string]time.Time),
 		QueueHigh:        make(chan *SyncTask, options.HighQueueSize),
 		QueueNormal:      make(chan *SyncTask, options.NormalQueueSize),
 		StopCh:           make(chan struct{}),
@@ -194,6 +204,12 @@ func (tp *Pool) AddTracked(hash string) {
 		tp.Tracked = make(map[string]struct{})
 	}
 	tp.Tracked[hash] = struct{}{}
+	if tp.trackedSince == nil {
+		tp.trackedSince = make(map[string]time.Time)
+	}
+	if _, ok := tp.trackedSince[hash]; !ok {
+		tp.trackedSince[hash] = time.Now()
+	}
 	tp.mu.Unlock()
 }
 
@@ -206,6 +222,12 @@ func (tp *Pool) AddTrackedKey(key string) {
 		tp.Tracked = make(map[string]struct{})
 	}
 	tp.Tracked[key] = struct{}{}
+	if tp.trackedSince == nil {
+		tp.trackedSince = make(map[string]time.Time)
+	}
+	if _, ok := tp.trackedSince[key]; !ok {
+		tp.trackedSince[key] = time.Now()
+	}
 	tp.mu.Unlock()
 }
 
@@ -215,6 +237,7 @@ func (tp *Pool) DelTracked(hash string) {
 	}
 	tp.mu.Lock()
 	delete(tp.Tracked, hash)
+	delete(tp.trackedSince, hash)
 	tp.mu.Unlock()
 }
 
@@ -224,12 +247,14 @@ func (tp *Pool) DelTrackedKey(key string) {
 	}
 	tp.mu.Lock()
 	delete(tp.Tracked, key)
+	delete(tp.trackedSince, key)
 	tp.mu.Unlock()
 }
 
 func (tp *Pool) ResetTracked() {
 	tp.mu.Lock()
 	tp.Tracked = make(map[string]struct{})
+	tp.trackedSince = make(map[string]time.Time)
 	tp.mu.Unlock()
 }
 
@@ -299,6 +324,9 @@ func (tp *Pool) EnqueueSyncTask(task *SyncTask) bool {
 	if task.Key == "" || tp.HasTaskKey(task.Key) {
 		return false
 	}
+	if task.CreatedAt.IsZero() {
+		task.CreatedAt = time.Now()
+	}
 	tp.AddTaskKey(task.Key)
 	return tp.PushTask(task, true)
 }
@@ -328,8 +356,13 @@ func (tp *Pool) PushTask(task *SyncTask, clearOnDrop bool) bool {
 	if task.Priority != TaskPriorityHigh {
 		task.Priority = TaskPriorityNormal
 	}
+	if task.CreatedAt.IsZero() {
+		task.CreatedAt = time.Now()
+	}
 
 	var sent bool
+	enqueuedAt := time.Now()
+	task.EnqueuedAt = enqueuedAt
 	if task.Priority == TaskPriorityHigh {
 		select {
 		case tp.QueueHigh <- task:
@@ -348,6 +381,7 @@ func (tp *Pool) PushTask(task *SyncTask, clearOnDrop bool) bool {
 	if sent {
 		atomic.AddUint64(&tp.enqueued, 1)
 		tp.addKindCounter(&tp.enqueuedBody, &tp.enqueuedHeaderH, &tp.enqueuedHeaderHs, task.Kind)
+		logTaskLifecycle("enqueued", task, 0, 0)
 		return true
 	}
 
@@ -356,6 +390,7 @@ func (tp *Pool) PushTask(task *SyncTask, clearOnDrop bool) bool {
 	if clearOnDrop {
 		tp.DelTaskKey(task.Key)
 	}
+	logTaskLifecycle("dropped", task, 0, time.Since(task.CreatedAt).Microseconds())
 	logrus.Warnf("task queue full, drop task key:%v kind:%v priority:%v retry:%v", task.Key, task.Kind, task.Priority, task.Retry)
 	return false
 }
@@ -395,7 +430,7 @@ func (tp *Pool) runTaskStatsReporter() {
 			return
 		case <-ticker.C:
 			stats := tp.Stats()
-			logrus.Infof("task pool stats enqueued:%v(body:%v hh:%v hs:%v) dequeued:%v(body:%v hh:%v hs:%v) succeeded:%v(body:%v hh:%v hs:%v) failed:%v(body:%v hh:%v hs:%v) retried:%v(body:%v hh:%v hs:%v) dropped:%v(body:%v hh:%v hs:%v) pending_high:%v pending_normal:%v tracked:%v(body:%v hh:%v hs:%v) workers:%v max_retry:%v",
+			logrus.Debugf("task pool stats enqueued:%v(body:%v hh:%v hs:%v) dequeued:%v(body:%v hh:%v hs:%v) succeeded:%v(body:%v hh:%v hs:%v) failed:%v(body:%v hh:%v hs:%v) retried:%v(body:%v hh:%v hs:%v) dropped:%v(body:%v hh:%v hs:%v) pending_high:%v pending_normal:%v tracked:%v(body:%v hh:%v hs:%v) workers:%v max_retry:%v tracked_oldest_age_us:%v tracked_avg_age_us:%v tracked_body_oldest_age_us:%v tracked_hh_oldest_age_us:%v tracked_hs_oldest_age_us:%v",
 				stats.Enqueued, stats.EnqueuedBody, stats.EnqueuedHeaderH, stats.EnqueuedHeaderHash,
 				stats.Dequeued, stats.DequeuedBody, stats.DequeuedHeaderH, stats.DequeuedHeaderHash,
 				stats.Succeeded, stats.SucceededBody, stats.SucceededHeaderH, stats.SucceededHeaderHash,
@@ -405,6 +440,7 @@ func (tp *Pool) runTaskStatsReporter() {
 				stats.PendingHigh, stats.PendingNormal,
 				stats.Tracked, stats.TrackedBody, stats.TrackedHeaderH, stats.TrackedHeaderHash,
 				stats.WorkerCount, stats.MaxRetry,
+				stats.TrackedOldestAgeUS, stats.TrackedAvgAgeUS, stats.TrackedBodyOldestAgeUS, stats.TrackedHeaderHOldestAgeUS, stats.TrackedHeaderHashOldestAgeUS,
 			)
 		}
 	}
@@ -430,6 +466,11 @@ func (tp *Pool) runTaskWorker() {
 
 		atomic.AddUint64(&tp.dequeued, 1)
 		tp.addKindCounter(&tp.dequeuedBody, &tp.dequeuedHeaderH, &tp.dequeuedHeaderHs, task.Kind)
+		queueWaitUS := int64(0)
+		if !task.EnqueuedAt.IsZero() {
+			queueWaitUS = time.Since(task.EnqueuedAt).Microseconds()
+		}
+		logTaskLifecycle("started", task, queueWaitUS, 0)
 
 		done := make(chan struct{})
 		tp.taskWG.Add(1)
@@ -444,6 +485,7 @@ func (tp *Pool) runTaskWorker() {
 func (tp *Pool) executeTask(task *SyncTask) {
 	defer tp.taskWG.Done()
 	if tp.IsStopping() {
+		logTaskLifecycle("canceled", task, 0, taskTotalMicros(task))
 		tp.DelTaskKey(task.Key)
 		return
 	}
@@ -452,6 +494,7 @@ func (tp *Pool) executeTask(task *SyncTask) {
 	if success {
 		atomic.AddUint64(&tp.succeeded, 1)
 		tp.addKindCounter(&tp.succeededBody, &tp.succeededHeaderH, &tp.succeededHeaderHs, task.Kind)
+		logTaskLifecycle("succeeded", task, 0, taskTotalMicros(task))
 		tp.DelTaskKey(task.Key)
 		return
 	}
@@ -464,6 +507,7 @@ func (tp *Pool) executeTask(task *SyncTask) {
 		task.Retry++
 		atomic.AddUint64(&tp.retried, 1)
 		tp.addKindCounter(&tp.retriedBody, &tp.retriedHeaderH, &tp.retriedHeaderHs, task.Kind)
+		logTaskLifecycle("retried", task, 0, taskTotalMicros(task))
 		if tp.PushTask(task, false) {
 			return
 		}
@@ -471,6 +515,7 @@ func (tp *Pool) executeTask(task *SyncTask) {
 
 	atomic.AddUint64(&tp.failed, 1)
 	tp.addKindCounter(&tp.failedBody, &tp.failedHeaderH, &tp.failedHeaderHs, task.Kind)
+	logTaskLifecycle("failed", task, 0, taskTotalMicros(task))
 	tp.DelTaskKey(task.Key)
 }
 
@@ -485,6 +530,34 @@ func (tp *Pool) handleTask(task *SyncTask) bool {
 		return false
 	}
 	return handler(task, tp.StopCh)
+}
+
+func taskTotalMicros(task *SyncTask) int64 {
+	if task == nil || task.CreatedAt.IsZero() {
+		return 0
+	}
+	return time.Since(task.CreatedAt).Microseconds()
+}
+
+func logTaskLifecycle(action string, task *SyncTask, queueWaitUS int64, totalUS int64) {
+	if task == nil {
+		return
+	}
+	logrus.Debugf("task lifecycle event action:%v kind:%v key:%v hash:%v height:%v priority:%v retry:%v queue_wait_us:%v total_us:%v",
+		action, syncTaskKindName(task.Kind), task.Key, task.Hash, task.Height, task.Priority, task.Retry, queueWaitUS, totalUS)
+}
+
+func syncTaskKindName(kind int) string {
+	switch kind {
+	case SyncTaskKindBody:
+		return "body"
+	case SyncTaskKindHeaderHeight:
+		return "header_height"
+	case SyncTaskKindHeaderHash:
+		return "header_hash"
+	default:
+		return strconv.Itoa(kind)
+	}
 }
 
 func (tp *Pool) IsStopping() bool {
@@ -536,6 +609,10 @@ func (tp *Pool) tryReserveTrackedKey(key string) bool {
 		return false
 	}
 	tp.Tracked[key] = struct{}{}
+	if tp.trackedSince == nil {
+		tp.trackedSince = make(map[string]time.Time)
+	}
+	tp.trackedSince[key] = time.Now()
 	return true
 }
 
@@ -562,6 +639,57 @@ func (tp *Pool) FinishHeaderHashSync(hash string) {
 func (tp *Pool) HeaderSyncCounts() (heightCount int, hashCount int) {
 	_, hh, hs := tp.trackedCountsByKind()
 	return hh, hs
+}
+
+type trackedKindStats struct {
+	bodyCount               int
+	headerHeightCount       int
+	headerHashCount         int
+	oldestAgeUS             uint64
+	avgAgeUS                uint64
+	bodyOldestAgeUS         uint64
+	headerHeightOldestAgeUS uint64
+	headerHashOldestAgeUS   uint64
+}
+
+func (tp *Pool) trackedStatsByKind(now time.Time) trackedKindStats {
+	tp.mu.Lock()
+	defer tp.mu.Unlock()
+
+	var stats trackedKindStats
+	var totalAgeUS uint64
+	for k := range tp.Tracked {
+		var ageUS uint64
+		if ts, ok := tp.trackedSince[k]; ok && !ts.IsZero() && now.After(ts) {
+			ageUS = uint64(now.Sub(ts).Microseconds())
+		}
+		totalAgeUS += ageUS
+		if ageUS > stats.oldestAgeUS {
+			stats.oldestAgeUS = ageUS
+		}
+		switch {
+		case strings.HasPrefix(k, headerHeightTaskPrefix):
+			stats.headerHeightCount++
+			if ageUS > stats.headerHeightOldestAgeUS {
+				stats.headerHeightOldestAgeUS = ageUS
+			}
+		case strings.HasPrefix(k, headerHashTaskPrefix):
+			stats.headerHashCount++
+			if ageUS > stats.headerHashOldestAgeUS {
+				stats.headerHashOldestAgeUS = ageUS
+			}
+		default:
+			stats.bodyCount++
+			if ageUS > stats.bodyOldestAgeUS {
+				stats.bodyOldestAgeUS = ageUS
+			}
+		}
+	}
+	total := stats.bodyCount + stats.headerHeightCount + stats.headerHashCount
+	if total > 0 {
+		stats.avgAgeUS = totalAgeUS / uint64(total)
+	}
+	return stats
 }
 
 func (tp *Pool) trackedCountsByKind() (bodyCount int, headerHeightCount int, headerHashCount int) {
@@ -607,44 +735,49 @@ func (tp *Pool) Stop() {
 }
 
 func (tp *Pool) Stats() TaskPoolStats {
-	trackedBody, trackedHeaderH, trackedHeaderHash := tp.trackedCountsByKind()
-	tracked := trackedBody + trackedHeaderH + trackedHeaderHash
+	trackedStats := tp.trackedStatsByKind(time.Now())
+	tracked := trackedStats.bodyCount + trackedStats.headerHeightCount + trackedStats.headerHashCount
 
 	return TaskPoolStats{
-		Enqueued:            atomic.LoadUint64(&tp.enqueued),
-		EnqueuedBody:        atomic.LoadUint64(&tp.enqueuedBody),
-		EnqueuedHeaderH:     atomic.LoadUint64(&tp.enqueuedHeaderH),
-		EnqueuedHeaderHash:  atomic.LoadUint64(&tp.enqueuedHeaderHs),
-		Dequeued:            atomic.LoadUint64(&tp.dequeued),
-		DequeuedBody:        atomic.LoadUint64(&tp.dequeuedBody),
-		DequeuedHeaderH:     atomic.LoadUint64(&tp.dequeuedHeaderH),
-		DequeuedHeaderHash:  atomic.LoadUint64(&tp.dequeuedHeaderHs),
-		Succeeded:           atomic.LoadUint64(&tp.succeeded),
-		SucceededBody:       atomic.LoadUint64(&tp.succeededBody),
-		SucceededHeaderH:    atomic.LoadUint64(&tp.succeededHeaderH),
-		SucceededHeaderHash: atomic.LoadUint64(&tp.succeededHeaderHs),
-		Failed:              atomic.LoadUint64(&tp.failed),
-		FailedBody:          atomic.LoadUint64(&tp.failedBody),
-		FailedHeaderH:       atomic.LoadUint64(&tp.failedHeaderH),
-		FailedHeaderHash:    atomic.LoadUint64(&tp.failedHeaderHs),
-		Retried:             atomic.LoadUint64(&tp.retried),
-		RetriedBody:         atomic.LoadUint64(&tp.retriedBody),
-		RetriedHeaderH:      atomic.LoadUint64(&tp.retriedHeaderH),
-		RetriedHeaderHash:   atomic.LoadUint64(&tp.retriedHeaderHs),
-		Dropped:             atomic.LoadUint64(&tp.dropped),
-		DroppedBody:         atomic.LoadUint64(&tp.droppedBody),
-		DroppedHeaderH:      atomic.LoadUint64(&tp.droppedHeaderH),
-		DroppedHeaderHash:   atomic.LoadUint64(&tp.droppedHeaderHs),
-		PendingHigh:         uint64(len(tp.QueueHigh)),
-		PendingNormal:       uint64(len(tp.QueueNormal)),
-		Tracked:             uint64(tracked),
-		TrackedBody:         uint64(trackedBody),
-		TrackedHeaderH:      uint64(trackedHeaderH),
-		TrackedHeaderHash:   uint64(trackedHeaderHash),
-		WorkerCount:         uint64(tp.WorkerCount),
-		HighQueueCapacity:   uint64(cap(tp.QueueHigh)),
-		NormalQueueCapacity: uint64(cap(tp.QueueNormal)),
-		MaxRetry:            uint64(tp.MaxRetry),
+		Enqueued:                     atomic.LoadUint64(&tp.enqueued),
+		EnqueuedBody:                 atomic.LoadUint64(&tp.enqueuedBody),
+		EnqueuedHeaderH:              atomic.LoadUint64(&tp.enqueuedHeaderH),
+		EnqueuedHeaderHash:           atomic.LoadUint64(&tp.enqueuedHeaderHs),
+		Dequeued:                     atomic.LoadUint64(&tp.dequeued),
+		DequeuedBody:                 atomic.LoadUint64(&tp.dequeuedBody),
+		DequeuedHeaderH:              atomic.LoadUint64(&tp.dequeuedHeaderH),
+		DequeuedHeaderHash:           atomic.LoadUint64(&tp.dequeuedHeaderHs),
+		Succeeded:                    atomic.LoadUint64(&tp.succeeded),
+		SucceededBody:                atomic.LoadUint64(&tp.succeededBody),
+		SucceededHeaderH:             atomic.LoadUint64(&tp.succeededHeaderH),
+		SucceededHeaderHash:          atomic.LoadUint64(&tp.succeededHeaderHs),
+		Failed:                       atomic.LoadUint64(&tp.failed),
+		FailedBody:                   atomic.LoadUint64(&tp.failedBody),
+		FailedHeaderH:                atomic.LoadUint64(&tp.failedHeaderH),
+		FailedHeaderHash:             atomic.LoadUint64(&tp.failedHeaderHs),
+		Retried:                      atomic.LoadUint64(&tp.retried),
+		RetriedBody:                  atomic.LoadUint64(&tp.retriedBody),
+		RetriedHeaderH:               atomic.LoadUint64(&tp.retriedHeaderH),
+		RetriedHeaderHash:            atomic.LoadUint64(&tp.retriedHeaderHs),
+		Dropped:                      atomic.LoadUint64(&tp.dropped),
+		DroppedBody:                  atomic.LoadUint64(&tp.droppedBody),
+		DroppedHeaderH:               atomic.LoadUint64(&tp.droppedHeaderH),
+		DroppedHeaderHash:            atomic.LoadUint64(&tp.droppedHeaderHs),
+		PendingHigh:                  uint64(len(tp.QueueHigh)),
+		PendingNormal:                uint64(len(tp.QueueNormal)),
+		Tracked:                      uint64(tracked),
+		TrackedBody:                  uint64(trackedStats.bodyCount),
+		TrackedHeaderH:               uint64(trackedStats.headerHeightCount),
+		TrackedHeaderHash:            uint64(trackedStats.headerHashCount),
+		WorkerCount:                  uint64(tp.WorkerCount),
+		HighQueueCapacity:            uint64(cap(tp.QueueHigh)),
+		NormalQueueCapacity:          uint64(cap(tp.QueueNormal)),
+		MaxRetry:                     uint64(tp.MaxRetry),
+		TrackedOldestAgeUS:           trackedStats.oldestAgeUS,
+		TrackedAvgAgeUS:              trackedStats.avgAgeUS,
+		TrackedBodyOldestAgeUS:       trackedStats.bodyOldestAgeUS,
+		TrackedHeaderHOldestAgeUS:    trackedStats.headerHeightOldestAgeUS,
+		TrackedHeaderHashOldestAgeUS: trackedStats.headerHashOldestAgeUS,
 	}
 }
 

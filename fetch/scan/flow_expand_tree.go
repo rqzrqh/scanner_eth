@@ -153,7 +153,7 @@ func (sf *Flow) EnsureBootstrapHeader() bool {
 	}
 	sf.taskRuntime.InsertTreeHeader(header)
 	sf.MarkRootParentReady()
-	logrus.Infof("bootstrap blocktree root by startHeight success. height:%v hash:%v", height, sf.normalize(header.Hash))
+	logrus.Debugf("bootstrap blocktree root by startHeight success. height:%v hash:%v", height, sf.normalize(header.Hash))
 	return true
 }
 
@@ -170,7 +170,7 @@ func (sf *Flow) MarkRootParentReady() bool {
 		return false
 	}
 	sf.storedBlocks.MarkStored(parentHash)
-	logrus.Infof("mark blocktree root parent ready. root_height:%v root_hash:%v parent_hash:%v", root.Height, sf.normalize(root.Key), parentHash)
+	logrus.Debugf("mark blocktree root parent ready. root_height:%v root_hash:%v parent_hash:%v", root.Height, sf.normalize(root.Key), parentHash)
 	return true
 }
 
@@ -196,7 +196,7 @@ func (sf *Flow) ExpandTreeWindow() {
 				return
 			}
 			sf.MarkRootParentReady()
-			logrus.Infof("sync header window bootstrap by startHeight success. height:%v hash:%v", height, sf.normalize(header.Hash))
+			logrus.Debugf("sync header window bootstrap by startHeight success. height:%v hash:%v", height, sf.normalize(header.Hash))
 			continue
 		}
 		if sf.ShouldStopHeaderWindowSync(start, end, targetSize) {

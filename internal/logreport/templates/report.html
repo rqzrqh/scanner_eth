@@ -74,6 +74,12 @@
     }
     td.wrap { white-space: normal; }
     .section { margin-top: 18px; }
+    .split-tables {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+      gap: 14px;
+      align-items: start;
+    }
     .badge {
       display: inline-block;
       padding: 2px 8px;
@@ -91,6 +97,100 @@
       border-radius: 10px;
       background: #fbfcfe;
     }
+    .chart-wrap {
+      margin: 12px 0 18px;
+      padding: 14px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #fbfcfe;
+    }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .legend-item::before {
+      content: "";
+      display: inline-block;
+      width: 18px;
+      height: 3px;
+      margin-right: 6px;
+      vertical-align: middle;
+      border-radius: 999px;
+      background: currentColor;
+    }
+    .legend-item.remote { color: #155eef; }
+    .legend-item.stored { color: #087443; }
+    .legend-item.tree { color: #b54708; }
+    .legend-item.lag { color: #155eef; }
+    .legend-item.body-gap { color: #155eef; }
+    .legend-item.store-gap { color: #087443; }
+    .legend-item.failure { color: #f04438; }
+    .legend-item.stage-header { color: #155eef; }
+    .legend-item.stage-body { color: #f79009; }
+    .legend-item.stage-store { color: #12b76a; }
+    .legend-item.task-queue { color: #7a5af8; }
+    .legend-item.rpc-header { color: #2e90fa; }
+    .legend-item.rpc-body { color: #f63d68; }
+    .legend-item.store-write { color: #079455; }
+    .legend-item.other-wait { color: #667085; }
+    .progress-chart {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+    .progress-chart .axis {
+      stroke: #98a2b3;
+      stroke-width: 1;
+    }
+    .progress-chart .gridline {
+      stroke: #e4e7ec;
+      stroke-width: 1;
+    }
+    .progress-chart .axis-label {
+      fill: var(--muted);
+      font-size: 12px;
+      text-anchor: end;
+    }
+    .progress-chart .axis-title {
+      fill: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .progress-chart .y-left-title { text-anchor: start; }
+    .progress-chart .y-right-title { text-anchor: end; }
+    .progress-chart .y-right-label { text-anchor: start; }
+    .progress-chart .x-start { text-anchor: start; }
+    .progress-chart .x-end { text-anchor: end; }
+    .progress-chart .line {
+      fill: none;
+      stroke-width: 3;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .progress-chart .line.remote { stroke: #155eef; }
+    .progress-chart .line.stored { stroke: #087443; }
+    .progress-chart .line.tree { stroke: #b54708; stroke-dasharray: 6 5; }
+    .progress-chart .line.lag { stroke: #155eef; }
+    .progress-chart .line.body-gap { stroke: #155eef; }
+    .progress-chart .line.store-gap { stroke: #087443; }
+    .progress-chart .line.cost { stroke: #155eef; }
+    .progress-chart .bar.success { fill: #12b76a; }
+    .progress-chart .bar.failure { fill: #f04438; }
+    .progress-chart .bar.stage-header { fill: #155eef; }
+    .progress-chart .bar.stage-body { fill: #f79009; }
+    .progress-chart .bar.stage-store { fill: #12b76a; }
+    .progress-chart .bar.task-queue { fill: #7a5af8; }
+    .progress-chart .bar.rpc-header { fill: #2e90fa; }
+    .progress-chart .bar.rpc-body { fill: #f63d68; }
+    .progress-chart .bar.store-write { fill: #079455; }
+    .progress-chart .bar.other-wait { fill: #667085; }
+    .progress-chart .marker.p95 { stroke: #b42318; stroke-width: 2; stroke-dasharray: 5 4; }
+    .progress-chart .bar-label { fill: #ffffff; font-size: 12px; font-weight: 700; }
+    .progress-chart .point.cost { fill: #155eef; }
     .sources { margin: 8px 0 0; padding-left: 18px; }
     @media print {
       body { padding: 0; background: #fff; }
@@ -115,32 +215,118 @@
       <div class="metric"><div class="label">Task Success Rate</div><div class="value">{{.Summary.TaskSuccessRate}}</div><div class="muted">success {{.Summary.TaskSucceeded}} / failure {{.Summary.TaskFailed}}</div></div>
       <div class="metric"><div class="label">Body Sync Success Rate</div><div class="value">{{.BodySync.SuccessRate}}</div><div class="muted">success {{.BodySync.Succeeded}} / failure {{.BodySync.Failed}}</div></div>
       <div class="metric"><div class="label">Store Success Rate</div><div class="value">{{.Summary.StoreSuccessRate}}</div><div class="muted">success {{.Summary.StoreSucceeded}} / failure {{.Summary.StoreFailed}}</div></div>
-      <div class="metric"><div class="label">Sync Progress</div><div class="value">{{.Summary.StoredCount}}</div><div class="muted">remote {{.Summary.RemoteLatest}} / lag {{.Summary.Lag}}</div></div>
+      <div class="metric"><div class="label">Sync Progress</div><div class="value">{{.Summary.StoredHeight}}</div><div class="muted">remote {{.Summary.RemoteLatest}} / lag {{.Summary.Lag}} / stored count {{.Summary.StoredCount}}</div></div>
+      <div class="metric"><div class="label">Avg Block E2E</div><div class="value">{{microsToMillis .BlockTiming.AvgFirstTaskToStoreUS}}ms</div><div class="muted">samples {{.BlockTiming.EndToEndSamples}} / p95 {{microsToMillis .BlockTiming.P95FirstTaskToStoreUS}}ms</div></div>
     </div>
   </section>
 
   <section class="card section">
-    <h2>Anomaly Summary</h2>
-    {{if .Anomalies}}
+    <h2>Sync Progress</h2>
+    {{if .RuntimeSeries}}
+    <div class="chart-wrap">
+      <div class="legend">
+        <span class="legend-item tree">BlockTree end</span>
+        <span class="legend-item stored">Stored block height</span>
+      </div>
+      {{syncProgressChart .RuntimeSeries}}
+    </div>
+    <div class="chart-wrap">
+      <div class="legend">
+        <span class="legend-item lag">Remote latest - BlockTree end</span>
+      </div>
+      {{blocktreeLagChart .RuntimeSeries}}
+    </div>
+    {{end}}
+    {{if not .RuntimeSeries}}<div class="empty">No sync progress data.</div>{{end}}
+  </section>
+
+  <section class="card section">
+    <h2>Time Distribution</h2>
+    {{if or .BlockTiming.Blocks .BlockProgress}}
+    <h3>Block Timing Distribution</h3>
+    {{if .BlockTiming.Blocks}}
+    <p class="muted">Per-block timing is correlated by task height/hash, header sync, body sync, and full-block store logs. Stage durations include waiting between stages; direct RPC/store costs are listed separately.</p>
+    <div class="chart-wrap">
+      <div class="legend">
+        <span class="legend-item stage-header">First task -> header</span>
+        <span class="legend-item stage-body">Header -> body</span>
+        <span class="legend-item stage-store">Body -> store</span>
+        <span class="legend-item task-queue">Task queue</span>
+        <span class="legend-item rpc-header">Header RPC</span>
+        <span class="legend-item rpc-body">Body RPC</span>
+        <span class="legend-item store-write">Store write</span>
+        <span class="legend-item other-wait">Other wait</span>
+      </div>
+      {{blockTimingChart .BlockTiming}}
+    </div>
     <table>
-      <thead><tr><th>Level</th><th>Category</th><th>Count</th><th>Description</th><th>Recommendation</th></tr></thead>
+      <thead><tr><th>Blocks Seen</th><th>E2E Samples</th><th>Avg Prev Store -> Task (ms)</th><th>Avg First Task -> Header (ms)</th><th>Avg Header -> Body (ms)</th><th>Avg Body -> Store (ms)</th><th>Avg First Task -> Store (ms)</th><th>P95 E2E (ms)</th><th>Max E2E (ms)</th><th>Avg Task Queue Wait (ms)</th><th>Avg Header RPC (ms)</th><th>Avg Body RPC (ms)</th><th>Avg Store Write (ms)</th><th>Avg Other Wait (ms)</th></tr></thead>
       <tbody>
-      {{range .Anomalies}}
-        <tr><td><span class="badge {{.Level}}">{{.Level}}</span></td><td>{{.Category}}</td><td>{{.Count}}</td><td class="wrap">{{.Message}}</td><td class="wrap">{{.Suggestion}}</td></tr>
-      {{end}}
+        <tr><td>{{.BlockTiming.Blocks}}</td><td>{{.BlockTiming.EndToEndSamples}}</td><td>{{microsToMillis .BlockTiming.AvgPrevStoreToTaskUS}}</td><td>{{microsToMillis .BlockTiming.AvgFirstTaskToHeaderUS}}</td><td>{{microsToMillis .BlockTiming.AvgHeaderToBodyUS}}</td><td>{{microsToMillis .BlockTiming.AvgBodyToStoreUS}}</td><td>{{microsToMillis .BlockTiming.AvgFirstTaskToStoreUS}}</td><td>{{microsToMillis .BlockTiming.P95FirstTaskToStoreUS}}</td><td>{{microsToMillis .BlockTiming.MaxFirstTaskToStoreUS}}</td><td>{{microsToMillis .BlockTiming.AvgTaskQueueWaitUS}}</td><td>{{microsToMillis .BlockTiming.AvgHeaderSyncCostUS}}</td><td>{{microsToMillis .BlockTiming.AvgBodySyncCostUS}}</td><td>{{microsToMillis .BlockTiming.AvgFullBlockStoreCostUS}}</td><td>{{microsToMillis .BlockTiming.AvgUnattributedOverheadUS}}</td></tr>
       </tbody>
     </table>
-    {{else}}<div class="empty">No high-risk anomaly patterns were detected.</div>{{end}}
+    <p class="muted">Samples: prev_store_to_task={{.BlockTiming.PrevStoreToTaskSamples}}, header={{.BlockTiming.HeaderStageSamples}}, body={{.BlockTiming.BodyStageSamples}}, store={{.BlockTiming.StoreStageSamples}}, task_queue={{.BlockTiming.TaskQueueSamples}}</p>
+    {{else}}<div class="empty">No block timing data.</div>{{end}}
+    <h3>Per-Block Sync And Store Intervals</h3>
+    {{if .BlockProgress}}
+    <p class="muted">Intervals above 10s are excluded from these charts and listed below.</p>
+    <div class="chart-wrap">
+      <div class="legend">
+        <span class="legend-item body-gap">Body sync interval</span>
+      </div>
+      {{bodySyncIntervalChart .BlockProgress}}
+    </div>
+    <div class="chart-wrap">
+      <div class="legend">
+        <span class="legend-item store-gap">Store interval</span>
+      </div>
+      {{storeIntervalChart .BlockProgress}}
+    </div>
+    {{if .BlockProgressOutliers}}
+    <p class="muted">Excluded interval outliers:</p>
+    <div class="split-tables">
+      <div>
+        <table>
+          <thead><tr><th>Height</th><th>Hash</th><th>Body Synced At</th><th>Body Gap</th></tr></thead>
+          <tbody>
+          {{range .BlockProgressOutliers}}
+            <tr><td>{{.Height}}</td><td class="wrap"><code>{{.Hash}}</code></td><td>{{formatClock .BodySyncedAt}}</td><td>{{if .HasBodySyncGap}}{{formatSignedMicros .BodySyncGapUS}}{{else}}n/a{{end}}</td></tr>
+          {{end}}
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <table>
+          <thead><tr><th>Height</th><th>Hash</th><th>Stored At</th><th>Store Gap</th></tr></thead>
+          <tbody>
+          {{range .BlockProgressOutliers}}
+            <tr><td>{{.Height}}</td><td class="wrap"><code>{{.Hash}}</code></td><td>{{formatClock .StoredAt}}</td><td>{{if .HasStoreGap}}{{formatSignedMicros .StoreGapUS}}{{else}}n/a{{end}}</td></tr>
+          {{end}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {{end}}
+    {{else}}<div class="empty">No per-block sync/store interval data.</div>{{end}}
+    {{else}}<div class="empty">No time distribution data.</div>{{end}}
   </section>
 
   <section class="card section">
     <h2>Node Stats</h2>
     {{if .Nodes}}
+    <div class="chart-wrap">
+      <div class="legend">
+        <span class="legend-item stored">Success requests</span>
+        <span class="legend-item failure">Failed requests</span>
+        <span class="legend-item remote">Avg cost</span>
+      </div>
+      {{nodeSyncChart .Nodes}}
+    </div>
     <table>
-      <thead><tr><th>Node</th><th>Requests</th><th>Success</th><th>Failure</th><th>Failure Rate</th><th>Avg Cost (us)</th><th>Max Cost (us)</th><th>Remote Height</th><th>Top Failure</th></tr></thead>
+      <thead><tr><th>Node</th><th>Requests</th><th>Success</th><th>Failure</th><th>Failure Rate</th><th>Avg Cost (ms)</th><th>Max Cost (ms)</th><th>Remote Height</th><th>Top Failure</th></tr></thead>
       <tbody>
       {{range .Nodes}}
-        <tr><td>{{.ID}}</td><td>{{.Requests}}</td><td>{{.Successes}}</td><td>{{.Failures}}</td><td>{{.FailureRate}}</td><td>{{.AvgCostUS}}</td><td>{{.MaxCostUS}}</td><td>{{.RemoteHeight}}</td><td>{{.TopFailure}}</td></tr>
+        <tr><td>{{.ID}}</td><td>{{.Requests}}</td><td>{{.Successes}}</td><td>{{.Failures}}</td><td>{{.FailureRate}}</td><td>{{microsToMillis .AvgCostUS}}</td><td>{{microsToMillis .MaxCostUS}}</td><td>{{.RemoteHeight}}</td><td>{{.TopFailure}}</td></tr>
       {{end}}
       </tbody>
     </table>
@@ -151,10 +337,10 @@
     <h2>RPC Method Stats</h2>
     {{if .Methods}}
     <table>
-      <thead><tr><th>Method</th><th>Requests</th><th>Success</th><th>Failure</th><th>Retries</th><th>Failure Rate</th><th>Avg Cost (us)</th><th>Max Cost (us)</th></tr></thead>
+      <thead><tr><th>Method</th><th>Requests</th><th>Success</th><th>Failure</th><th>Retries</th><th>Failure Rate</th><th>Avg Cost (ms)</th><th>Max Cost (ms)</th></tr></thead>
       <tbody>
       {{range .Methods}}
-        <tr><td>{{.Name}}</td><td>{{.Requests}}</td><td>{{.Successes}}</td><td>{{.Failures}}</td><td>{{.Retries}}</td><td>{{.FailureRate}}</td><td>{{.AvgCostUS}}</td><td>{{.MaxCostUS}}</td></tr>
+        <tr><td>{{.Name}}</td><td>{{.Requests}}</td><td>{{.Successes}}</td><td>{{.Failures}}</td><td>{{.Retries}}</td><td>{{.FailureRate}}</td><td>{{microsToMillis .AvgCostUS}}</td><td>{{microsToMillis .MaxCostUS}}</td></tr>
       {{end}}
       </tbody>
     </table>
@@ -162,13 +348,48 @@
   </section>
 
   <section class="card section">
-    <h2>Body Sync</h2>
+    <h2>NodeOperator Method Stats</h2>
+    {{if .NodeOperatorMethods}}
     <table>
-      <thead><tr><th>Started</th><th>Success</th><th>Failure</th><th>Success Rate</th><th>Avg Cost (us)</th><th>Max Cost (us)</th><th>Avg Txs</th><th>Last Height</th><th>Last Hash</th></tr></thead>
+      <thead><tr><th>Node</th><th>Method</th><th>Calls</th><th>Total Cost (ms)</th><th>Avg Cost (ms)</th><th>Max Cost (ms)</th><th>Array Samples</th><th>Total Array Items</th><th>Avg Array Items</th><th>Max Array Items</th></tr></thead>
       <tbody>
-        <tr><td>{{.BodySync.Started}}</td><td>{{.BodySync.Succeeded}}</td><td>{{.BodySync.Failed}}</td><td>{{.BodySync.SuccessRate}}</td><td>{{.BodySync.AvgCostUS}}</td><td>{{.BodySync.MaxCostUS}}</td><td>{{.BodySync.AvgTxs}}</td><td>{{.BodySync.LastHeight}}</td><td class="wrap">{{.BodySync.LastHash}}</td></tr>
+      {{range .NodeOperatorMethods}}
+        <tr><td>{{.NodeID}}</td><td>{{.Method}}</td><td>{{.Calls}}</td><td>{{microsToMillis .TotalCostUS}}</td><td>{{microsToMillis .AvgCostUS}}</td><td>{{microsToMillis .MaxCostUS}}</td><td>{{.ArraySamples}}</td><td>{{.ArrayItemsTotal}}</td><td>{{.AvgArrayItems}}</td><td>{{.MaxArrayItems}}</td></tr>
+      {{end}}
       </tbody>
     </table>
+    {{else}}<div class="empty">No NodeOperator method timing data.</div>{{end}}
+  </section>
+
+  <section class="card section">
+    <h2>Header Sync</h2>
+    <table>
+      <thead><tr><th>Started</th><th>Success</th><th>Failure</th><th>Success Rate</th><th>Avg Cost (ms)</th><th>Max Cost (ms)</th><th>Last Height</th><th>Last Hash</th></tr></thead>
+      <tbody>
+        <tr><td>{{.HeaderSync.Started}}</td><td>{{.HeaderSync.Succeeded}}</td><td>{{.HeaderSync.Failed}}</td><td>{{.HeaderSync.SuccessRate}}</td><td>{{microsToMillis .HeaderSync.AvgCostUS}}</td><td>{{microsToMillis .HeaderSync.MaxCostUS}}</td><td>{{.HeaderSync.LastHeight}}</td><td class="wrap">{{.HeaderSync.LastHash}}</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card section">
+    <h2>Body Sync</h2>
+    <table>
+      <thead><tr><th>Started</th><th>Success</th><th>Failure</th><th>Success Rate</th><th>Avg Cost (ms)</th><th>Max Cost (ms)</th><th>Avg Txs</th><th>Last Height</th><th>Last Hash</th></tr></thead>
+      <tbody>
+        <tr><td>{{.BodySync.Started}}</td><td>{{.BodySync.Succeeded}}</td><td>{{.BodySync.Failed}}</td><td>{{.BodySync.SuccessRate}}</td><td>{{microsToMillis .BodySync.AvgCostUS}}</td><td>{{microsToMillis .BodySync.MaxCostUS}}</td><td>{{.BodySync.AvgTxs}}</td><td>{{.BodySync.LastHeight}}</td><td class="wrap">{{.BodySync.LastHash}}</td></tr>
+      </tbody>
+    </table>
+    {{if .BodyItems}}
+    <h3>Body Item Duration</h3>
+    <table>
+      <thead><tr><th>Item</th><th>Blocks</th><th>Items</th><th>Total Cost (ms)</th><th>Avg Block Cost (ms)</th><th>Avg Item Cost (ms)</th><th>Max Cost (ms)</th><th>Last Height</th><th>Last Hash</th></tr></thead>
+      <tbody>
+      {{range .BodyItems}}
+        <tr><td>{{.Item}}</td><td>{{.Blocks}}</td><td>{{.Items}}</td><td>{{microsToMillis .TotalCostUS}}</td><td>{{microsToMillis .AvgCostUS}}</td><td>{{microsToMillis .AvgItemCostUS}}</td><td>{{microsToMillis .MaxCostUS}}</td><td>{{.LastHeight}}</td><td class="wrap">{{.LastHash}}</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{end}}
   </section>
 
   <section class="card section">
@@ -193,6 +414,7 @@
       </tbody>
     </table>
     <p class="muted">Queues: high={{.TaskPool.PendingHigh}}, normal={{.TaskPool.PendingNormal}}, workers={{.TaskPool.WorkerCount}}, max_retry={{.TaskPool.MaxRetry}}</p>
+    <p class="muted">Tracked age: oldest={{microsToMillis .TaskPool.TrackedOldestAgeUS}}ms, avg={{microsToMillis .TaskPool.TrackedAvgAgeUS}}ms, body_oldest={{microsToMillis .TaskPool.TrackedBodyOldestAgeUS}}ms, header_height_oldest={{microsToMillis .TaskPool.TrackedHeaderHOldestAgeUS}}ms, header_hash_oldest={{microsToMillis .TaskPool.TrackedHeaderHashOldestAgeUS}}ms</p>
     {{else}}<div class="empty">No task pool stats.</div>{{end}}
   </section>
 
@@ -213,26 +435,58 @@
   <section class="card section">
     <h2>Store</h2>
     <table>
-      <thead><tr><th>Submitted</th><th>Success</th><th>Failure</th><th>Skipped</th><th>Canceled</th><th>Success Rate</th><th>Missing Body</th><th>Parent Not Ready</th><th>DB Failures</th><th>Queue</th></tr></thead>
+      <thead><tr><th>Submitted</th><th>Success</th><th>Failure</th><th>Skipped</th><th>Canceled</th><th>Success Rate</th><th>Missing Body</th><th>Parent Not Ready</th><th>DB Failures</th><th>Queue</th><th>Avg Store (ms)</th><th>Max Store (ms)</th><th>Last Store (ms)</th></tr></thead>
       <tbody>
-        <tr><td>{{.Store.Submitted}}</td><td>{{.Store.Succeeded}}</td><td>{{.Store.Failed}}</td><td>{{.Store.Skipped}}</td><td>{{.Store.Canceled}}</td><td>{{.Store.SuccessRate}}</td><td>{{.Store.SkippedMissingBody}}</td><td>{{.Store.SkippedParentNotReady}}</td><td>{{.Store.FailedDB}}</td><td>{{.Store.QueuePending}}</td></tr>
+        <tr><td>{{.Store.Submitted}}</td><td>{{.Store.Succeeded}}</td><td>{{.Store.Failed}}</td><td>{{.Store.Skipped}}</td><td>{{.Store.Canceled}}</td><td>{{.Store.SuccessRate}}</td><td>{{.Store.SkippedMissingBody}}</td><td>{{.Store.SkippedParentNotReady}}</td><td>{{.Store.FailedDB}}</td><td>{{.Store.QueuePending}}</td><td>{{microsToMillis .Store.DurationAvgUS}}</td><td>{{microsToMillis .Store.DurationMaxUS}}</td><td>{{microsToMillis .Store.DurationLastUS}}</td></tr>
       </tbody>
     </table>
-  </section>
-
-  <section class="card section">
-    <h2>Sync Progress</h2>
-    {{if .RuntimeSeries}}
+    {{if .StoreDataTypes}}
+    <h3>Store Data Type Duration</h3>
     <table>
-      <thead><tr><th>Time</th><th>Remote</th><th>Nodes</th><th>BlockTree</th><th>Branches</th><th>Orphans</th><th>Staging</th><th>Stored</th><th>Task Backlog</th><th>Store Queue</th></tr></thead>
+      <thead><tr><th>Data Type</th><th>Writes</th><th>Tasks</th><th>Failures</th><th>Retries</th><th>Total Cost (ms)</th><th>Avg Task Cost (ms)</th><th>Avg Write Cost (ms)</th><th>Max Task Cost (ms)</th><th>Avg Failed Cost (ms)</th><th>Max Failed Cost (ms)</th></tr></thead>
       <tbody>
-      {{range .RuntimeSeries}}
-        <tr><td>{{formatTime .Time}}</td><td>{{.RemoteLatest}}</td><td>{{.NodeReady}}/{{.NodeTotal}}</td><td>{{.BlocktreeStart}}-{{.BlocktreeEnd}}</td><td>{{.Branches}}</td><td>{{.Orphans}}</td><td>h={{.PendingHeaders}} b={{.PendingBodies}} done={{.CompleteBlocks}}</td><td>{{.StoredCount}}</td><td>{{.TaskPendingHigh}}/{{.TaskPendingNormal}}</td><td>{{.StoreQueuePending}}</td></tr>
+      {{range .StoreDataTypes}}
+        <tr><td>{{.Type}}</td><td>{{.Writes}}</td><td>{{.Tasks}}</td><td>{{.Failures}}</td><td>{{.RetriedAttempts}}</td><td>{{microsToMillis .TotalCostUS}}</td><td>{{microsToMillis .AvgCostUS}}</td><td>{{microsToMillis .AvgWriteCostUS}}</td><td>{{microsToMillis .MaxCostUS}}</td><td>{{microsToMillis .AvgFailedCostUS}}</td><td>{{microsToMillis .MaxFailedCostUS}}</td></tr>
       {{end}}
       </tbody>
     </table>
-    {{else}}<div class="empty">No runtime health stats data.</div>{{end}}
+    {{end}}
+    {{if .FullBlockStore.Count}}
+    <h3>FullBlock Store Duration</h3>
+    <table>
+      <thead><tr><th>Count</th><th>Avg Total (ms)</th><th>P95 Total (ms)</th><th>Max Total (ms)</th><th>Avg Data (ms)</th><th>Max Data (ms)</th><th>Avg Finalize (ms)</th><th>Max Finalize (ms)</th><th>Avg Ready (ms)</th><th>Avg Block Row (ms)</th></tr></thead>
+      <tbody>
+        <tr><td>{{.FullBlockStore.Count}}</td><td>{{microsToMillis .FullBlockStore.AvgTotalUS}}</td><td>{{microsToMillis .FullBlockStore.P95TotalUS}}</td><td>{{microsToMillis .FullBlockStore.MaxTotalUS}}</td><td>{{microsToMillis .FullBlockStore.AvgDataUS}}</td><td>{{microsToMillis .FullBlockStore.MaxDataUS}}</td><td>{{microsToMillis .FullBlockStore.AvgFinalizeUS}}</td><td>{{microsToMillis .FullBlockStore.MaxFinalizeUS}}</td><td>{{microsToMillis .FullBlockStore.AvgReadyUS}}</td><td>{{microsToMillis .FullBlockStore.AvgBlockRowUS}}</td></tr>
+      </tbody>
+    </table>
+    {{end}}
+    {{if .BlockStoreDurations}}
+    <h3>Per-Block Store Duration</h3>
+    <table>
+      <thead><tr><th>Height</th><th>Hash</th><th>Stored At</th><th>Total (ms)</th><th>Ready (ms)</th><th>Block Row (ms)</th><th>Data (ms)</th><th>Finalize (ms)</th></tr></thead>
+      <tbody>
+      {{range .BlockStoreDurations}}
+        <tr><td>{{.Height}}</td><td class="wrap"><code>{{.Hash}}</code></td><td>{{formatClock .StoredAt}}</td><td>{{microsToMillis .TotalUS}}</td><td>{{microsToMillis .ReadyUS}}</td><td>{{microsToMillis .BlockRowUS}}</td><td>{{microsToMillis .DataUS}}</td><td>{{microsToMillis .FinalizeUS}}</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{end}}
   </section>
+
+  <section class="card section">
+    <h2>Anomaly Summary</h2>
+    {{if .Anomalies}}
+    <table>
+      <thead><tr><th>Level</th><th>Category</th><th>Count</th><th>Description</th><th>Recommendation</th></tr></thead>
+      <tbody>
+      {{range .Anomalies}}
+        <tr><td><span class="badge {{.Level}}">{{.Level}}</span></td><td>{{.Category}}</td><td>{{.Count}}</td><td class="wrap">{{.Message}}</td><td class="wrap">{{.Suggestion}}</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{else}}<div class="empty">No high-risk anomaly patterns were detected.</div>{{end}}
+  </section>
+
 </main>
 </body>
 </html>

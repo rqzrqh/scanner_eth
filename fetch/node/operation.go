@@ -44,6 +44,8 @@ func (n *NodeOperatorImpl) FetchBlockHeaderByHeight(ctx context.Context, taskId 
 	if n == nil || n.client == nil {
 		return nil
 	}
+	startedAt := time.Now()
+	defer n.recordMethodCall("FetchBlockHeaderByHeight", startedAt, -1)
 	rpcCtx, cancel := n.withNodeRPCTimeout(ctx)
 	defer cancel()
 	nodeId := n.ID()
@@ -56,7 +58,7 @@ func (n *NodeOperatorImpl) FetchBlockHeaderByHeight(ctx context.Context, taskId 
 		logrus.Warnf("fetch header failed. nodeId:%v taskId:%v error:%v height:%v", nodeId, taskId, err, height)
 		return nil
 	}
-	logrus.Debugf("fetch header success. nodeId:%v taskId:%v height:%v cost:%v", nodeId, taskId, height, time.Since(startTime).String())
+	logrus.Infof("fetch header success. nodeId:%v taskId:%v height:%v cost:%v", nodeId, taskId, height, time.Since(startTime).String())
 	return blkHeaderJson
 }
 
@@ -64,6 +66,8 @@ func (n *NodeOperatorImpl) FetchBlockHeaderByHash(ctx context.Context, taskId in
 	if n == nil || n.client == nil {
 		return nil
 	}
+	startedAt := time.Now()
+	defer n.recordMethodCall("FetchBlockHeaderByHash", startedAt, -1)
 	rpcCtx, cancel := n.withNodeRPCTimeout(ctx)
 	defer cancel()
 	nodeId := n.ID()
@@ -79,7 +83,7 @@ func (n *NodeOperatorImpl) FetchBlockHeaderByHash(ctx context.Context, taskId in
 		logrus.Warnf("fetch header by hash empty. nodeId:%v taskId:%v hash:%v", nodeId, taskId, hash)
 		return nil
 	}
-	logrus.Debugf("fetch header by hash success. nodeId:%v taskId:%v hash:%v cost:%v", nodeId, taskId, hash, time.Since(startTime).String())
+	logrus.Infof("fetch header by hash success. nodeId:%v taskId:%v hash:%v cost:%v", nodeId, taskId, hash, time.Since(startTime).String())
 	return blkHeaderJson
 }
 
@@ -87,6 +91,8 @@ func (n *NodeOperatorImpl) FetchInternalTxTracesByBlockHash(ctx context.Context,
 	if n == nil || n.client == nil {
 		return nil, fmt.Errorf("nil NodeOperatorImpl or client")
 	}
+	startedAt := time.Now()
+	defer n.recordMethodCall("FetchInternalTxTracesByBlockHash", startedAt, -1)
 	rpcCtx, cancel := n.withNodeRPCTimeout(ctx)
 	defer cancel()
 	nodeId := n.ID()
@@ -115,6 +121,8 @@ func (n *NodeOperatorImpl) FetchTransactionsByHashBatch(ctx context.Context, txH
 	if n == nil || n.client == nil {
 		return fmt.Errorf("nil NodeOperatorImpl or client")
 	}
+	startedAt := time.Now()
+	defer n.recordMethodCall("FetchTransactionsByHashBatch", startedAt, len(txHashes))
 	if len(txHashes) != len(txs) {
 		return fmt.Errorf("txHashes len %d != txs len %d", len(txHashes), len(txs))
 	}
@@ -150,6 +158,8 @@ func (n *NodeOperatorImpl) FetchReceiptsBatch(ctx context.Context, txHashes []st
 	if n == nil || n.client == nil {
 		return fmt.Errorf("nil NodeOperatorImpl or client")
 	}
+	startedAt := time.Now()
+	defer n.recordMethodCall("FetchReceiptsBatch", startedAt, len(txHashes))
 	if len(txHashes) != len(receipts) {
 		return fmt.Errorf("txHashes len %d != receipts len %d", len(txHashes), len(receipts))
 	}
@@ -169,6 +179,8 @@ func (n *NodeOperatorImpl) FetchReceiptsBatch(ctx context.Context, txHashes []st
 }
 
 func (n *NodeOperatorImpl) FetchBalanceNative(ctx context.Context, balancesNative []*data.BalanceNative, height uint64) error {
+	startedAt := time.Now()
+	defer n.recordMethodCall("FetchBalanceNative", startedAt, len(balancesNative))
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -209,6 +221,8 @@ func (n *NodeOperatorImpl) FetchBalanceNative(ctx context.Context, balancesNativ
 }
 
 func (n *NodeOperatorImpl) FetchErc20BalancesBatch(ctx context.Context, bs []*data.BalanceErc20, height uint64) error {
+	startedAt := time.Now()
+	defer n.recordMethodCall("FetchErc20BalancesBatch", startedAt, len(bs))
 	rpcCtx, cancel := n.withNodeRPCTimeout(ctx)
 	defer cancel()
 	hexBalances := make([]hexutil.Bytes, len(bs))
@@ -260,6 +274,8 @@ func (n *NodeOperatorImpl) FetchErc20BalancesBatch(ctx context.Context, bs []*da
 }
 
 func (n *NodeOperatorImpl) FetchErc1155BalancesBatch(ctx context.Context, bs []*data.BalanceErc1155, height uint64) error {
+	startedAt := time.Now()
+	defer n.recordMethodCall("FetchErc1155BalancesBatch", startedAt, len(bs))
 	rpcCtx, cancel := n.withNodeRPCTimeout(ctx)
 	defer cancel()
 	hexBalances := make([]hexutil.Bytes, len(bs))
@@ -330,6 +346,8 @@ func (n *NodeOperatorImpl) ToCallArg(msg ethereum.CallMsg) interface{} {
 }
 
 func (n *NodeOperatorImpl) FetchContractErc20(ctx context.Context, addr *common.Address, height uint64) (*data.ContractErc20, error) {
+	startedAt := time.Now()
+	defer n.recordMethodCall("FetchContractErc20", startedAt, -1)
 	rpcCtx, cancel := n.withNodeRPCTimeout(ctx)
 	defer cancel()
 	methods := []string{"name", "symbol", "decimals", "totalSupply"}
@@ -355,21 +373,21 @@ func (n *NodeOperatorImpl) FetchContractErc20(ctx context.Context, addr *common.
 			continue
 		}
 		if elem.Error != nil {
-			logrus.Infof("erc20 info elem err:%v elem:%v method:%v", elem.Error, elem, methods[i])
+			logrus.Debugf("erc20 info elem err:%v elem:%v method:%v", elem.Error, elem, methods[i])
 			continue
 		}
 		ret := elem.Result.(*hexutil.Bytes)
 		if ret == nil || len(*ret) == 0 {
-			logrus.Infof("erc20 info ret empty addr:%v elem:%v method:%v", addr.Hex(), elem, methods[i])
+			logrus.Debugf("erc20 info ret empty addr:%v elem:%v method:%v", addr.Hex(), elem, methods[i])
 			continue
 		}
 		rets, err := filter.Erc20ABI.Unpack(methods[i], *ret)
 		if err != nil {
-			logrus.Infof("erc20 info unpack failed. err:%v addr:%v method:%v ret:%v", err, addr.Hex(), methods[i], *ret)
+			logrus.Debugf("erc20 info unpack failed. err:%v addr:%v method:%v ret:%v", err, addr.Hex(), methods[i], *ret)
 			continue
 		}
 		if len(rets) <= 0 {
-			logrus.Infof("elem rets empty addr:%v", addr.Hex())
+			logrus.Debugf("elem rets empty addr:%v", addr.Hex())
 			continue
 		}
 		switch i {
@@ -395,6 +413,8 @@ func (n *NodeOperatorImpl) FetchContractErc20(ctx context.Context, addr *common.
 }
 
 func (n *NodeOperatorImpl) FetchContractErc721(ctx context.Context, addr *common.Address) (*data.ContractErc721, error) {
+	startedAt := time.Now()
+	defer n.recordMethodCall("FetchContractErc721", startedAt, -1)
 	rpcCtx, cancel := n.withNodeRPCTimeout(ctx)
 	defer cancel()
 	methods := []string{"name", "symbol"}
@@ -443,6 +463,8 @@ func (n *NodeOperatorImpl) FetchContractErc721(ctx context.Context, addr *common
 }
 
 func (n *NodeOperatorImpl) FetchTokenErc721(ctx context.Context, contractAddr *common.Address, tokenId *big.Int) (*data.TokenErc721, error) {
+	startedAt := time.Now()
+	defer n.recordMethodCall("FetchTokenErc721", startedAt, -1)
 	rpcCtx, cancel := n.withNodeRPCTimeout(ctx)
 	defer cancel()
 	methods := []string{"ownerOf", "tokenURI"}

@@ -233,7 +233,7 @@ func (nm *NodeManager) GetAllValidNodeOperators(height uint64, blockHash string)
 			scores = append(scores, candidate.score)
 		}
 	}
-	logrus.Infof("valid node operators selected. height:%v hash:%v valid_nodes:%v node_ids:%v scores:%v disabled:%v not_ready:%v cooldown:%v height_too_low:%v remote_unknown:%v nil_nodes:%v",
+	logrus.Debugf("valid node operators selected. height:%v hash:%v valid_nodes:%v node_ids:%v scores:%v disabled:%v not_ready:%v cooldown:%v height_too_low:%v remote_unknown:%v nil_nodes:%v",
 		height, strings.TrimSpace(blockHash), len(ops), nodeIDs, scores, stats.disabled, stats.notReady, stats.cooldown, stats.heightTooLow, stats.remoteUnknown, stats.nilNodes)
 	return ops
 }

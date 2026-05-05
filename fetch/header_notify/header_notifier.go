@@ -43,10 +43,10 @@ func (ds *HeaderNotifier) Run(ctx context.Context, out chan<- *RemoteChainUpdate
 			defer wg.Done()
 		}
 		if ds.client.Client().SupportsSubscriptions() {
-			logrus.Infof("header notifier use websocket. id:%d", ds.id)
+			logrus.Debugf("header notifier use websocket. id:%d", ds.id)
 			ds.useWebsocket(ctx, out)
 		} else {
-			logrus.Infof("header notifier use http. id:%d", ds.id)
+			logrus.Debugf("header notifier use http. id:%d", ds.id)
 			ds.useHttp(ctx, out)
 		}
 	}()
@@ -74,7 +74,7 @@ RECONNECT:
 		}
 	}
 
-	logrus.Infof("header notifier subscribe newHeads success. id:%d", ds.id)
+	logrus.Debugf("header notifier subscribe newHeads success. id:%d", ds.id)
 
 	for {
 		select {
