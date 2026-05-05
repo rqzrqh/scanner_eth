@@ -51,7 +51,7 @@ func (sf *Flow) EnqueueMissingBodyTasks(branches []fetchserialstore.Branch) {
 }
 
 func (sf *Flow) collectStoreBranchesForBodySync() []fetchserialstore.Branch {
-	return sf.BuildStoreBranches()
+	return sf.collectStoreBranchSuffixes()
 }
 
 func (sf *Flow) requestMissingBodySync(branches []fetchserialstore.Branch) {

@@ -342,9 +342,10 @@ func (fm *FetchManager) logRuntimeHealthStats(rt *fetchRuntimeState) {
 	storeMetrics := rt.storeWorker.MetricsPayload()
 	storeTotals, _ := storeMetrics["totals"].(map[string]uint64)
 	storeQueue, _ := storeMetrics["queue"].(map[string]uint64)
+	storeDuration, _ := storeMetrics["duration"].(map[string]uint64)
 	nodeSnapshot := fm.nodeManager.Snapshot()
 
-	logrus.Infof("runtime health stats remote_latest:%v node_ready:%v/%v blocktree_range:[%v,%v] linked:%v leaves:%v branches:%v orphans:%v orphan_parents:%v staging_blocks:%v pending_headers:%v pending_bodies:%v complete_blocks:%v stored_count:%v task_pending_high:%v task_pending_normal:%v task_tracked:%v task_succeeded:%v task_failed:%v task_retried:%v store_submitted:%v store_succeeded:%v store_failed:%v store_skipped:%v store_queue_pending:%v",
+	logrus.Infof("runtime health stats remote_latest:%v node_ready:%v/%v blocktree_range:[%v,%v] linked:%v leaves:%v branches:%v orphans:%v orphan_parents:%v staging_blocks:%v pending_headers:%v pending_bodies:%v complete_blocks:%v stored_count:%v task_pending_high:%v task_pending_normal:%v task_tracked:%v task_succeeded:%v task_failed:%v task_retried:%v store_submitted:%v store_succeeded:%v store_failed:%v store_skipped:%v store_queue_pending:%v store_duration_last:%v store_duration_avg:%v store_duration_max:%v",
 		nodeSnapshot.LatestHeight,
 		nodeSnapshot.ReadyCount,
 		nodeSnapshot.NodeCount,
@@ -371,6 +372,9 @@ func (fm *FetchManager) logRuntimeHealthStats(rt *fetchRuntimeState) {
 		storeTotals["failed"],
 		storeTotals["skipped"],
 		storeQueue["pending"],
+		time.Duration(storeDuration["last_ns"]),
+		time.Duration(storeDuration["avg_ns"]),
+		time.Duration(storeDuration["max_ns"]),
 	)
 }
 

@@ -283,7 +283,7 @@ func (env *testFlowEnv) runScanAndWait() {
 		env.attachAsyncTaskPool()
 	}
 	if env.scanWorker == nil {
-		env.scanWorker = &Worker{triggerCh: make(chan struct{}, 1)}
+		env.scanWorker = &Worker{triggerCh: make(chan int64, 1)}
 		env.scanWorker.SetEnabled(true)
 	}
 	triggerCh := env.scanWorker.TriggerChan()

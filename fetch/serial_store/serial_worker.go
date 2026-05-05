@@ -60,6 +60,11 @@ type Worker struct {
 	skippedParentNotReady uint64
 	skippedZeroBlock      uint64
 	failedDB              uint64
+
+	storeDurationTotalNS uint64
+	storeDurationLastNS  uint64
+	storeDurationMaxNS   uint64
+	storeDurationSamples uint64
 }
 
 func NewWorker(dbOperator fetchstore.BlockDataStorer, storedBlocks *fetchstore.StoredBlockState, isZero func(*fetchstore.EventBlockData) bool) *Worker {
@@ -221,12 +226,19 @@ func (w *Worker) MetricsPayload() map[string]any {
 	if w == nil {
 		return map[string]any{}
 	}
+	succeeded := atomic.LoadUint64(&w.succeeded)
+	durationSamples := atomic.LoadUint64(&w.storeDurationSamples)
+	totalDurationNS := atomic.LoadUint64(&w.storeDurationTotalNS)
+	avgDurationNS := uint64(0)
+	if durationSamples > 0 {
+		avgDurationNS = totalDurationNS / durationSamples
+	}
 
 	return map[string]any{
 		"totals": map[string]uint64{
 			"submitted": atomic.LoadUint64(&w.submitted),
 			"skipped":   atomic.LoadUint64(&w.skipped),
-			"succeeded": atomic.LoadUint64(&w.succeeded),
+			"succeeded": succeeded,
 			"failed":    atomic.LoadUint64(&w.failed),
 			"canceled":  atomic.LoadUint64(&w.canceled),
 		},
@@ -247,6 +259,13 @@ func (w *Worker) MetricsPayload() map[string]any {
 		"state": map[string]uint64{
 			"processing": atomic.LoadUint64(&w.processing),
 		},
+		"duration": map[string]uint64{
+			"samples":  durationSamples,
+			"total_ns": totalDurationNS,
+			"last_ns":  atomic.LoadUint64(&w.storeDurationLastNS),
+			"avg_ns":   avgDurationNS,
+			"max_ns":   atomic.LoadUint64(&w.storeDurationMaxNS),
+		},
 	}
 }
 
@@ -255,10 +274,18 @@ func (w *Worker) logStats() {
 		return
 	}
 
-	logrus.Infof("store block worker stats submitted:%v skipped:%v succeeded:%v failed:%v canceled:%v queue_pending:%v processing:%v skipped_missing_body:%v skipped_parent_not_ready:%v failed_db:%v",
+	succeeded := atomic.LoadUint64(&w.succeeded)
+	durationSamples := atomic.LoadUint64(&w.storeDurationSamples)
+	totalDurationNS := atomic.LoadUint64(&w.storeDurationTotalNS)
+	avgDurationNS := uint64(0)
+	if durationSamples > 0 {
+		avgDurationNS = totalDurationNS / durationSamples
+	}
+
+	logrus.Infof("store block worker stats submitted:%v skipped:%v succeeded:%v failed:%v canceled:%v queue_pending:%v processing:%v skipped_missing_body:%v skipped_parent_not_ready:%v failed_db:%v store_duration_total:%v store_duration_last:%v store_duration_avg:%v store_duration_max:%v",
 		atomic.LoadUint64(&w.submitted),
 		atomic.LoadUint64(&w.skipped),
-		atomic.LoadUint64(&w.succeeded),
+		succeeded,
 		atomic.LoadUint64(&w.failed),
 		atomic.LoadUint64(&w.canceled),
 		len(w.reqCh),
@@ -266,7 +293,30 @@ func (w *Worker) logStats() {
 		atomic.LoadUint64(&w.skippedMissingBody),
 		atomic.LoadUint64(&w.skippedParentNotReady),
 		atomic.LoadUint64(&w.failedDB),
+		time.Duration(totalDurationNS),
+		time.Duration(atomic.LoadUint64(&w.storeDurationLastNS)),
+		time.Duration(avgDurationNS),
+		time.Duration(atomic.LoadUint64(&w.storeDurationMaxNS)),
 	)
+}
+
+func (w *Worker) recordStoreDuration(duration time.Duration) {
+	if w == nil || duration < 0 {
+		return
+	}
+	durationNS := uint64(duration)
+	atomic.AddUint64(&w.storeDurationSamples, 1)
+	atomic.AddUint64(&w.storeDurationTotalNS, durationNS)
+	atomic.StoreUint64(&w.storeDurationLastNS, durationNS)
+	for {
+		currentMax := atomic.LoadUint64(&w.storeDurationMaxNS)
+		if durationNS <= currentMax {
+			return
+		}
+		if atomic.CompareAndSwapUint64(&w.storeDurationMaxNS, currentMax, durationNS) {
+			return
+		}
+	}
 }
 
 func (w *Worker) runRequest(req *storeRequest) error {
@@ -291,10 +341,14 @@ func (w *Worker) runSingleRequest(req *storeRequest) error {
 		return fmt.Errorf("db operator is nil")
 	}
 
+	startedAt := time.Now()
 	err := w.dbOperator.StoreBlockData(req.Ctx, req.BlockData)
+	duration := time.Since(startedAt)
+	w.recordStoreDuration(duration)
 	if err != nil {
 		atomic.AddUint64(&w.failed, 1)
 		atomic.AddUint64(&w.failedDB, 1)
+		logrus.Warnf("store block data failed. height:%v hash:%v cost:%v err:%v", req.Height, req.Hash, duration, err)
 		return err
 	}
 	if w.storedBlocks != nil {

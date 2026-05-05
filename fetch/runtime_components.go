@@ -46,7 +46,7 @@ func (fm *FetchManager) newHeaderManager() *headernotify.Manager {
 			)
 		}
 		if runtime != nil {
-			runtime.scanWorker.Trigger()
+			runtime.scanWorker.TriggerAtMicro(update.EventTimeMicroSec)
 		}
 	}
 	return headernotify.NewManager(fm.nodeManager.EthClients(), handleUpdate)

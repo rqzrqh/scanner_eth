@@ -5,6 +5,7 @@ import (
 	fetchstore "scanner_eth/fetch/store"
 	"scanner_eth/model"
 	"testing"
+	"time"
 )
 
 type serialTestBlockStorer struct {
@@ -135,5 +136,48 @@ func TestSubmitBranchesMetricsReportSkipReasons(t *testing.T) {
 	}
 	if !worker.IsIdle() {
 		t.Fatalf("worker should be idle after synchronous branch submission")
+	}
+}
+
+func TestSubmitBranchesMetricsReportStoreDuration(t *testing.T) {
+	stored := fetchstore.NewStoredBlockState()
+	stored.MarkStored("a")
+	worker := NewStartedWorker(serialTestBlockStorer{
+		storeFn: func(_ context.Context, _ *fetchstore.EventBlockData) error {
+			time.Sleep(time.Millisecond)
+			return nil
+		},
+	}, &stored, func(data *fetchstore.EventBlockData) bool {
+		return data == nil || data.StorageFullBlock == nil
+	})
+	defer worker.Stop()
+
+	branch := Branch{
+		Nodes: []BranchNode{
+			{
+				Hash:       "b",
+				ParentHash: "a",
+				Height:     2,
+				BlockData:  makeSerialTestEventBlockData(2, "b", "a"),
+			},
+		},
+	}
+	if err := worker.SubmitBranches(context.Background(), []Branch{branch}); err != nil {
+		t.Fatalf("submit branches failed: %v", err)
+	}
+
+	metrics := worker.MetricsPayload()
+	duration, ok := metrics["duration"].(map[string]uint64)
+	if !ok {
+		t.Fatalf("missing duration payload: %+v", metrics)
+	}
+	if duration["samples"] != 1 {
+		t.Fatalf("expected one duration sample, got=%+v", duration)
+	}
+	if duration["total_ns"] == 0 || duration["last_ns"] == 0 || duration["avg_ns"] == 0 || duration["max_ns"] == 0 {
+		t.Fatalf("expected non-zero duration stats, got=%+v", duration)
+	}
+	if duration["total_ns"] < duration["last_ns"] || duration["max_ns"] < duration["last_ns"] {
+		t.Fatalf("duration stats are inconsistent: %+v", duration)
 	}
 }

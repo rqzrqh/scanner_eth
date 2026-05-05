@@ -28,3 +28,37 @@ func TestScanWorkerTriggerAndStop(t *testing.T) {
 	worker.Stop()
 	worker.Stop()
 }
+
+func TestScanWorkerIgnoresTriggersOlderThanLastScanStart(t *testing.T) {
+	worker := NewWorker(nil)
+	worker.SetEnabled(true)
+	worker.recordScanStartedAtMicro(100)
+
+	worker.TriggerAtMicro(99)
+	if len(worker.TriggerChan()) != 0 {
+		t.Fatalf("old trigger should be ignored, got queue length %d", len(worker.TriggerChan()))
+	}
+	if worker.IgnoredTriggerEvents() != 1 {
+		t.Fatalf("expected one ignored trigger, got=%d", worker.IgnoredTriggerEvents())
+	}
+
+	worker.TriggerAtMicro(100)
+	if len(worker.TriggerChan()) != 1 {
+		t.Fatalf("trigger at scan start should be accepted, got queue length %d", len(worker.TriggerChan()))
+	}
+	if worker.LastScanStartedAtMicro() != 100 {
+		t.Fatalf("last scan started time should be recorded in microseconds, got=%d", worker.LastScanStartedAtMicro())
+	}
+}
+
+func TestScanWorkerIgnoresBufferedOldTriggerOnConsume(t *testing.T) {
+	worker := NewWorker(nil)
+	worker.SetEnabled(true)
+	worker.TriggerAtMicro(100)
+
+	worker.recordScanStartedAtMicro(101)
+	triggerAtMicro := <-worker.TriggerChan()
+	if !worker.shouldIgnoreTrigger(triggerAtMicro) {
+		t.Fatal("buffered trigger older than latest scan start should be ignored")
+	}
+}

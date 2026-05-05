@@ -7,11 +7,16 @@ import (
 	"time"
 )
 
+const scanWorkerPollInterval = 5 * time.Second
+
 type Worker struct {
 	flow *Flow
 
 	enabled   atomic.Bool
-	triggerCh chan struct{}
+	triggerCh chan int64
+
+	lastScanStartedAtMicro int64
+	ignoredTriggerEvents   uint64
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -21,7 +26,7 @@ type Worker struct {
 func NewWorker(flow *Flow) *Worker {
 	return &Worker{
 		flow:      flow,
-		triggerCh: make(chan struct{}, 1),
+		triggerCh: make(chan int64, 1),
 	}
 }
 
@@ -46,7 +51,7 @@ func (w *Worker) Start() {
 func (w *Worker) run(loopCtx context.Context) {
 	defer w.wg.Done()
 
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(scanWorkerPollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -54,33 +59,86 @@ func (w *Worker) run(loopCtx context.Context) {
 		case <-loopCtx.Done():
 			return
 		case <-ticker.C:
-			if w.flow != nil {
-				w.flow.RunScanCycle(loopCtx)
+			w.runScanCycle(loopCtx)
+		case triggerAtMicro := <-w.triggerCh:
+			if w.shouldIgnoreTrigger(triggerAtMicro) {
+				continue
 			}
-		case <-w.triggerCh:
-			if w.flow != nil {
-				w.flow.RunScanCycle(loopCtx)
-			}
+			w.runScanCycle(loopCtx)
 		}
 	}
 }
 
+func (w *Worker) runScanCycle(ctx context.Context) {
+	if w == nil || w.flow == nil || !w.IsEnabled() {
+		return
+	}
+	w.recordScanStartedAtMicro(time.Now().UnixMicro())
+	w.flow.RunScanCycle(ctx)
+}
+
 func (w *Worker) Trigger() {
+	if w == nil {
+		return
+	}
+	w.TriggerAtMicro(time.Now().UnixMicro())
+}
+
+func (w *Worker) TriggerAtMicro(triggerAtMicro int64) {
 	if w == nil || w.triggerCh == nil || !w.IsEnabled() {
+		return
+	}
+	if triggerAtMicro <= 0 {
+		triggerAtMicro = time.Now().UnixMicro()
+	}
+	if w.shouldIgnoreTrigger(triggerAtMicro) {
 		return
 	}
 
 	select {
-	case w.triggerCh <- struct{}{}:
+	case w.triggerCh <- triggerAtMicro:
 	default:
 	}
 }
 
-func (w *Worker) TriggerChan() <-chan struct{} {
+func (w *Worker) TriggerChan() <-chan int64 {
 	if w == nil {
 		return nil
 	}
 	return w.triggerCh
+}
+
+func (w *Worker) LastScanStartedAtMicro() int64 {
+	if w == nil {
+		return 0
+	}
+	return atomic.LoadInt64(&w.lastScanStartedAtMicro)
+}
+
+func (w *Worker) IgnoredTriggerEvents() uint64 {
+	if w == nil {
+		return 0
+	}
+	return atomic.LoadUint64(&w.ignoredTriggerEvents)
+}
+
+func (w *Worker) recordScanStartedAtMicro(startedAtMicro int64) {
+	if w == nil {
+		return
+	}
+	atomic.StoreInt64(&w.lastScanStartedAtMicro, startedAtMicro)
+}
+
+func (w *Worker) shouldIgnoreTrigger(triggerAtMicro int64) bool {
+	if w == nil {
+		return true
+	}
+	lastScanStartedAtMicro := atomic.LoadInt64(&w.lastScanStartedAtMicro)
+	if triggerAtMicro > 0 && lastScanStartedAtMicro > 0 && triggerAtMicro < lastScanStartedAtMicro {
+		atomic.AddUint64(&w.ignoredTriggerEvents, 1)
+		return true
+	}
+	return false
 }
 
 func (w *Worker) IsEnabled() bool {

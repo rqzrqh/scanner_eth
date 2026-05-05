@@ -102,10 +102,11 @@ RECONNECT:
 			logrus.Debugf("header notifier new header. id:%d height:%v hash:%v", ds.id, height, blockHash)
 
 			update := &RemoteChainUpdate{
-				NodeId:    ds.id,
-				Height:    height,
-				BlockHash: blockHash,
-				Header:    toRemoteHeader(header),
+				NodeId:            ds.id,
+				Height:            height,
+				BlockHash:         blockHash,
+				Header:            toRemoteHeader(header),
+				EventTimeMicroSec: time.Now().UnixMicro(),
 			}
 			select {
 			case out <- update:
@@ -145,10 +146,11 @@ func (ds *HeaderNotifier) useHttp(ctx context.Context, out chan<- *RemoteChainUp
 		height := header.Number.Uint64()
 		blockHash := header.Hash().Hex()
 		update := &RemoteChainUpdate{
-			NodeId:    ds.id,
-			Height:    height,
-			BlockHash: blockHash,
-			Header:    toRemoteHeader(header),
+			NodeId:            ds.id,
+			Height:            height,
+			BlockHash:         blockHash,
+			Header:            toRemoteHeader(header),
+			EventTimeMicroSec: time.Now().UnixMicro(),
 		}
 		select {
 		case out <- update:

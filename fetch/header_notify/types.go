@@ -12,8 +12,9 @@ type RemoteHeader struct {
 }
 
 type RemoteChainUpdate struct {
-	NodeId    int
-	Height    uint64
-	BlockHash string
-	Header    *RemoteHeader
+	NodeId            int
+	Height            uint64
+	BlockHash         string
+	Header            *RemoteHeader
+	EventTimeMicroSec int64
 }

@@ -21,14 +21,14 @@ func (sf *Flow) GetStoreBranchTargets() []string {
 }
 
 func (sf *Flow) GetBodyBranchTargets() []string {
-	return sf.GetStoreBranchTargets()
+	return sf.serializeStoreBranches(sf.collectStoreBranchesForBodySync())
 }
 
 func (sf *Flow) BuildStoreBranches() []fetchserialstore.Branch {
 	return sf.collectStoreBranchesForWrite()
 }
 
-func (sf *Flow) collectStoreBranchesForWrite() []fetchserialstore.Branch {
+func (sf *Flow) collectStoreBranchSuffixes() []fetchserialstore.Branch {
 	if sf == nil {
 		return nil
 	}
@@ -62,6 +62,57 @@ func (sf *Flow) collectStoreBranchesForWrite() []fetchserialstore.Branch {
 		branches = append(branches, fetchserialstore.Branch{Nodes: nodes})
 	}
 	return branches
+}
+
+func (sf *Flow) collectStoreBranchesForWrite() []fetchserialstore.Branch {
+	return sf.filterStorableBranches(sf.collectStoreBranchSuffixes())
+}
+
+func (sf *Flow) filterStorableBranches(branches []fetchserialstore.Branch) []fetchserialstore.Branch {
+	if sf == nil || len(branches) == 0 {
+		return nil
+	}
+	filtered := make([]fetchserialstore.Branch, 0, len(branches))
+	for _, branch := range branches {
+		nodes := sf.filterStorableBranchNodes(branch.Nodes)
+		if len(nodes) == 0 {
+			continue
+		}
+		filtered = append(filtered, fetchserialstore.Branch{Nodes: nodes})
+	}
+	return filtered
+}
+
+func (sf *Flow) filterStorableBranchNodes(nodes []fetchserialstore.BranchNode) []fetchserialstore.BranchNode {
+	if sf == nil || len(nodes) == 0 {
+		return nil
+	}
+	filtered := make([]fetchserialstore.BranchNode, 0, len(nodes))
+	readyParents := make(map[string]struct{}, len(nodes))
+	for _, node := range nodes {
+		hash := sf.normalize(node.Hash)
+		if hash == "" {
+			break
+		}
+		if sf.storedBlocks != nil && sf.storedBlocks.IsStored(hash) {
+			readyParents[hash] = struct{}{}
+			continue
+		}
+		parentHash := sf.normalize(node.ParentHash)
+		parentReady := parentHash == ""
+		if !parentReady {
+			_, parentReady = readyParents[parentHash]
+		}
+		if !parentReady && sf.storedBlocks != nil {
+			parentReady = sf.storedBlocks.IsStored(parentHash)
+		}
+		if !parentReady || !sf.HasStorableNodeData(node.BlockData) {
+			break
+		}
+		filtered = append(filtered, node)
+		readyParents[hash] = struct{}{}
+	}
+	return filtered
 }
 
 func (sf *Flow) serializeStoreBranches(branches []fetchserialstore.Branch) []string {
@@ -128,6 +179,10 @@ func (sf *Flow) SubmitStoreBranches(ctx context.Context, branches []fetchserials
 	if sf.storeWorker == nil {
 		return fmt.Errorf("store block worker is not initialized")
 	}
+	branches = sf.filterStorableBranches(branches)
+	if len(branches) == 0 {
+		return nil
+	}
 	return sf.storeWorker.SubmitBranches(ctx, branches)
 }
 
@@ -135,19 +190,17 @@ func (sf *Flow) waitStoreBranchesWrite(ctx context.Context, bodyBranches []fetch
 	if sf == nil || len(bodyBranches) == 0 {
 		return
 	}
-	// Scan materializes the current low-to-high branch suffixes and hands them to
-	// serial_store as full branch snapshots. serial_store decides which
-	// contiguous prefix is writable using stored-block state only. Missing bodies
-	// are re-enqueued here on the fetch side. This stage is intentionally
-	// synchronous so prune cannot race with the same cycle's store submission.
-	bodyBranchTarget := strings.Join(sf.serializeStoreBranches(bodyBranches), bodyTargetBranchSep)
+	// Scan keeps missing-body scheduling on the fetch side, then submits only the
+	// contiguous storable prefix of each low-to-high branch to serial_store.
+	storeBranches := sf.filterStorableBranches(bodyBranches)
+	bodyBranchTarget := strings.Join(sf.serializeStoreBranches(storeBranches), bodyTargetBranchSep)
 	startedAt := time.Now()
 	if ctx != nil && ctx.Err() != nil {
-		sf.logScanStageEvent(scanStageEvent{stage: scanStageStoreBranches, target: bodyBranchTarget, targetCount: countBranchNodes(bodyBranches), duration: time.Since(startedAt), errMsg: "scan context cancelled"})
+		sf.logScanStageEvent(scanStageEvent{stage: scanStageStoreBranches, target: bodyBranchTarget, targetCount: countBranchNodes(storeBranches), duration: time.Since(startedAt), errMsg: "scan context cancelled"})
 		return
 	}
-	err := sf.SubmitStoreBranches(ctx, bodyBranches)
-	event := scanStageEvent{stage: scanStageStoreBranches, target: bodyBranchTarget, targetCount: countBranchNodes(bodyBranches), success: err == nil, duration: time.Since(startedAt)}
+	err := sf.SubmitStoreBranches(ctx, storeBranches)
+	event := scanStageEvent{stage: scanStageStoreBranches, target: bodyBranchTarget, targetCount: countBranchNodes(storeBranches), success: err == nil, duration: time.Since(startedAt)}
 	if err != nil {
 		event.errMsg = err.Error()
 	}

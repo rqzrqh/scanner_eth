@@ -4,3 +4,4 @@ coverage*.out
 .idea
 .vscode
 logs
+report.html
