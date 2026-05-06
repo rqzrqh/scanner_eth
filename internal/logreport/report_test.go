@@ -90,6 +90,18 @@ func TestAnalyzeParsesScannerLogSummary(t *testing.T) {
 	if len(report.NodeOperatorMethods) != 1 || report.NodeOperatorMethods[0].Method != "FetchReceiptsBatch" || report.NodeOperatorMethods[0].AvgCostUS != 2500 || report.NodeOperatorMethods[0].AvgArrayItems != 10 {
 		t.Fatalf("unexpected node operator method stats: %+v", report.NodeOperatorMethods)
 	}
+	if methods := bodySyncNodeOperatorMethods([]NodeOperatorMethodStats{{Method: "FetchBlockHeaderByHeight"}, {Method: "FetchBlockHeaderByHash"}, {Method: "FetchReceiptsBatch"}}); len(methods) != 2 || methods[0].Method != "FetchBlockHeaderByHash" || methods[1].Method != "FetchReceiptsBatch" {
+		t.Fatalf("unexpected body sync node operator method filtering: %+v", methods)
+	}
+	chart := string(renderSyncNodeOperatorChart([]NodeOperatorMethodStats{
+		{NodeID: 1, Method: "FetchReceiptsBatch", TotalCostUS: 3000},
+		{NodeID: 1, Method: "FetchTransactionsByHashBatch", TotalCostUS: 1000},
+		{NodeID: 2, Method: "FetchReceiptsBatch", TotalCostUS: 2000},
+		{NodeID: 2, Method: "FetchBlockHeaderByHash", TotalCostUS: 1000},
+	}))
+	if !strings.Contains(chart, "Sync node remote interface duration ratio") || !strings.Contains(chart, "FetchReceiptsBatch") || !strings.Contains(chart, "FetchTransactionsByHashBatch") || !strings.Contains(chart, "FetchBlockHeaderByHash") || !strings.Contains(chart, ">N1<") || !strings.Contains(chart, ">N2<") || !strings.Contains(chart, "N1 60%") {
+		t.Fatalf("sync node operator chart missing expected content: %s", chart)
+	}
 	if len(report.Anomalies) == 0 {
 		t.Fatalf("expected anomalies")
 	}
@@ -112,8 +124,23 @@ func TestRenderHTMLSmoke(t *testing.T) {
 		t.Fatalf("RenderHTML() error = %v", err)
 	}
 	html := buf.String()
-	if !strings.Contains(html, "scanner_eth Log Analysis Report") || !strings.Contains(html, "Task Pool") || !strings.Contains(html, "Header Sync") || !strings.Contains(html, "Body Sync") || !strings.Contains(html, "NodeOperator Method Stats") || !strings.Contains(html, "Store Data Type Duration") || !strings.Contains(html, "Block Timing Distribution") || !strings.Contains(html, "Per-Block Store Duration") {
+	if !strings.Contains(html, "scanner_eth Log Analysis Report") || !strings.Contains(html, "Task Pool") || !strings.Contains(html, "Sync Overview") || !strings.Contains(html, "Sync Detail") || !strings.Contains(html, "Store Detail") || !strings.Contains(html, "Header Sync") || !strings.Contains(html, "Body Sync") || !strings.Contains(html, "Node Request Overview") || !strings.Contains(html, "Sync Node Remote Interface Duration") || !strings.Contains(html, "Store Data Type Duration") {
 		t.Fatalf("rendered HTML missing expected content: %s", html)
+	}
+	if strings.Contains(html, "<h2>Sync</h2>") {
+		t.Fatalf("rendered HTML should rename Sync section to Sync Overview: %s", html)
+	}
+	if strings.Contains(html, "<h2>Store</h2>") {
+		t.Fatalf("rendered HTML should rename Store section to Store Detail: %s", html)
+	}
+	if strings.Contains(html, "Per-Block Store Duration") {
+		t.Fatalf("rendered HTML should not show per-block store duration table: %s", html)
+	}
+	if strings.Index(html, "Sync Progress") > strings.Index(html, "Node Request Overview") || strings.Index(html, "Node Request Overview") > strings.Index(html, "Time Distribution") || strings.Index(html, "Time Distribution") > strings.Index(html, "Sync Detail") || strings.Index(html, "Sync Detail") > strings.Index(html, "Store Detail") || strings.Index(html, "Store Detail") > strings.Index(html, "Task Pool") {
+		t.Fatalf("rendered HTML should show overall sections before module details: %s", html)
+	}
+	if strings.Index(html, "Node Request Overview") > strings.Index(html, "Sync Node Remote Interface Duration") || strings.Index(html, "Sync Node Remote Interface Duration") > strings.Index(html, "Time Distribution") {
+		t.Fatalf("sync node remote interface duration should render in node request overview: %s", html)
 	}
 	if strings.Contains(html, "<th>Time</th><th>Remote</th><th>Nodes</th><th>BlockTree</th>") {
 		t.Fatalf("rendered HTML should not show runtime sampling table: %s", html)
@@ -169,16 +196,22 @@ func TestAnalyzeBuildsPerBlockProgressIntervals(t *testing.T) {
 		`May  4 06:40:00.000 [DEBUG] task lifecycle event action:enqueued kind:header_height key:header_height:100 hash: height:100 priority:1 retry:0 queue_wait_us:0 total_us:0`,
 		`May  4 06:40:00.200 [DEBUG] task lifecycle event action:started kind:header_height key:header_height:100 hash: height:100 priority:1 retry:0 queue_wait_us:200000 total_us:0`,
 		`May  4 06:40:00.500 [INFO] header sync success. height:100 hash:0xaaa parent_hash:0xparent cost_us:100000`,
+		`May  4 06:40:00.800 [INFO] body sync start. height:100 hash:0xaaa valid_nodes:1 node_ids:1`,
 		`May  4 06:40:01.000 [INFO] body sync success. height:100 hash:0xaaa valid_nodes:1 node_ids:1 txs:1 cost_us:1000`,
+		`May  4 06:40:01.499 [INFO] store fullblock start. height:100 hash:0xaaa`,
 		`May  4 06:40:01.500 [INFO] store fullblock. height:100 hash:0xaaa block_id:1 message_id:1 txs:1 internal_txs:0 event_logs:0 erc20_events:0 erc721_events:0 erc1155_events:0 contracts:0 erc20_contracts:0 erc721_contracts:0 native_balances:0 erc20_balances:0 erc1155_balances:0 tokens_erc721:0 tasks:1 ready_cost:100µs block_row_cost:200µs data_cost:300µs finalize_cost:400µs total_cost:1ms`,
 		`May  4 06:40:02.000 [DEBUG] task lifecycle event action:enqueued kind:header_height key:header_height:101 hash: height:101 priority:1 retry:0 queue_wait_us:0 total_us:0`,
 		`May  4 06:40:02.300 [DEBUG] task lifecycle event action:started kind:header_height key:header_height:101 hash: height:101 priority:1 retry:0 queue_wait_us:300000 total_us:0`,
 		`May  4 06:40:02.500 [INFO] header sync success. height:101 hash:0xbbb parent_hash:0xparent cost_us:200000`,
+		`May  4 06:40:02.800 [INFO] body sync start. height:101 hash:0xbbb valid_nodes:1 node_ids:1`,
 		`May  4 06:40:03.000 [INFO] body sync success. height:101 hash:0xbbb valid_nodes:1 node_ids:1 txs:2 cost_us:2000`,
+		`May  4 06:40:04.998 [INFO] store fullblock start. height:101 hash:0xbbb`,
 		`May  4 06:40:05.000 [INFO] store fullblock. height:101 hash:0xbbb block_id:2 message_id:2 txs:2 internal_txs:0 event_logs:0 erc20_events:0 erc721_events:0 erc1155_events:0 contracts:0 erc20_contracts:0 erc721_contracts:0 native_balances:0 erc20_balances:0 erc1155_balances:0 tokens_erc721:0 tasks:1 ready_cost:100µs block_row_cost:200µs data_cost:300µs finalize_cost:400µs total_cost:2ms`,
 		`May  4 06:40:17.000 [DEBUG] task lifecycle event action:enqueued kind:body key:0xccc hash:0xccc height:0 priority:2 retry:0 queue_wait_us:0 total_us:0`,
 		`May  4 06:40:17.500 [INFO] header sync success. height:102 hash:0xccc parent_hash:0xparent cost_us:300000`,
+		`May  4 06:40:17.800 [INFO] body sync start. height:102 hash:0xccc valid_nodes:1 node_ids:1`,
 		`May  4 06:40:18.000 [INFO] body sync success. height:102 hash:0xccc valid_nodes:1 node_ids:1 txs:3 cost_us:3000`,
+		`May  4 06:40:18.997 [INFO] store fullblock start. height:102 hash:0xccc`,
 		`May  4 06:40:19.000 [INFO] store fullblock. height:102 hash:0xccc block_id:3 message_id:3 txs:3 internal_txs:0 event_logs:0 erc20_events:0 erc721_events:0 erc1155_events:0 contracts:0 erc20_contracts:0 erc721_contracts:0 native_balances:0 erc20_balances:0 erc1155_balances:0 tokens_erc721:0 tasks:1 ready_cost:100µs block_row_cost:200µs data_cost:300µs finalize_cost:400µs total_cost:3ms`,
 	}, "\n")), "sample.log", Options{
 		Now: time.Date(2026, 5, 5, 0, 0, 0, 0, time.Local),
@@ -189,19 +222,54 @@ func TestAnalyzeBuildsPerBlockProgressIntervals(t *testing.T) {
 	if len(report.BlockProgress) != 2 {
 		t.Fatalf("expected 2 block progress rows, got %d: %+v", len(report.BlockProgress), report.BlockProgress)
 	}
-	if len(report.BlockProgressOutliers) != 1 || report.BlockProgressOutliers[0].Height != 102 || report.BlockProgressOutliers[0].BodySyncGapUS != 15_000_000 {
+	if len(report.BlockProgressOutliers) != 1 || report.BlockProgressOutliers[0].Height != 102 || report.BlockProgressOutliers[0].TaskCreatedGapUS != 15_000_000 {
 		t.Fatalf("unexpected block progress outliers: %+v", report.BlockProgressOutliers)
 	}
 	second := report.BlockProgress[1]
-	if second.Height != 101 || !second.HasBodySyncGap || second.BodySyncGapUS != 2_000_000 || !second.HasStoreGap || second.StoreGapUS != 3_500_000 || second.BodyCostUS != 2000 || second.StoreTotalUS != 2000 {
+	if second.Height != 101 || !second.HasTaskCreatedGap || second.TaskCreatedGapUS != 2_000_000 {
 		t.Fatalf("unexpected second block progress row: %+v", second)
 	}
-	if report.BlockTiming.EndToEndSamples != 3 || report.BlockTiming.PrevStoreToTaskSamples != 2 || report.BlockTiming.AvgPrevStoreToTaskUS != 6_250_000 || report.BlockTiming.AvgFirstTaskToHeaderUS != 500_000 || report.BlockTiming.AvgHeaderToBodyUS != 500_000 || report.BlockTiming.AvgBodyToStoreUS != 1_166_666 || report.BlockTiming.AvgFirstTaskToStoreUS != 2_166_666 || report.BlockTiming.AvgTaskQueueWaitUS != 250_000 {
+	if report.BlockTiming.EndToEndSamples != 3 || report.BlockTiming.PrevStoreToTaskSamples != 2 || report.BlockTiming.AvgPrevStoreToTaskUS != 6_250_000 || report.BlockTiming.TaskToHeaderStartSamples != 2 || report.BlockTiming.AvgTaskToHeaderStartUS != 250_000 || report.BlockTiming.AvgHeaderSyncCostUS != 200_000 || report.BlockTiming.AvgHeaderToBodyStartUS != 300_000 || report.BlockTiming.AvgBodySyncCostUS != 2_000 || report.BlockTiming.AvgBodyToStoreStartUS != 1_164_666 || report.BlockTiming.AvgStoreCostUS != 2_000 || report.BlockTiming.AvgFirstTaskToStoreUS != 2_166_666 || report.BlockTiming.AvgTaskQueueWaitUS != 250_000 {
 		t.Fatalf("unexpected block timing stats: %+v", report.BlockTiming)
 	}
-	html := string(renderBlockProgressIntervalChart(report.BlockProgress))
-	if !strings.Contains(html, `class="line body-gap"`) || !strings.Contains(html, `class="line store-gap"`) || !strings.Contains(html, "Per-block sync and store intervals") {
-		t.Fatalf("block progress interval chart missing expected series: %s", html)
+	if len(report.BlockTimingPhases) != 9 || report.BlockTimingPhases[0].P95US != 12_000_000 {
+		t.Fatalf("unexpected block timing phase stats: %+v", report.BlockTimingPhases)
+	}
+	phaseChart := string(renderBlockTimingPhaseChart(pipelineTimingPhases(report.BlockTimingPhases)))
+	if strings.Contains(phaseChart, "Task Queue Wait") || strings.Contains(phaseChart, "Task Created -&gt; Store Done") || strings.Contains(phaseChart, "Task Created -> Store Done") {
+		t.Fatalf("timing phase chart should only render pipeline phases: %s", phaseChart)
+	}
+	if len(report.SlowBlockTimings) != 3 || report.SlowBlockTimings[0].Height != 101 {
+		t.Fatalf("unexpected slow block timing rows: %+v", report.SlowBlockTimings)
+	}
+	if len(report.BlockTimings) != 3 || report.BlockTimings[1].Height != 101 || report.BlockTimings[1].BodySyncUS != 2000 || report.BlockTimings[1].StoreUS != 2000 {
+		t.Fatalf("unexpected per-block timing rows: %+v", report.BlockTimings)
+	}
+	bodyDurationChart := string(renderBodySyncDurationChart(report.BlockTimings))
+	if !strings.Contains(bodyDurationChart, `class="line body-gap"`) || !strings.Contains(bodyDurationChart, "Per-block Body sync duration") {
+		t.Fatalf("body sync duration chart missing expected series: %s", bodyDurationChart)
+	}
+	bodyDurationChart = string(renderBodySyncDurationChart([]BlockTimingBlock{
+		{Height: 100, BodySyncUS: 2_000_000},
+		{Height: 101, BodySyncUS: 11_000_000},
+	}))
+	if strings.Contains(bodyDurationChart, "11.000s") || strings.Contains(bodyDurationChart, ">101<") {
+		t.Fatalf("body sync duration chart should exclude outliers above 10s: %s", bodyDurationChart)
+	}
+	taskToStoreDurationChart := string(renderTaskToStoreDurationChart(report.BlockTimings))
+	if !strings.Contains(taskToStoreDurationChart, `class="line end-to-end"`) || !strings.Contains(taskToStoreDurationChart, "Per-block Block duration") {
+		t.Fatalf("task-to-store duration chart missing expected series: %s", taskToStoreDurationChart)
+	}
+	taskToStoreDurationChart = string(renderTaskToStoreDurationChart([]BlockTimingBlock{
+		{Height: 100, FirstTaskToStoreUS: 2_000_000},
+		{Height: 101, FirstTaskToStoreUS: 11_000_000},
+	}))
+	if strings.Contains(taskToStoreDurationChart, "11.000s") || strings.Contains(taskToStoreDurationChart, ">101<") {
+		t.Fatalf("block duration chart should exclude outliers above 10s: %s", taskToStoreDurationChart)
+	}
+	storeDurationChart := string(renderStoreDurationChart(report.BlockTimings))
+	if !strings.Contains(storeDurationChart, `class="line store-gap"`) || !strings.Contains(storeDurationChart, "Per-block Store duration") {
+		t.Fatalf("store duration chart missing expected series: %s", storeDurationChart)
 	}
 
 	report.RuntimeSeries = []RuntimeSnapshot{{Time: time.Date(2026, 5, 5, 1, 2, 3, 0, time.Local), RemoteLatest: 103, BlocktreeEnd: 102, StoredHeight: 102}}
@@ -209,19 +277,94 @@ func TestAnalyzeBuildsPerBlockProgressIntervals(t *testing.T) {
 	if err := RenderHTML(&buf, report); err != nil {
 		t.Fatalf("RenderHTML() error = %v", err)
 	}
-	if !strings.Contains(buf.String(), "Time Distribution") || !strings.Contains(buf.String(), "Per-block Body sync interval") || !strings.Contains(buf.String(), "Per-block Store interval") {
-		t.Fatalf("rendered HTML should show split time distribution charts: %s", buf.String())
+	if !strings.Contains(buf.String(), "Time Distribution") || !strings.Contains(buf.String(), "Block Duration") || !strings.Contains(buf.String(), "Block duration") || !strings.Contains(buf.String(), "Block Body Sync Duration") || !strings.Contains(buf.String(), "Body sync duration") || !strings.Contains(buf.String(), "Block Store Duration") || !strings.Contains(buf.String(), "Store duration") {
+		t.Fatalf("rendered HTML should show duration charts: %s", buf.String())
 	}
-	if strings.Contains(buf.String(), "Body Sync Intervals") {
-		t.Fatalf("rendered HTML should not show body sync interval table: %s", buf.String())
+	if strings.Index(buf.String(), "Block Duration") > strings.Index(buf.String(), "Block Body Sync Duration") {
+		t.Fatalf("task-to-store duration chart should render before body sync duration chart: %s", buf.String())
 	}
-	if !strings.Contains(buf.String(), "Excluded interval outliers") {
-		t.Fatalf("rendered HTML should show excluded interval outliers: %s", buf.String())
+	if strings.Contains(buf.String(), "Per-Block Task Creation Intervals") || strings.Contains(buf.String(), "Task creation interval") || strings.Contains(buf.String(), "Excluded interval outliers") || strings.Contains(buf.String(), "Body Sync Intervals") || strings.Contains(buf.String(), "Per-block Body sync interval") || strings.Contains(buf.String(), "Per-block Store interval") {
+		t.Fatalf("rendered HTML should not show interval charts: %s", buf.String())
 	}
-	if !strings.Contains(buf.String(), "Block timing distribution by stage") || !strings.Contains(buf.String(), `class="bar stage-body"`) {
-		t.Fatalf("rendered HTML should show block timing distribution chart: %s", buf.String())
+	if strings.Contains(buf.String(), "Block Timing Overview") || strings.Contains(buf.String(), "Block timing overview with requested block time distribution") {
+		t.Fatalf("rendered HTML should not show block timing overview chart: %s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "Timing Phase Percentiles") || !strings.Contains(buf.String(), "Timing phase percentiles") || !strings.Contains(buf.String(), `class="bar phase-p95"`) {
+		t.Fatalf("rendered HTML should show timing phase percentile chart: %s", buf.String())
+	}
+	if strings.Contains(buf.String(), "Slowest Blocks") {
+		t.Fatalf("rendered HTML should not show slowest blocks table: %s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "Pipeline Phases") || !strings.Contains(buf.String(), "Scheduling And E2E") || !strings.Contains(buf.String(), "Task Queue Wait") || !strings.Contains(buf.String(), "Task Created -&gt; Store Done") {
+		t.Fatalf("rendered HTML should split pipeline phases from scheduling/e2e metrics: %s", buf.String())
+	}
+	if strings.Contains(buf.String(), `class="bar phase-max"`) || strings.Contains(buf.String(), `legend-item phase-max`) {
+		t.Fatalf("timing phase percentile chart should not render max bars: %s", buf.String())
 	}
 	if strings.Contains(buf.String(), "<th>Time</th><th>Remote</th><th>Nodes</th><th>BlockTree</th>") {
 		t.Fatalf("rendered HTML should not show runtime sampling table: %s", buf.String())
+	}
+}
+
+func TestBodySyncDurationOutliersBecomeAnomalies(t *testing.T) {
+	report, err := Analyze(strings.NewReader(strings.Join([]string{
+		`May  4 06:40:00.000 [DEBUG] task lifecycle event action:enqueued kind:body key:0xaaa hash:0xaaa height:0 priority:2 retry:0 queue_wait_us:0 total_us:0`,
+		`May  4 06:40:00.500 [INFO] header sync success. height:100 hash:0xaaa parent_hash:0xparent cost_us:1000`,
+		`May  4 06:40:01.000 [INFO] body sync start. height:100 hash:0xaaa valid_nodes:1 node_ids:1`,
+		`May  4 06:40:12.000 [INFO] body sync success. height:100 hash:0xaaa valid_nodes:1 node_ids:1 txs:1 cost_us:11000000`,
+	}, "\n")), "sample.log", Options{
+		Now: time.Date(2026, 5, 5, 0, 0, 0, 0, time.Local),
+	})
+	if err != nil {
+		t.Fatalf("Analyze() error = %v", err)
+	}
+	if len(report.BodySyncOutliers) != 1 || report.BodySyncOutliers[0].Height != 100 || report.BodySyncOutliers[0].BodySyncUS != 11_000_000 {
+		t.Fatalf("unexpected body sync outliers: %+v", report.BodySyncOutliers)
+	}
+	var found bool
+	for _, anomaly := range report.Anomalies {
+		if anomaly.Category == "block_body_sync_slow" && anomaly.Count == 1 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected body sync outlier anomaly: %+v", report.Anomalies)
+	}
+}
+
+func TestBlockDurationOutliersBecomeAnomalies(t *testing.T) {
+	report, err := Analyze(strings.NewReader(strings.Join([]string{
+		`May  4 06:40:00.000 [DEBUG] task lifecycle event action:enqueued kind:body key:0xaaa hash:0xaaa height:0 priority:2 retry:0 queue_wait_us:0 total_us:0`,
+		`May  4 06:40:00.500 [INFO] header sync success. height:100 hash:0xaaa parent_hash:0xparent cost_us:1000`,
+		`May  4 06:40:01.000 [INFO] body sync start. height:100 hash:0xaaa valid_nodes:1 node_ids:1`,
+		`May  4 06:40:01.100 [INFO] body sync success. height:100 hash:0xaaa valid_nodes:1 node_ids:1 txs:1 cost_us:100000`,
+		`May  4 06:40:12.000 [INFO] store fullblock start. height:100 hash:0xaaa`,
+		`May  4 06:40:12.100 [INFO] store fullblock. height:100 hash:0xaaa block_id:1 message_id:1 txs:1 internal_txs:0 event_logs:0 erc20_events:0 erc721_events:0 erc1155_events:0 contracts:0 erc20_contracts:0 erc721_contracts:0 native_balances:0 erc20_balances:0 erc1155_balances:0 tokens_erc721:0 tasks:1 ready_cost:100µs block_row_cost:200µs data_cost:300µs finalize_cost:400µs total_cost:1ms`,
+	}, "\n")), "sample.log", Options{
+		Now: time.Date(2026, 5, 5, 0, 0, 0, 0, time.Local),
+	})
+	if err != nil {
+		t.Fatalf("Analyze() error = %v", err)
+	}
+	if len(report.BlockDurationOutliers) != 1 || report.BlockDurationOutliers[0].Height != 100 || report.BlockDurationOutliers[0].FirstTaskToStoreUS != 12_100_000 {
+		t.Fatalf("unexpected block duration outliers: %+v", report.BlockDurationOutliers)
+	}
+	var found bool
+	for _, anomaly := range report.Anomalies {
+		if anomaly.Category == "block_duration_slow" && anomaly.Count == 1 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected block duration outlier anomaly: %+v", report.Anomalies)
+	}
+	var buf bytes.Buffer
+	if err := RenderHTML(&buf, report); err != nil {
+		t.Fatalf("RenderHTML() error = %v", err)
+	}
+	if !strings.Contains(buf.String(), "Excluded block duration outliers") || !strings.Contains(buf.String(), "Block Duration (ms)") {
+		t.Fatalf("rendered HTML should show block duration outliers: %s", buf.String())
 	}
 }

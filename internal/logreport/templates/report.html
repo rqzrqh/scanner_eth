@@ -129,6 +129,7 @@
     .legend-item.body-gap { color: #155eef; }
     .legend-item.store-gap { color: #087443; }
     .legend-item.failure { color: #f04438; }
+    .legend-item.prev-store { color: #98a2b3; }
     .legend-item.stage-header { color: #155eef; }
     .legend-item.stage-body { color: #f79009; }
     .legend-item.stage-store { color: #12b76a; }
@@ -137,6 +138,9 @@
     .legend-item.rpc-body { color: #f63d68; }
     .legend-item.store-write { color: #079455; }
     .legend-item.other-wait { color: #667085; }
+    .legend-item.phase-avg { color: #155eef; }
+    .legend-item.phase-p95 { color: #f79009; }
+    .legend-item.end-to-end { color: #7a5af8; }
     .progress-chart {
       display: block;
       width: 100%;
@@ -177,9 +181,11 @@
     .progress-chart .line.lag { stroke: #155eef; }
     .progress-chart .line.body-gap { stroke: #155eef; }
     .progress-chart .line.store-gap { stroke: #087443; }
+    .progress-chart .line.end-to-end { stroke: #7a5af8; }
     .progress-chart .line.cost { stroke: #155eef; }
     .progress-chart .bar.success { fill: #12b76a; }
     .progress-chart .bar.failure { fill: #f04438; }
+    .progress-chart .bar.prev-store { fill: #98a2b3; }
     .progress-chart .bar.stage-header { fill: #155eef; }
     .progress-chart .bar.stage-body { fill: #f79009; }
     .progress-chart .bar.stage-store { fill: #12b76a; }
@@ -188,6 +194,9 @@
     .progress-chart .bar.rpc-body { fill: #f63d68; }
     .progress-chart .bar.store-write { fill: #079455; }
     .progress-chart .bar.other-wait { fill: #667085; }
+    .progress-chart .bar.phase-avg { fill: #155eef; }
+    .progress-chart .bar.phase-p95 { fill: #f79009; }
+    .progress-chart .marker.mean { stroke: #344054; stroke-width: 2; stroke-dasharray: 2 4; }
     .progress-chart .marker.p95 { stroke: #b42318; stroke-width: 2; stroke-dasharray: 5 4; }
     .progress-chart .bar-label { fill: #ffffff; font-size: 12px; font-weight: 700; }
     .progress-chart .point.cost { fill: #155eef; }
@@ -221,7 +230,8 @@
   </section>
 
   <section class="card section">
-    <h2>Sync Progress</h2>
+    <h2>Sync Overview</h2>
+    <h3>Sync Progress</h3>
     {{if .RuntimeSeries}}
     <div class="chart-wrap">
       <div class="legend">
@@ -241,78 +251,7 @@
   </section>
 
   <section class="card section">
-    <h2>Time Distribution</h2>
-    {{if or .BlockTiming.Blocks .BlockProgress}}
-    <h3>Block Timing Distribution</h3>
-    {{if .BlockTiming.Blocks}}
-    <p class="muted">Per-block timing is correlated by task height/hash, header sync, body sync, and full-block store logs. Stage durations include waiting between stages; direct RPC/store costs are listed separately.</p>
-    <div class="chart-wrap">
-      <div class="legend">
-        <span class="legend-item stage-header">First task -> header</span>
-        <span class="legend-item stage-body">Header -> body</span>
-        <span class="legend-item stage-store">Body -> store</span>
-        <span class="legend-item task-queue">Task queue</span>
-        <span class="legend-item rpc-header">Header RPC</span>
-        <span class="legend-item rpc-body">Body RPC</span>
-        <span class="legend-item store-write">Store write</span>
-        <span class="legend-item other-wait">Other wait</span>
-      </div>
-      {{blockTimingChart .BlockTiming}}
-    </div>
-    <table>
-      <thead><tr><th>Blocks Seen</th><th>E2E Samples</th><th>Avg Prev Store -> Task (ms)</th><th>Avg First Task -> Header (ms)</th><th>Avg Header -> Body (ms)</th><th>Avg Body -> Store (ms)</th><th>Avg First Task -> Store (ms)</th><th>P95 E2E (ms)</th><th>Max E2E (ms)</th><th>Avg Task Queue Wait (ms)</th><th>Avg Header RPC (ms)</th><th>Avg Body RPC (ms)</th><th>Avg Store Write (ms)</th><th>Avg Other Wait (ms)</th></tr></thead>
-      <tbody>
-        <tr><td>{{.BlockTiming.Blocks}}</td><td>{{.BlockTiming.EndToEndSamples}}</td><td>{{microsToMillis .BlockTiming.AvgPrevStoreToTaskUS}}</td><td>{{microsToMillis .BlockTiming.AvgFirstTaskToHeaderUS}}</td><td>{{microsToMillis .BlockTiming.AvgHeaderToBodyUS}}</td><td>{{microsToMillis .BlockTiming.AvgBodyToStoreUS}}</td><td>{{microsToMillis .BlockTiming.AvgFirstTaskToStoreUS}}</td><td>{{microsToMillis .BlockTiming.P95FirstTaskToStoreUS}}</td><td>{{microsToMillis .BlockTiming.MaxFirstTaskToStoreUS}}</td><td>{{microsToMillis .BlockTiming.AvgTaskQueueWaitUS}}</td><td>{{microsToMillis .BlockTiming.AvgHeaderSyncCostUS}}</td><td>{{microsToMillis .BlockTiming.AvgBodySyncCostUS}}</td><td>{{microsToMillis .BlockTiming.AvgFullBlockStoreCostUS}}</td><td>{{microsToMillis .BlockTiming.AvgUnattributedOverheadUS}}</td></tr>
-      </tbody>
-    </table>
-    <p class="muted">Samples: prev_store_to_task={{.BlockTiming.PrevStoreToTaskSamples}}, header={{.BlockTiming.HeaderStageSamples}}, body={{.BlockTiming.BodyStageSamples}}, store={{.BlockTiming.StoreStageSamples}}, task_queue={{.BlockTiming.TaskQueueSamples}}</p>
-    {{else}}<div class="empty">No block timing data.</div>{{end}}
-    <h3>Per-Block Sync And Store Intervals</h3>
-    {{if .BlockProgress}}
-    <p class="muted">Intervals above 10s are excluded from these charts and listed below.</p>
-    <div class="chart-wrap">
-      <div class="legend">
-        <span class="legend-item body-gap">Body sync interval</span>
-      </div>
-      {{bodySyncIntervalChart .BlockProgress}}
-    </div>
-    <div class="chart-wrap">
-      <div class="legend">
-        <span class="legend-item store-gap">Store interval</span>
-      </div>
-      {{storeIntervalChart .BlockProgress}}
-    </div>
-    {{if .BlockProgressOutliers}}
-    <p class="muted">Excluded interval outliers:</p>
-    <div class="split-tables">
-      <div>
-        <table>
-          <thead><tr><th>Height</th><th>Hash</th><th>Body Synced At</th><th>Body Gap</th></tr></thead>
-          <tbody>
-          {{range .BlockProgressOutliers}}
-            <tr><td>{{.Height}}</td><td class="wrap"><code>{{.Hash}}</code></td><td>{{formatClock .BodySyncedAt}}</td><td>{{if .HasBodySyncGap}}{{formatSignedMicros .BodySyncGapUS}}{{else}}n/a{{end}}</td></tr>
-          {{end}}
-          </tbody>
-        </table>
-      </div>
-      <div>
-        <table>
-          <thead><tr><th>Height</th><th>Hash</th><th>Stored At</th><th>Store Gap</th></tr></thead>
-          <tbody>
-          {{range .BlockProgressOutliers}}
-            <tr><td>{{.Height}}</td><td class="wrap"><code>{{.Hash}}</code></td><td>{{formatClock .StoredAt}}</td><td>{{if .HasStoreGap}}{{formatSignedMicros .StoreGapUS}}{{else}}n/a{{end}}</td></tr>
-          {{end}}
-          </tbody>
-        </table>
-      </div>
-    </div>
-    {{end}}
-    {{else}}<div class="empty">No per-block sync/store interval data.</div>{{end}}
-    {{else}}<div class="empty">No time distribution data.</div>{{end}}
-  </section>
-
-  <section class="card section">
-    <h2>Node Stats</h2>
+    <h2>Node Request Overview</h2>
     {{if .Nodes}}
     <div class="chart-wrap">
       <div class="legend">
@@ -331,10 +270,149 @@
       </tbody>
     </table>
     {{else}}<div class="empty">No node request data.</div>{{end}}
+    <h3>Sync Node Remote Interface Duration</h3>
+    {{if .NodeOperatorMethods}}
+    <p class="muted">Remote interface timing by request type. Each row shows the node cost ratio for that request.</p>
+    <div class="chart-wrap">
+      {{syncNodeOperatorChart .NodeOperatorMethods}}
+    </div>
+    <table>
+      <thead><tr><th>Node</th><th>Method</th><th>Calls</th><th>Total Cost (ms)</th><th>Avg Cost (ms)</th><th>Max Cost (ms)</th><th>Array Samples</th><th>Total Array Items</th><th>Avg Array Items</th><th>Max Array Items</th></tr></thead>
+      <tbody>
+      {{range .NodeOperatorMethods}}
+        <tr><td>{{.NodeID}}</td><td>{{.Method}}</td><td>{{.Calls}}</td><td>{{microsToMillis .TotalCostUS}}</td><td>{{microsToMillis .AvgCostUS}}</td><td>{{microsToMillis .MaxCostUS}}</td><td>{{.ArraySamples}}</td><td>{{.ArrayItemsTotal}}</td><td>{{.AvgArrayItems}}</td><td>{{.MaxArrayItems}}</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{else}}<div class="empty">No sync node remote interface timing data.</div>{{end}}
   </section>
 
   <section class="card section">
-    <h2>RPC Method Stats</h2>
+    <h2>Time Distribution</h2>
+    {{if or .BlockTiming.Blocks .BlockProgress}}
+    {{if .BlockTiming.Blocks}}
+    {{if .BlockTimingPhases}}
+    <h3>Timing Phase Percentiles</h3>
+    <p class="muted">Each phase shows average and p95 duration on the same time scale. Longer bars identify the phases that dominate end-to-end latency.</p>
+    <div class="chart-wrap">
+      <div class="legend">
+        <span class="legend-item phase-avg">Avg</span>
+        <span class="legend-item phase-p95">P95</span>
+      </div>
+      {{blockTimingPhaseChart (pipelineTimingPhases .BlockTimingPhases)}}
+    </div>
+    <div class="split-tables">
+      <div>
+        <h3>Pipeline Phases</h3>
+        <table>
+          <thead><tr><th>Phase</th><th>Samples</th><th>Avg (ms)</th><th>P95 (ms)</th><th>Max (ms)</th></tr></thead>
+          <tbody>
+          {{range pipelineTimingPhases .BlockTimingPhases}}
+            <tr><td>{{.Name}}</td><td>{{.Samples}}</td><td>{{microsToMillis .AvgUS}}</td><td>{{microsToMillis .P95US}}</td><td>{{microsToMillis .MaxUS}}</td></tr>
+          {{end}}
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <h3>Scheduling And E2E</h3>
+        <table>
+          <thead><tr><th>Metric</th><th>Samples</th><th>Avg (ms)</th><th>P95 (ms)</th><th>Max (ms)</th></tr></thead>
+          <tbody>
+          {{range summaryTimingPhases .BlockTimingPhases}}
+            <tr><td>{{.Name}}</td><td>{{.Samples}}</td><td>{{microsToMillis .AvgUS}}</td><td>{{microsToMillis .P95US}}</td><td>{{microsToMillis .MaxUS}}</td></tr>
+          {{end}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {{end}}
+    {{else}}<div class="empty">No block timing data.</div>{{end}}
+    <h3>Block Duration</h3>
+    {{if .BlockTimings}}
+    <p class="muted">Duration from the first task creation for each block to the final store completion, ordered by block height. Durations above 10s are excluded from the chart and listed below.</p>
+    <div class="chart-wrap">
+      <div class="legend">
+        <span class="legend-item end-to-end">Block duration</span>
+      </div>
+      {{taskToStoreDurationChart .BlockTimings}}
+    </div>
+    {{if .BlockDurationOutliers}}
+    <p class="muted">Excluded block duration outliers (&gt;10s):</p>
+    <table>
+      <thead><tr><th>Height</th><th>Hash</th><th>Block Duration (ms)</th></tr></thead>
+      <tbody>
+      {{range .BlockDurationOutliers}}
+        <tr><td>{{.Height}}</td><td class="wrap"><code>{{.Hash}}</code></td><td>{{microsToMillis .FirstTaskToStoreUS}}</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{end}}
+    {{else}}<div class="empty">No per-block task-to-store duration data.</div>{{end}}
+    <h3>Block Body Sync Duration</h3>
+    {{if .BlockTimings}}
+    <p class="muted">Body sync cost for each block, ordered by block height.</p>
+    <div class="chart-wrap">
+      <div class="legend">
+        <span class="legend-item body-gap">Body sync duration</span>
+      </div>
+      {{bodySyncDurationChart .BlockTimings}}
+    </div>
+    {{if .BodySyncOutliers}}
+    <p class="muted">Excluded body sync duration outliers (&gt;10s):</p>
+    <table>
+      <thead><tr><th>Height</th><th>Hash</th><th>Body Sync (ms)</th></tr></thead>
+      <tbody>
+      {{range .BodySyncOutliers}}
+        <tr><td>{{.Height}}</td><td class="wrap"><code>{{.Hash}}</code></td><td>{{microsToMillis .BodySyncUS}}</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{end}}
+    {{else}}<div class="empty">No per-block body sync duration data.</div>{{end}}
+    <h3>Block Store Duration</h3>
+    {{if .BlockTimings}}
+    <p class="muted">Store write cost for each block, ordered by block height.</p>
+    <div class="chart-wrap">
+      <div class="legend">
+        <span class="legend-item store-gap">Store duration</span>
+      </div>
+      {{storeDurationChart .BlockTimings}}
+    </div>
+    {{else}}<div class="empty">No per-block store duration data.</div>{{end}}
+    {{else}}<div class="empty">No time distribution data.</div>{{end}}
+  </section>
+
+  <section class="card section">
+    <h2>Sync Detail</h2>
+    <h3>Header Sync</h3>
+    <table>
+      <thead><tr><th>Started</th><th>Success</th><th>Failure</th><th>Success Rate</th><th>Avg Cost (ms)</th><th>Max Cost (ms)</th><th>Last Height</th><th>Last Hash</th></tr></thead>
+      <tbody>
+        <tr><td>{{.HeaderSync.Started}}</td><td>{{.HeaderSync.Succeeded}}</td><td>{{.HeaderSync.Failed}}</td><td>{{.HeaderSync.SuccessRate}}</td><td>{{microsToMillis .HeaderSync.AvgCostUS}}</td><td>{{microsToMillis .HeaderSync.MaxCostUS}}</td><td>{{.HeaderSync.LastHeight}}</td><td class="wrap">{{.HeaderSync.LastHash}}</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Body Sync</h3>
+    <table>
+      <thead><tr><th>Started</th><th>Success</th><th>Failure</th><th>Success Rate</th><th>Avg Cost (ms)</th><th>Max Cost (ms)</th><th>Avg Txs</th><th>Last Height</th><th>Last Hash</th></tr></thead>
+      <tbody>
+        <tr><td>{{.BodySync.Started}}</td><td>{{.BodySync.Succeeded}}</td><td>{{.BodySync.Failed}}</td><td>{{.BodySync.SuccessRate}}</td><td>{{microsToMillis .BodySync.AvgCostUS}}</td><td>{{microsToMillis .BodySync.MaxCostUS}}</td><td>{{.BodySync.AvgTxs}}</td><td>{{.BodySync.LastHeight}}</td><td class="wrap">{{.BodySync.LastHash}}</td></tr>
+      </tbody>
+    </table>
+    {{if .BodyItems}}
+    <h3>Body Sync Flow Duration</h3>
+    <p class="muted">Per-flow body sync cost, including fetch, parse, attach, and build steps.</p>
+    <table>
+      <thead><tr><th>Flow</th><th>Blocks</th><th>Items</th><th>Total Cost (ms)</th><th>Avg Block Cost (ms)</th><th>Avg Item Cost (ms)</th><th>Max Cost (ms)</th><th>Last Height</th><th>Last Hash</th></tr></thead>
+      <tbody>
+      {{range .BodyItems}}
+        <tr><td>{{.Item}}</td><td>{{.Blocks}}</td><td>{{.Items}}</td><td>{{microsToMillis .TotalCostUS}}</td><td>{{microsToMillis .AvgCostUS}}</td><td>{{microsToMillis .AvgItemCostUS}}</td><td>{{microsToMillis .MaxCostUS}}</td><td>{{.LastHeight}}</td><td class="wrap">{{.LastHash}}</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{end}}
+
+    <h3>RPC Method Details</h3>
     {{if .Methods}}
     <table>
       <thead><tr><th>Method</th><th>Requests</th><th>Success</th><th>Failure</th><th>Retries</th><th>Failure Rate</th><th>Avg Cost (ms)</th><th>Max Cost (ms)</th></tr></thead>
@@ -345,48 +423,34 @@
       </tbody>
     </table>
     {{else}}<div class="empty">No RPC method data.</div>{{end}}
+
   </section>
 
   <section class="card section">
-    <h2>NodeOperator Method Stats</h2>
-    {{if .NodeOperatorMethods}}
+    <h2>Store Detail</h2>
     <table>
-      <thead><tr><th>Node</th><th>Method</th><th>Calls</th><th>Total Cost (ms)</th><th>Avg Cost (ms)</th><th>Max Cost (ms)</th><th>Array Samples</th><th>Total Array Items</th><th>Avg Array Items</th><th>Max Array Items</th></tr></thead>
+      <thead><tr><th>Submitted</th><th>Success</th><th>Failure</th><th>Skipped</th><th>Canceled</th><th>Success Rate</th><th>Missing Body</th><th>Parent Not Ready</th><th>DB Failures</th><th>Queue</th><th>Avg Store (ms)</th><th>Max Store (ms)</th><th>Last Store (ms)</th></tr></thead>
       <tbody>
-      {{range .NodeOperatorMethods}}
-        <tr><td>{{.NodeID}}</td><td>{{.Method}}</td><td>{{.Calls}}</td><td>{{microsToMillis .TotalCostUS}}</td><td>{{microsToMillis .AvgCostUS}}</td><td>{{microsToMillis .MaxCostUS}}</td><td>{{.ArraySamples}}</td><td>{{.ArrayItemsTotal}}</td><td>{{.AvgArrayItems}}</td><td>{{.MaxArrayItems}}</td></tr>
+        <tr><td>{{.Store.Submitted}}</td><td>{{.Store.Succeeded}}</td><td>{{.Store.Failed}}</td><td>{{.Store.Skipped}}</td><td>{{.Store.Canceled}}</td><td>{{.Store.SuccessRate}}</td><td>{{.Store.SkippedMissingBody}}</td><td>{{.Store.SkippedParentNotReady}}</td><td>{{.Store.FailedDB}}</td><td>{{.Store.QueuePending}}</td><td>{{microsToMillis .Store.DurationAvgUS}}</td><td>{{microsToMillis .Store.DurationMaxUS}}</td><td>{{microsToMillis .Store.DurationLastUS}}</td></tr>
+      </tbody>
+    </table>
+    {{if .StoreDataTypes}}
+    <h3>Store Data Type Duration</h3>
+    <table>
+      <thead><tr><th>Data Type</th><th>Writes</th><th>Tasks</th><th>Failures</th><th>Retries</th><th>Total Cost (ms)</th><th>Avg Task Cost (ms)</th><th>Avg Write Cost (ms)</th><th>Max Task Cost (ms)</th><th>Avg Failed Cost (ms)</th><th>Max Failed Cost (ms)</th></tr></thead>
+      <tbody>
+      {{range .StoreDataTypes}}
+        <tr><td>{{.Type}}</td><td>{{.Writes}}</td><td>{{.Tasks}}</td><td>{{.Failures}}</td><td>{{.RetriedAttempts}}</td><td>{{microsToMillis .TotalCostUS}}</td><td>{{microsToMillis .AvgCostUS}}</td><td>{{microsToMillis .AvgWriteCostUS}}</td><td>{{microsToMillis .MaxCostUS}}</td><td>{{microsToMillis .AvgFailedCostUS}}</td><td>{{microsToMillis .MaxFailedCostUS}}</td></tr>
       {{end}}
       </tbody>
     </table>
-    {{else}}<div class="empty">No NodeOperator method timing data.</div>{{end}}
-  </section>
-
-  <section class="card section">
-    <h2>Header Sync</h2>
+    {{end}}
+    {{if .FullBlockStore.Count}}
+    <h3>FullBlock Store Duration</h3>
     <table>
-      <thead><tr><th>Started</th><th>Success</th><th>Failure</th><th>Success Rate</th><th>Avg Cost (ms)</th><th>Max Cost (ms)</th><th>Last Height</th><th>Last Hash</th></tr></thead>
+      <thead><tr><th>Count</th><th>Avg Total (ms)</th><th>P95 Total (ms)</th><th>Max Total (ms)</th><th>Avg Data (ms)</th><th>Max Data (ms)</th><th>Avg Finalize (ms)</th><th>Max Finalize (ms)</th><th>Avg Ready (ms)</th><th>Avg Block Row (ms)</th></tr></thead>
       <tbody>
-        <tr><td>{{.HeaderSync.Started}}</td><td>{{.HeaderSync.Succeeded}}</td><td>{{.HeaderSync.Failed}}</td><td>{{.HeaderSync.SuccessRate}}</td><td>{{microsToMillis .HeaderSync.AvgCostUS}}</td><td>{{microsToMillis .HeaderSync.MaxCostUS}}</td><td>{{.HeaderSync.LastHeight}}</td><td class="wrap">{{.HeaderSync.LastHash}}</td></tr>
-      </tbody>
-    </table>
-  </section>
-
-  <section class="card section">
-    <h2>Body Sync</h2>
-    <table>
-      <thead><tr><th>Started</th><th>Success</th><th>Failure</th><th>Success Rate</th><th>Avg Cost (ms)</th><th>Max Cost (ms)</th><th>Avg Txs</th><th>Last Height</th><th>Last Hash</th></tr></thead>
-      <tbody>
-        <tr><td>{{.BodySync.Started}}</td><td>{{.BodySync.Succeeded}}</td><td>{{.BodySync.Failed}}</td><td>{{.BodySync.SuccessRate}}</td><td>{{microsToMillis .BodySync.AvgCostUS}}</td><td>{{microsToMillis .BodySync.MaxCostUS}}</td><td>{{.BodySync.AvgTxs}}</td><td>{{.BodySync.LastHeight}}</td><td class="wrap">{{.BodySync.LastHash}}</td></tr>
-      </tbody>
-    </table>
-    {{if .BodyItems}}
-    <h3>Body Item Duration</h3>
-    <table>
-      <thead><tr><th>Item</th><th>Blocks</th><th>Items</th><th>Total Cost (ms)</th><th>Avg Block Cost (ms)</th><th>Avg Item Cost (ms)</th><th>Max Cost (ms)</th><th>Last Height</th><th>Last Hash</th></tr></thead>
-      <tbody>
-      {{range .BodyItems}}
-        <tr><td>{{.Item}}</td><td>{{.Blocks}}</td><td>{{.Items}}</td><td>{{microsToMillis .TotalCostUS}}</td><td>{{microsToMillis .AvgCostUS}}</td><td>{{microsToMillis .AvgItemCostUS}}</td><td>{{microsToMillis .MaxCostUS}}</td><td>{{.LastHeight}}</td><td class="wrap">{{.LastHash}}</td></tr>
-      {{end}}
+        <tr><td>{{.FullBlockStore.Count}}</td><td>{{microsToMillis .FullBlockStore.AvgTotalUS}}</td><td>{{microsToMillis .FullBlockStore.P95TotalUS}}</td><td>{{microsToMillis .FullBlockStore.MaxTotalUS}}</td><td>{{microsToMillis .FullBlockStore.AvgDataUS}}</td><td>{{microsToMillis .FullBlockStore.MaxDataUS}}</td><td>{{microsToMillis .FullBlockStore.AvgFinalizeUS}}</td><td>{{microsToMillis .FullBlockStore.MaxFinalizeUS}}</td><td>{{microsToMillis .FullBlockStore.AvgReadyUS}}</td><td>{{microsToMillis .FullBlockStore.AvgBlockRowUS}}</td></tr>
       </tbody>
     </table>
     {{end}}
@@ -430,47 +494,6 @@
       </tbody>
     </table>
     {{else}}<div class="empty">No scan stage data.</div>{{end}}
-  </section>
-
-  <section class="card section">
-    <h2>Store</h2>
-    <table>
-      <thead><tr><th>Submitted</th><th>Success</th><th>Failure</th><th>Skipped</th><th>Canceled</th><th>Success Rate</th><th>Missing Body</th><th>Parent Not Ready</th><th>DB Failures</th><th>Queue</th><th>Avg Store (ms)</th><th>Max Store (ms)</th><th>Last Store (ms)</th></tr></thead>
-      <tbody>
-        <tr><td>{{.Store.Submitted}}</td><td>{{.Store.Succeeded}}</td><td>{{.Store.Failed}}</td><td>{{.Store.Skipped}}</td><td>{{.Store.Canceled}}</td><td>{{.Store.SuccessRate}}</td><td>{{.Store.SkippedMissingBody}}</td><td>{{.Store.SkippedParentNotReady}}</td><td>{{.Store.FailedDB}}</td><td>{{.Store.QueuePending}}</td><td>{{microsToMillis .Store.DurationAvgUS}}</td><td>{{microsToMillis .Store.DurationMaxUS}}</td><td>{{microsToMillis .Store.DurationLastUS}}</td></tr>
-      </tbody>
-    </table>
-    {{if .StoreDataTypes}}
-    <h3>Store Data Type Duration</h3>
-    <table>
-      <thead><tr><th>Data Type</th><th>Writes</th><th>Tasks</th><th>Failures</th><th>Retries</th><th>Total Cost (ms)</th><th>Avg Task Cost (ms)</th><th>Avg Write Cost (ms)</th><th>Max Task Cost (ms)</th><th>Avg Failed Cost (ms)</th><th>Max Failed Cost (ms)</th></tr></thead>
-      <tbody>
-      {{range .StoreDataTypes}}
-        <tr><td>{{.Type}}</td><td>{{.Writes}}</td><td>{{.Tasks}}</td><td>{{.Failures}}</td><td>{{.RetriedAttempts}}</td><td>{{microsToMillis .TotalCostUS}}</td><td>{{microsToMillis .AvgCostUS}}</td><td>{{microsToMillis .AvgWriteCostUS}}</td><td>{{microsToMillis .MaxCostUS}}</td><td>{{microsToMillis .AvgFailedCostUS}}</td><td>{{microsToMillis .MaxFailedCostUS}}</td></tr>
-      {{end}}
-      </tbody>
-    </table>
-    {{end}}
-    {{if .FullBlockStore.Count}}
-    <h3>FullBlock Store Duration</h3>
-    <table>
-      <thead><tr><th>Count</th><th>Avg Total (ms)</th><th>P95 Total (ms)</th><th>Max Total (ms)</th><th>Avg Data (ms)</th><th>Max Data (ms)</th><th>Avg Finalize (ms)</th><th>Max Finalize (ms)</th><th>Avg Ready (ms)</th><th>Avg Block Row (ms)</th></tr></thead>
-      <tbody>
-        <tr><td>{{.FullBlockStore.Count}}</td><td>{{microsToMillis .FullBlockStore.AvgTotalUS}}</td><td>{{microsToMillis .FullBlockStore.P95TotalUS}}</td><td>{{microsToMillis .FullBlockStore.MaxTotalUS}}</td><td>{{microsToMillis .FullBlockStore.AvgDataUS}}</td><td>{{microsToMillis .FullBlockStore.MaxDataUS}}</td><td>{{microsToMillis .FullBlockStore.AvgFinalizeUS}}</td><td>{{microsToMillis .FullBlockStore.MaxFinalizeUS}}</td><td>{{microsToMillis .FullBlockStore.AvgReadyUS}}</td><td>{{microsToMillis .FullBlockStore.AvgBlockRowUS}}</td></tr>
-      </tbody>
-    </table>
-    {{end}}
-    {{if .BlockStoreDurations}}
-    <h3>Per-Block Store Duration</h3>
-    <table>
-      <thead><tr><th>Height</th><th>Hash</th><th>Stored At</th><th>Total (ms)</th><th>Ready (ms)</th><th>Block Row (ms)</th><th>Data (ms)</th><th>Finalize (ms)</th></tr></thead>
-      <tbody>
-      {{range .BlockStoreDurations}}
-        <tr><td>{{.Height}}</td><td class="wrap"><code>{{.Hash}}</code></td><td>{{formatClock .StoredAt}}</td><td>{{microsToMillis .TotalUS}}</td><td>{{microsToMillis .ReadyUS}}</td><td>{{microsToMillis .BlockRowUS}}</td><td>{{microsToMillis .DataUS}}</td><td>{{microsToMillis .FinalizeUS}}</td></tr>
-      {{end}}
-      </tbody>
-    </table>
-    {{end}}
   </section>
 
   <section class="card section">

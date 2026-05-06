@@ -45,6 +45,11 @@ type Report struct {
 	RuntimeLatest         RuntimeSnapshot
 	RuntimeSeries         []RuntimeSnapshot
 	BlockTiming           BlockTimingStats
+	BlockTimingPhases     []BlockTimingPhaseStats
+	BlockTimings          []BlockTimingBlock
+	BlockDurationOutliers []BlockTimingBlock
+	BodySyncOutliers      []BlockTimingBlock
+	SlowBlockTimings      []BlockTimingBlock
 	BlockStoreDurations   []BlockStoreDuration
 	BlockProgress         []BlockProgressInterval
 	BlockProgressOutliers []BlockProgressInterval
@@ -286,44 +291,98 @@ type RuntimeSnapshot struct {
 }
 
 type BlockProgressInterval struct {
-	Height         uint64
-	Hash           string
-	BodySyncedAt   time.Time
-	HasBodySyncGap bool
-	BodySyncGapUS  int64
-	BodyCostUS     uint64
-	StoredAt       time.Time
-	HasStoreGap    bool
-	StoreGapUS     int64
-	StoreTotalUS   uint64
+	Height            uint64
+	Hash              string
+	TaskCreatedAt     time.Time
+	HasTaskCreatedGap bool
+	TaskCreatedGapUS  int64
 }
 
 type BlockTimingStats struct {
 	Blocks                    uint64
 	PrevStoreToTaskSamples    uint64
+	TaskToHeaderStartSamples  uint64
 	HeaderStageSamples        uint64
+	HeaderToBodyStartSamples  uint64
 	BodyStageSamples          uint64
+	BodySyncCostSamples       uint64
 	StoreStageSamples         uint64
+	BodyToStoreStartSamples   uint64
+	StoreCostSamples          uint64
 	EndToEndSamples           uint64
 	TaskQueueSamples          uint64
 	AvgPrevStoreToTaskUS      uint64
-	AvgFirstTaskToHeaderUS    uint64
-	AvgHeaderToBodyUS         uint64
-	AvgBodyToStoreUS          uint64
+	AvgTaskToHeaderStartUS    uint64
+	AvgHeaderToBodyStartUS    uint64
+	AvgBodyToStoreStartUS     uint64
 	AvgFirstTaskToStoreUS     uint64
 	P95FirstTaskToStoreUS     uint64
 	MaxFirstTaskToStoreUS     uint64
 	AvgTaskQueueWaitUS        uint64
 	AvgHeaderSyncCostUS       uint64
 	AvgBodySyncCostUS         uint64
-	AvgFullBlockStoreCostUS   uint64
+	AvgStoreCostUS            uint64
 	AvgUnattributedOverheadUS uint64
+}
+
+type BlockTimingPhaseStats struct {
+	Name    string
+	Samples uint64
+	AvgUS   uint64
+	P95US   uint64
+	MaxUS   uint64
+}
+
+type BlockTimingBlock struct {
+	Height              uint64
+	Hash                string
+	PrevStoreToTaskUS   uint64
+	TaskToHeaderStartUS uint64
+	HeaderSyncUS        uint64
+	HeaderToBodyStartUS uint64
+	BodySyncUS          uint64
+	BodyToStoreStartUS  uint64
+	StoreUS             uint64
+	FirstTaskToStoreUS  uint64
 }
 
 type blockTimingSegment struct {
 	Label string
 	Class string
 	Value uint64
+}
+
+type blockTimingAccumulator struct {
+	name   string
+	total  uint64
+	values []uint64
+	max    uint64
+}
+
+func (a *blockTimingAccumulator) add(value uint64) {
+	a.total += value
+	a.values = append(a.values, value)
+	if value > a.max {
+		a.max = value
+	}
+}
+
+func (a blockTimingAccumulator) samples() uint64 {
+	return uint64(len(a.values))
+}
+
+func (a blockTimingAccumulator) avg() uint64 {
+	return averageUint(a.total, a.samples())
+}
+
+func (a blockTimingAccumulator) stats() BlockTimingPhaseStats {
+	return BlockTimingPhaseStats{
+		Name:    a.name,
+		Samples: a.samples(),
+		AvgUS:   a.avg(),
+		P95US:   percentile95(a.values),
+		MaxUS:   a.max,
+	}
 }
 
 type BlockStoreDuration struct {
@@ -367,10 +426,13 @@ type blockProgressEvent struct {
 	Height               uint64
 	Hash                 string
 	FirstTaskCreatedAt   time.Time
+	HeaderSyncStartedAt  time.Time
 	HeaderSyncedAt       time.Time
 	HeaderCostUS         uint64
+	BodySyncStartedAt    time.Time
 	BodySyncedAt         time.Time
 	BodyCostUS           uint64
+	StoreStartedAt       time.Time
 	StoredAt             time.Time
 	StoreTotalUS         uint64
 	TaskQueueWaitTotalUS uint64
@@ -408,6 +470,28 @@ type nodeOperatorMethodWindow struct {
 	samples uint64
 	first   nodeOperatorMethodSnapshot
 	last    nodeOperatorMethodSnapshot
+}
+
+type bodySyncNodeChartSegment struct {
+	Method string
+	Value  uint64
+}
+
+type bodySyncNodeChartRow struct {
+	NodeID   int
+	TotalUS  uint64
+	Segments []bodySyncNodeChartSegment
+}
+
+type syncNodeChartSegment struct {
+	NodeID int
+	Value  uint64
+}
+
+type syncNodeChartRow struct {
+	Method   string
+	TotalUS  uint64
+	Segments []syncNodeChartSegment
 }
 
 type taskPoolSnapshot struct {
@@ -448,7 +532,11 @@ type storeWindow struct {
 	last    storeSnapshot
 }
 
-const blockProgressIntervalOutlierUS = int64(10 * time.Second / time.Microsecond)
+const (
+	blockProgressIntervalOutlierUS = int64(10 * time.Second / time.Microsecond)
+	blockDurationOutlierUS         = uint64(10 * time.Second / time.Microsecond)
+	bodySyncDurationOutlierUS      = uint64(10 * time.Second / time.Microsecond)
+)
 
 var (
 	ansiRE               = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -470,6 +558,7 @@ var (
 	bodySyncFailedRE     = regexp.MustCompile(`body sync failed\. height:(\d+) hash:([^ ]+) valid_nodes:(\d+) node_ids:[^ ]* cost_us:(\d+)`)
 	bodyNoValidNodesRE   = regexp.MustCompile(`body sync no valid nodes\. height:(\d+) hash:([^ ]+)`)
 	bodyItemCostRE       = regexp.MustCompile(`fetch full block item cost\. height:(\d+) hash:([^ ]+) item:([^ ]+) count:(\d+) cost_us:(\d+)`)
+	storeBlockStartRE    = regexp.MustCompile(`store fullblock start\. height:(\d+)(?: hash:([^ ]+))?`)
 	storedBlockRE        = regexp.MustCompile(`store fullblock\. height:(\d+)(?: hash:([^ ]+))?`)
 	storeDataTypeRE      = regexp.MustCompile(`store data type success\. type:([^ ]+) rows:(\d+) .*? cost:([^ ]+)`)
 	storeDataTypeFailRE  = regexp.MustCompile(`store failed err:.*? height:(\d+) type:([^ ]+) task_id:[^ ]+ try_count:(\d+) cost:([^ ]+)`)
@@ -609,6 +698,8 @@ func (a *analyzer) parseLine(line string, ts time.Time) bool {
 		return a.parseStoreDataType(line)
 	case strings.Contains(line, "store failed err:"):
 		return a.parseStoreDataTypeFailure(line)
+	case strings.Contains(line, "store fullblock start. height:"):
+		return a.parseStoreBlockStart(line, ts)
 	case strings.Contains(line, "store fullblock. height:"):
 		return a.parseStoredBlock(line, ts)
 	case strings.Contains(line, "scan stage event stage:"):
@@ -638,7 +729,7 @@ func (a *analyzer) parseLine(line string, ts time.Time) bool {
 	case strings.Contains(line, "valid node operators selected"):
 		return a.parseValidNodes(line)
 	case strings.Contains(line, "body sync start"):
-		return a.parseBodySyncStart(line)
+		return a.parseBodySyncStart(line, ts)
 	case strings.Contains(line, "body sync success"):
 		return a.parseBodySyncSuccess(line, ts)
 	case strings.Contains(line, "body sync failed"):
@@ -794,6 +885,22 @@ func (a *analyzer) parseStoreDataTypeFailure(line string) bool {
 	return true
 }
 
+func (a *analyzer) parseStoreBlockStart(line string, ts time.Time) bool {
+	m := storeBlockStartRE.FindStringSubmatch(line)
+	if len(m) != 3 {
+		return false
+	}
+	height := parseUint(m[1])
+	progress := a.progressEventForHeightHash(height, m[2])
+	if m[2] != "" {
+		progress.Hash = m[2]
+	}
+	if !ts.IsZero() && (progress.StoreStartedAt.IsZero() || ts.Before(progress.StoreStartedAt)) {
+		progress.StoreStartedAt = ts
+	}
+	return true
+}
+
 func (a *analyzer) parseStoredBlock(line string, ts time.Time) bool {
 	m := storedBlockRE.FindStringSubmatch(line)
 	if len(m) != 3 {
@@ -854,6 +961,9 @@ func (a *analyzer) parseTaskLifecycle(line string, ts time.Time) bool {
 		if queueWait > 0 {
 			event.TaskQueueWaitTotalUS += queueWait
 			event.TaskQueueWaitSamples++
+		}
+		if !ts.IsZero() && (fields["kind"] == "header_height" || fields["kind"] == "header_hash") && (event.HeaderSyncStartedAt.IsZero() || ts.Before(event.HeaderSyncStartedAt)) {
+			event.HeaderSyncStartedAt = ts
 		}
 	}
 	return true
@@ -932,17 +1042,26 @@ func (a *analyzer) mergeProgressEvents(dst, src *blockProgressEvent) {
 	if dst.FirstTaskCreatedAt.IsZero() || (!src.FirstTaskCreatedAt.IsZero() && src.FirstTaskCreatedAt.Before(dst.FirstTaskCreatedAt)) {
 		dst.FirstTaskCreatedAt = src.FirstTaskCreatedAt
 	}
+	if dst.HeaderSyncStartedAt.IsZero() || (!src.HeaderSyncStartedAt.IsZero() && src.HeaderSyncStartedAt.Before(dst.HeaderSyncStartedAt)) {
+		dst.HeaderSyncStartedAt = src.HeaderSyncStartedAt
+	}
 	if dst.HeaderSyncedAt.IsZero() {
 		dst.HeaderSyncedAt = src.HeaderSyncedAt
 	}
 	if dst.HeaderCostUS == 0 {
 		dst.HeaderCostUS = src.HeaderCostUS
 	}
+	if dst.BodySyncStartedAt.IsZero() || (!src.BodySyncStartedAt.IsZero() && src.BodySyncStartedAt.Before(dst.BodySyncStartedAt)) {
+		dst.BodySyncStartedAt = src.BodySyncStartedAt
+	}
 	if dst.BodySyncedAt.IsZero() {
 		dst.BodySyncedAt = src.BodySyncedAt
 	}
 	if dst.BodyCostUS == 0 {
 		dst.BodyCostUS = src.BodyCostUS
+	}
+	if dst.StoreStartedAt.IsZero() || (!src.StoreStartedAt.IsZero() && src.StoreStartedAt.Before(dst.StoreStartedAt)) {
+		dst.StoreStartedAt = src.StoreStartedAt
 	}
 	if dst.StoredAt.IsZero() {
 		dst.StoredAt = src.StoredAt
@@ -1188,7 +1307,7 @@ func (a *analyzer) parseValidNodes(line string) bool {
 	return true
 }
 
-func (a *analyzer) parseBodySyncStart(line string) bool {
+func (a *analyzer) parseBodySyncStart(line string, ts time.Time) bool {
 	m := bodySyncStartRE.FindStringSubmatch(line)
 	if len(m) != 4 {
 		return false
@@ -1196,6 +1315,11 @@ func (a *analyzer) parseBodySyncStart(line string) bool {
 	a.report.BodySync.Started++
 	a.report.BodySync.LastHeight = parseUint(m[1])
 	a.report.BodySync.LastHash = m[2]
+	progress := a.progressEventForHeightHash(a.report.BodySync.LastHeight, a.report.BodySync.LastHash)
+	progress.Hash = a.report.BodySync.LastHash
+	if !ts.IsZero() && (progress.BodySyncStartedAt.IsZero() || ts.Before(progress.BodySyncStartedAt)) {
+		progress.BodySyncStartedAt = ts
+	}
 	if parseUint(m[3]) == 0 {
 		a.addAnomaly("high", "body_no_valid_nodes", "Body sync started without valid nodes", 1, "Check node selection and remote height.")
 	}
@@ -1452,30 +1576,20 @@ func (a *analyzer) finishBlockProgress() {
 
 	rows := make([]BlockProgressInterval, 0, len(heights))
 	outliers := make([]BlockProgressInterval, 0)
-	var prevBodyAt, prevStoreAt time.Time
+	var prevTaskCreatedAt time.Time
 	for _, height := range heights {
 		event := a.blockProgress[height]
 		row := BlockProgressInterval{
-			Height:       event.Height,
-			Hash:         event.Hash,
-			BodySyncedAt: event.BodySyncedAt,
-			BodyCostUS:   event.BodyCostUS,
-			StoredAt:     event.StoredAt,
-			StoreTotalUS: event.StoreTotalUS,
+			Height:        event.Height,
+			Hash:          event.Hash,
+			TaskCreatedAt: event.FirstTaskCreatedAt,
 		}
-		if !event.BodySyncedAt.IsZero() && !prevBodyAt.IsZero() {
-			row.HasBodySyncGap = true
-			row.BodySyncGapUS = event.BodySyncedAt.Sub(prevBodyAt).Microseconds()
+		if !event.FirstTaskCreatedAt.IsZero() && !prevTaskCreatedAt.IsZero() {
+			row.HasTaskCreatedGap = true
+			row.TaskCreatedGapUS = event.FirstTaskCreatedAt.Sub(prevTaskCreatedAt).Microseconds()
 		}
-		if !event.StoredAt.IsZero() && !prevStoreAt.IsZero() {
-			row.HasStoreGap = true
-			row.StoreGapUS = event.StoredAt.Sub(prevStoreAt).Microseconds()
-		}
-		if !event.BodySyncedAt.IsZero() {
-			prevBodyAt = event.BodySyncedAt
-		}
-		if !event.StoredAt.IsZero() {
-			prevStoreAt = event.StoredAt
+		if !event.FirstTaskCreatedAt.IsZero() {
+			prevTaskCreatedAt = event.FirstTaskCreatedAt
 		}
 		if isBlockProgressOutlier(row) {
 			outliers = append(outliers, row)
@@ -1488,8 +1602,7 @@ func (a *analyzer) finishBlockProgress() {
 }
 
 func isBlockProgressOutlier(row BlockProgressInterval) bool {
-	return (row.HasBodySyncGap && row.BodySyncGapUS > blockProgressIntervalOutlierUS) ||
-		(row.HasStoreGap && row.StoreGapUS > blockProgressIntervalOutlierUS)
+	return row.HasTaskCreatedGap && row.TaskCreatedGapUS > blockProgressIntervalOutlierUS
 }
 
 func (a *analyzer) finishBlockTiming() {
@@ -1497,9 +1610,20 @@ func (a *analyzer) finishBlockTiming() {
 		return
 	}
 	var stats BlockTimingStats
-	var prevStoreToTaskTotal, headerStageTotal, bodyStageTotal, storeStageTotal uint64
-	var endToEndTotal, taskQueueTotal, directCostTotal uint64
-	endToEndValues := make([]uint64, 0)
+	prevStoreToTask := blockTimingAccumulator{name: "Prev Store -> Task Created"}
+	taskToHeaderStart := blockTimingAccumulator{name: "Task Created -> Header Start"}
+	headerSync := blockTimingAccumulator{name: "Header Sync Cost"}
+	headerToBodyStart := blockTimingAccumulator{name: "Header Done -> Body Start"}
+	bodySync := blockTimingAccumulator{name: "Body Sync Cost"}
+	bodyToStoreStart := blockTimingAccumulator{name: "Body Done -> Store Start"}
+	storeCost := blockTimingAccumulator{name: "Store Cost"}
+	endToEnd := blockTimingAccumulator{name: "Task Created -> Store Done"}
+	taskQueue := blockTimingAccumulator{name: "Task Queue Wait"}
+	var directCostTotal uint64
+	blocks := make([]BlockTimingBlock, 0)
+	blockDurationOutliers := make([]BlockTimingBlock, 0)
+	bodySyncOutliers := make([]BlockTimingBlock, 0)
+	slowBlocks := make([]BlockTimingBlock, 0)
 	heights := make([]uint64, 0, len(a.blockProgress))
 	for height := range a.blockProgress {
 		heights = append(heights, height)
@@ -1514,59 +1638,97 @@ func (a *analyzer) finishBlockTiming() {
 		if event == nil || event.FirstTaskCreatedAt.IsZero() {
 			continue
 		}
+		headerStartedAt := event.HeaderSyncStartedAt
+		bodyStartedAt := event.BodySyncStartedAt
+		storeStartedAt := event.StoreStartedAt
 		stats.Blocks++
+		block := BlockTimingBlock{
+			Height: event.Height,
+			Hash:   event.Hash,
+		}
 		if prevHeight+1 == event.Height && !prevStoredAt.IsZero() {
 			if d, ok := positiveDurationMicros(prevStoredAt, event.FirstTaskCreatedAt); ok {
-				prevStoreToTaskTotal += d
-				stats.PrevStoreToTaskSamples++
+				prevStoreToTask.add(d)
+				block.PrevStoreToTaskUS = d
 			}
 		}
-		if !event.FirstTaskCreatedAt.IsZero() && !event.HeaderSyncedAt.IsZero() {
-			if d, ok := positiveDurationMicros(event.FirstTaskCreatedAt, event.HeaderSyncedAt); ok {
-				headerStageTotal += d
-				stats.HeaderStageSamples++
+		if !event.FirstTaskCreatedAt.IsZero() && !headerStartedAt.IsZero() {
+			if d, ok := positiveDurationMicros(event.FirstTaskCreatedAt, headerStartedAt); ok {
+				taskToHeaderStart.add(d)
+				block.TaskToHeaderStartUS = d
 			}
 		}
-		if !event.HeaderSyncedAt.IsZero() && !event.BodySyncedAt.IsZero() {
-			if d, ok := positiveDurationMicros(event.HeaderSyncedAt, event.BodySyncedAt); ok {
-				bodyStageTotal += d
-				stats.BodyStageSamples++
+		if event.HeaderCostUS > 0 {
+			headerSync.add(event.HeaderCostUS)
+			block.HeaderSyncUS = event.HeaderCostUS
+		}
+		if !event.HeaderSyncedAt.IsZero() && !bodyStartedAt.IsZero() {
+			if d, ok := positiveDurationMicros(event.HeaderSyncedAt, bodyStartedAt); ok {
+				headerToBodyStart.add(d)
+				block.HeaderToBodyStartUS = d
 			}
 		}
-		if !event.BodySyncedAt.IsZero() && !event.StoredAt.IsZero() {
-			if d, ok := positiveDurationMicros(event.BodySyncedAt, event.StoredAt); ok {
-				storeStageTotal += d
-				stats.StoreStageSamples++
+		if event.BodyCostUS > 0 {
+			bodySync.add(event.BodyCostUS)
+			block.BodySyncUS = event.BodyCostUS
+		}
+		if !event.BodySyncedAt.IsZero() && !storeStartedAt.IsZero() {
+			if d, ok := positiveDurationMicros(event.BodySyncedAt, storeStartedAt); ok {
+				bodyToStoreStart.add(d)
+				block.BodyToStoreStartUS = d
 			}
+		}
+		if event.StoreTotalUS > 0 {
+			storeCost.add(event.StoreTotalUS)
+			block.StoreUS = event.StoreTotalUS
 		}
 		if !event.FirstTaskCreatedAt.IsZero() && !event.StoredAt.IsZero() {
 			if d, ok := positiveDurationMicros(event.FirstTaskCreatedAt, event.StoredAt); ok {
-				endToEndTotal += d
-				endToEndValues = append(endToEndValues, d)
-				stats.EndToEndSamples++
+				endToEnd.add(d)
+				block.FirstTaskToStoreUS = d
 				directCostTotal += event.HeaderCostUS + event.BodyCostUS + event.StoreTotalUS
-				if d > stats.MaxFirstTaskToStoreUS {
-					stats.MaxFirstTaskToStoreUS = d
-				}
+				slowBlocks = append(slowBlocks, block)
 			}
 		}
-		taskQueueTotal += event.TaskQueueWaitTotalUS
-		stats.TaskQueueSamples += event.TaskQueueWaitSamples
+		if event.TaskQueueWaitSamples > 0 {
+			taskQueue.add(event.TaskQueueWaitTotalUS / event.TaskQueueWaitSamples)
+		}
+		if block.BodySyncUS > 0 || block.StoreUS > 0 || block.FirstTaskToStoreUS > 0 {
+			blocks = append(blocks, block)
+		}
+		if block.BodySyncUS > bodySyncDurationOutlierUS {
+			bodySyncOutliers = append(bodySyncOutliers, block)
+		}
+		if block.FirstTaskToStoreUS > blockDurationOutlierUS {
+			blockDurationOutliers = append(blockDurationOutliers, block)
+		}
 		if !event.StoredAt.IsZero() {
 			prevHeight = event.Height
 			prevStoredAt = event.StoredAt
 		}
 	}
-	stats.AvgPrevStoreToTaskUS = averageUint(prevStoreToTaskTotal, stats.PrevStoreToTaskSamples)
-	stats.AvgFirstTaskToHeaderUS = averageUint(headerStageTotal, stats.HeaderStageSamples)
-	stats.AvgHeaderToBodyUS = averageUint(bodyStageTotal, stats.BodyStageSamples)
-	stats.AvgBodyToStoreUS = averageUint(storeStageTotal, stats.StoreStageSamples)
-	stats.AvgFirstTaskToStoreUS = averageUint(endToEndTotal, stats.EndToEndSamples)
-	stats.P95FirstTaskToStoreUS = percentile95(endToEndValues)
-	stats.AvgTaskQueueWaitUS = averageUint(taskQueueTotal, stats.TaskQueueSamples)
-	stats.AvgHeaderSyncCostUS = a.report.HeaderSync.AvgCostUS
-	stats.AvgBodySyncCostUS = a.report.BodySync.AvgCostUS
-	stats.AvgFullBlockStoreCostUS = a.report.FullBlockStore.AvgTotalUS
+	stats.PrevStoreToTaskSamples = prevStoreToTask.samples()
+	stats.TaskToHeaderStartSamples = taskToHeaderStart.samples()
+	stats.HeaderStageSamples = headerSync.samples()
+	stats.HeaderToBodyStartSamples = headerToBodyStart.samples()
+	stats.BodyStageSamples = bodySync.samples()
+	stats.BodySyncCostSamples = bodySync.samples()
+	stats.BodyToStoreStartSamples = bodyToStoreStart.samples()
+	stats.StoreStageSamples = storeCost.samples()
+	stats.StoreCostSamples = storeCost.samples()
+	stats.EndToEndSamples = endToEnd.samples()
+	stats.TaskQueueSamples = taskQueue.samples()
+	stats.AvgPrevStoreToTaskUS = prevStoreToTask.avg()
+	stats.AvgTaskToHeaderStartUS = taskToHeaderStart.avg()
+	stats.AvgHeaderSyncCostUS = headerSync.avg()
+	stats.AvgHeaderToBodyStartUS = headerToBodyStart.avg()
+	stats.AvgBodySyncCostUS = bodySync.avg()
+	stats.AvgBodyToStoreStartUS = bodyToStoreStart.avg()
+	stats.AvgFirstTaskToStoreUS = endToEnd.avg()
+	stats.P95FirstTaskToStoreUS = percentile95(endToEnd.values)
+	stats.MaxFirstTaskToStoreUS = endToEnd.max
+	stats.AvgTaskQueueWaitUS = taskQueue.avg()
+	stats.AvgStoreCostUS = storeCost.avg()
 	if stats.EndToEndSamples > 0 {
 		avgDirectCost := directCostTotal / stats.EndToEndSamples
 		if stats.AvgFirstTaskToStoreUS > avgDirectCost {
@@ -1574,6 +1736,36 @@ func (a *analyzer) finishBlockTiming() {
 		}
 	}
 	a.report.BlockTiming = stats
+	a.report.BlockTimingPhases = []BlockTimingPhaseStats{
+		prevStoreToTask.stats(),
+		taskToHeaderStart.stats(),
+		headerSync.stats(),
+		headerToBodyStart.stats(),
+		bodySync.stats(),
+		bodyToStoreStart.stats(),
+		storeCost.stats(),
+		taskQueue.stats(),
+		endToEnd.stats(),
+	}
+	sort.Slice(slowBlocks, func(i, j int) bool {
+		if slowBlocks[i].FirstTaskToStoreUS == slowBlocks[j].FirstTaskToStoreUS {
+			return slowBlocks[i].Height < slowBlocks[j].Height
+		}
+		return slowBlocks[i].FirstTaskToStoreUS > slowBlocks[j].FirstTaskToStoreUS
+	})
+	if len(slowBlocks) > 10 {
+		slowBlocks = slowBlocks[:10]
+	}
+	if len(blockDurationOutliers) > 0 {
+		a.addAnomaly("medium", "block_duration_slow", "Block duration exceeded 10s", uint64(len(blockDurationOutliers)), "Check slow body RPC, node throttling, retries, and store readiness for these blocks.")
+	}
+	if len(bodySyncOutliers) > 0 {
+		a.addAnomaly("medium", "block_body_sync_slow", "Block body sync duration exceeded 10s", uint64(len(bodySyncOutliers)), "Check slow full-block RPC methods, node throttling, and retry behavior for these blocks.")
+	}
+	a.report.BlockTimings = blocks
+	a.report.BlockDurationOutliers = blockDurationOutliers
+	a.report.BodySyncOutliers = bodySyncOutliers
+	a.report.SlowBlockTimings = slowBlocks
 }
 
 func (a *analyzer) finishTaskPool() {
@@ -2035,14 +2227,19 @@ func TemplateFuncs() template.FuncMap {
 		"microsToMillis": func(us uint64) string {
 			return fmt.Sprintf("%.3f", float64(us)/1000)
 		},
-		"formatSignedMicros":         formatSignedMicros,
-		"syncProgressChart":          renderSyncProgressChart,
-		"blocktreeLagChart":          renderBlocktreeLagChart,
-		"blockProgressIntervalChart": renderBlockProgressIntervalChart,
-		"bodySyncIntervalChart":      renderBodySyncIntervalChart,
-		"storeIntervalChart":         renderStoreIntervalChart,
-		"blockTimingChart":           renderBlockTimingChart,
-		"nodeSyncChart":              renderNodeSyncChart,
+		"formatSignedMicros":          formatSignedMicros,
+		"syncProgressChart":           renderSyncProgressChart,
+		"blocktreeLagChart":           renderBlocktreeLagChart,
+		"blockTimingChart":            renderBlockTimingChart,
+		"blockTimingPhaseChart":       renderBlockTimingPhaseChart,
+		"taskToStoreDurationChart":    renderTaskToStoreDurationChart,
+		"bodySyncDurationChart":       renderBodySyncDurationChart,
+		"storeDurationChart":          renderStoreDurationChart,
+		"syncNodeOperatorChart":       renderSyncNodeOperatorChart,
+		"bodySyncNodeOperatorMethods": bodySyncNodeOperatorMethods,
+		"pipelineTimingPhases":        pipelineTimingPhases,
+		"summaryTimingPhases":         summaryTimingPhases,
+		"nodeSyncChart":               renderNodeSyncChart,
 	}
 }
 
@@ -2062,21 +2259,416 @@ func formatSignedMicros(us int64) string {
 	}
 }
 
+func bodySyncNodeOperatorMethods(methods []NodeOperatorMethodStats) []NodeOperatorMethodStats {
+	rows := make([]NodeOperatorMethodStats, 0, len(methods))
+	for _, method := range methods {
+		if isBodySyncNodeOperatorMethod(method.Method) {
+			rows = append(rows, method)
+		}
+	}
+	return rows
+}
+
+func isBodySyncNodeOperatorMethod(method string) bool {
+	return method != "" && method != "FetchBlockHeaderByHeight"
+}
+
+func renderSyncNodeOperatorChart(methods []NodeOperatorMethodStats) template.HTML {
+	if len(methods) == 0 {
+		return ""
+	}
+	rows, nodeIDs := syncNodeOperatorChartRows(methods)
+	if len(rows) == 0 || len(nodeIDs) == 0 {
+		return ""
+	}
+
+	const (
+		width       = 960.0
+		left        = 230.0
+		right       = 70.0
+		top         = 26.0
+		bottom      = 42.0
+		rowH        = 36.0
+		barH        = 18.0
+		legendItemW = 80.0
+		legendRowH  = 20.0
+	)
+	legendRows := (len(nodeIDs) + 8) / 9
+	legendH := float64(legendRows) * legendRowH
+	plotTop := top + legendH + 20
+	height := plotTop + float64(len(rows))*rowH + bottom
+	plotW := width - left - right
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf(`<svg class="progress-chart" viewBox="0 0 960 %.0f" role="img" aria-label="Sync node remote interface duration ratio">`, height))
+	for i, nodeID := range nodeIDs {
+		legendX := left + float64(i%9)*legendItemW
+		legendY := top + float64(i/9)*legendRowH
+		b.WriteString(fmt.Sprintf(`<rect x="%.1f" y="%.1f" width="12" height="12" rx="2" fill="%s"></rect>`, legendX, legendY, template.HTMLEscapeString(syncNodeOperatorNodeColor(nodeID))))
+		b.WriteString(fmt.Sprintf(`<text class="axis-label x-start" x="%.1f" y="%.1f">N%d</text>`, legendX+18, legendY+10, nodeID))
+	}
+	for i := 0; i <= 4; i++ {
+		x := left + float64(i)*plotW/4
+		b.WriteString(fmt.Sprintf(`<line class="gridline" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, x, plotTop-8, x, plotTop+float64(len(rows))*rowH-8))
+		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">%d%%</text>`, x, height-16, i*25))
+	}
+	b.WriteString(fmt.Sprintf(`<text class="axis-title y-left-title" x="%.1f" y="%.1f">Cost ratio by request</text>`, left, plotTop-14))
+
+	for i, row := range rows {
+		y := plotTop + float64(i)*rowH
+		labelY := y + barH - 4
+		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">%s</text>`, left-12, labelY, template.HTMLEscapeString(row.Method)))
+		var offset uint64
+		for _, segment := range row.Segments {
+			if segment.Value == 0 {
+				continue
+			}
+			x1 := left + float64(offset)*plotW/float64(row.TotalUS)
+			offset += segment.Value
+			x2 := left + float64(offset)*plotW/float64(row.TotalUS)
+			segmentW := x2 - x1
+			if segmentW <= 0 {
+				continue
+			}
+			b.WriteString(fmt.Sprintf(`<rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" fill="%s"></rect>`, x1, y, segmentW, barH, template.HTMLEscapeString(syncNodeOperatorNodeColor(segment.NodeID))))
+			if segmentW >= 46 {
+				percent := float64(segment.Value) * 100 / float64(row.TotalUS)
+				b.WriteString(fmt.Sprintf(`<text class="bar-label" x="%.1f" y="%.1f">N%d %.0f%%</text>`, x1+6, y+barH-4, segment.NodeID, percent))
+			}
+		}
+		b.WriteString(fmt.Sprintf(`<text class="axis-label y-right-label" x="%.1f" y="%.1f">%s</text>`, left+plotW+8, labelY, template.HTMLEscapeString(formatSignedMicros(int64(row.TotalUS)))))
+	}
+	b.WriteString(`</svg>`)
+	return template.HTML(b.String())
+}
+
+func syncNodeOperatorChartRows(methods []NodeOperatorMethodStats) ([]syncNodeChartRow, []int) {
+	byMethod := make(map[string]map[int]uint64)
+	methodTotals := make(map[string]uint64)
+	nodeSeen := make(map[int]bool)
+	for _, method := range methods {
+		if method.TotalCostUS == 0 {
+			continue
+		}
+		nodeValues := byMethod[method.Method]
+		if nodeValues == nil {
+			nodeValues = make(map[int]uint64)
+			byMethod[method.Method] = nodeValues
+		}
+		nodeValues[method.NodeID] += method.TotalCostUS
+		methodTotals[method.Method] += method.TotalCostUS
+		nodeSeen[method.NodeID] = true
+	}
+
+	nodeIDs := make([]int, 0, len(nodeSeen))
+	for nodeID := range nodeSeen {
+		nodeIDs = append(nodeIDs, nodeID)
+	}
+	sort.Ints(nodeIDs)
+
+	methodNames := make([]string, 0, len(methodTotals))
+	for method := range methodTotals {
+		methodNames = append(methodNames, method)
+	}
+	sort.Slice(methodNames, func(i, j int) bool {
+		if methodTotals[methodNames[i]] == methodTotals[methodNames[j]] {
+			return methodNames[i] < methodNames[j]
+		}
+		return methodTotals[methodNames[i]] > methodTotals[methodNames[j]]
+	})
+
+	rows := make([]syncNodeChartRow, 0, len(methodNames))
+	for _, method := range methodNames {
+		nodeValues := byMethod[method]
+		row := syncNodeChartRow{Method: method}
+		for _, nodeID := range nodeIDs {
+			value := nodeValues[nodeID]
+			if value == 0 {
+				continue
+			}
+			row.TotalUS += value
+			row.Segments = append(row.Segments, syncNodeChartSegment{NodeID: nodeID, Value: value})
+		}
+		if row.TotalUS > 0 {
+			rows = append(rows, row)
+		}
+	}
+	return rows, nodeIDs
+}
+
+func renderBodySyncNodeOperatorChart(methods []NodeOperatorMethodStats) template.HTML {
+	if len(methods) == 0 {
+		return ""
+	}
+	rows, methodNames := bodySyncNodeOperatorChartRows(methods)
+	if len(rows) == 0 || len(methodNames) == 0 {
+		return ""
+	}
+
+	const (
+		width       = 960.0
+		left        = 110.0
+		right       = 70.0
+		top         = 26.0
+		bottom      = 42.0
+		rowH        = 36.0
+		barH        = 18.0
+		legendItemW = 230.0
+		legendRowH  = 20.0
+	)
+	legendRows := (len(methodNames) + 2) / 3
+	legendH := float64(legendRows) * legendRowH
+	plotTop := top + legendH + 20
+	height := plotTop + float64(len(rows))*rowH + bottom
+	plotW := width - left - right
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf(`<svg class="progress-chart" viewBox="0 0 960 %.0f" role="img" aria-label="Body sync node remote interface duration ratio">`, height))
+	for i, method := range methodNames {
+		legendX := left + float64(i%3)*legendItemW
+		legendY := top + float64(i/3)*legendRowH
+		b.WriteString(fmt.Sprintf(`<rect x="%.1f" y="%.1f" width="12" height="12" rx="2" fill="%s"></rect>`, legendX, legendY, template.HTMLEscapeString(bodySyncNodeOperatorMethodColor(method))))
+		b.WriteString(fmt.Sprintf(`<text class="axis-label x-start" x="%.1f" y="%.1f">%s</text>`, legendX+18, legendY+10, template.HTMLEscapeString(method)))
+	}
+	for i := 0; i <= 4; i++ {
+		x := left + float64(i)*plotW/4
+		b.WriteString(fmt.Sprintf(`<line class="gridline" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, x, plotTop-8, x, plotTop+float64(len(rows))*rowH-8))
+		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">%d%%</text>`, x, height-16, i*25))
+	}
+	b.WriteString(fmt.Sprintf(`<text class="axis-title y-left-title" x="%.1f" y="%.1f">Cost ratio by node</text>`, left, plotTop-14))
+
+	for i, row := range rows {
+		y := plotTop + float64(i)*rowH
+		labelY := y + barH - 4
+		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">N%d</text>`, left-12, labelY, row.NodeID))
+		var offset uint64
+		for _, segment := range row.Segments {
+			if segment.Value == 0 {
+				continue
+			}
+			x1 := left + float64(offset)*plotW/float64(row.TotalUS)
+			offset += segment.Value
+			x2 := left + float64(offset)*plotW/float64(row.TotalUS)
+			segmentW := x2 - x1
+			if segmentW <= 0 {
+				continue
+			}
+			b.WriteString(fmt.Sprintf(`<rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" fill="%s"></rect>`, x1, y, segmentW, barH, template.HTMLEscapeString(bodySyncNodeOperatorMethodColor(segment.Method))))
+			if segmentW >= 58 {
+				percent := float64(segment.Value) * 100 / float64(row.TotalUS)
+				b.WriteString(fmt.Sprintf(`<text class="bar-label" x="%.1f" y="%.1f">%.0f%%</text>`, x1+6, y+barH-4, percent))
+			}
+		}
+		b.WriteString(fmt.Sprintf(`<text class="axis-label y-right-label" x="%.1f" y="%.1f">%s</text>`, left+plotW+8, labelY, template.HTMLEscapeString(formatSignedMicros(int64(row.TotalUS)))))
+	}
+	b.WriteString(`</svg>`)
+	return template.HTML(b.String())
+}
+
+func bodySyncNodeOperatorChartRows(methods []NodeOperatorMethodStats) ([]bodySyncNodeChartRow, []string) {
+	byNode := make(map[int]map[string]uint64)
+	methodTotals := make(map[string]uint64)
+	for _, method := range methods {
+		if method.TotalCostUS == 0 {
+			continue
+		}
+		nodeMethods := byNode[method.NodeID]
+		if nodeMethods == nil {
+			nodeMethods = make(map[string]uint64)
+			byNode[method.NodeID] = nodeMethods
+		}
+		nodeMethods[method.Method] += method.TotalCostUS
+		methodTotals[method.Method] += method.TotalCostUS
+	}
+	methodNames := make([]string, 0, len(methodTotals))
+	for method := range methodTotals {
+		methodNames = append(methodNames, method)
+	}
+	sort.Slice(methodNames, func(i, j int) bool {
+		if methodTotals[methodNames[i]] == methodTotals[methodNames[j]] {
+			return methodNames[i] < methodNames[j]
+		}
+		return methodTotals[methodNames[i]] > methodTotals[methodNames[j]]
+	})
+
+	nodeIDs := make([]int, 0, len(byNode))
+	for nodeID := range byNode {
+		nodeIDs = append(nodeIDs, nodeID)
+	}
+	sort.Ints(nodeIDs)
+
+	rows := make([]bodySyncNodeChartRow, 0, len(nodeIDs))
+	for _, nodeID := range nodeIDs {
+		nodeMethods := byNode[nodeID]
+		row := bodySyncNodeChartRow{NodeID: nodeID}
+		for _, method := range methodNames {
+			value := nodeMethods[method]
+			if value == 0 {
+				continue
+			}
+			row.TotalUS += value
+			row.Segments = append(row.Segments, bodySyncNodeChartSegment{Method: method, Value: value})
+		}
+		if row.TotalUS > 0 {
+			rows = append(rows, row)
+		}
+	}
+	return rows, methodNames
+}
+
+func bodySyncNodeOperatorMethodColor(method string) string {
+	palette := []string{
+		"#155eef", "#f63d68", "#12b76a", "#f79009", "#7a5af8", "#06aed4",
+		"#b54708", "#079455", "#2e90fa", "#d444f1", "#667085", "#b42318",
+	}
+	known := []string{
+		"FetchBalanceNative",
+		"FetchErc20BalancesBatch",
+		"FetchErc1155BalancesBatch",
+		"FetchReceiptsBatch",
+		"FetchTransactionsByHashBatch",
+		"FetchContractErc20",
+		"FetchContractErc721",
+		"FetchTokenErc721",
+		"FetchInternalTxTracesByBlockHash",
+		"FetchBlockHeaderByHash",
+	}
+	for i, knownMethod := range known {
+		if method == knownMethod {
+			return palette[i%len(palette)]
+		}
+	}
+	var hash uint32
+	for _, r := range method {
+		hash = hash*33 + uint32(r)
+	}
+	return palette[int(hash)%len(palette)]
+}
+
+func syncNodeOperatorNodeColor(nodeID int) string {
+	palette := []string{
+		"#155eef", "#f63d68", "#12b76a", "#f79009", "#7a5af8", "#06aed4",
+		"#b54708", "#079455", "#2e90fa", "#d444f1", "#667085", "#b42318",
+	}
+	if nodeID < 0 {
+		nodeID = -nodeID
+	}
+	return palette[nodeID%len(palette)]
+}
+
+func pipelineTimingPhases(phases []BlockTimingPhaseStats) []BlockTimingPhaseStats {
+	rows := make([]BlockTimingPhaseStats, 0, len(phases))
+	for _, phase := range phases {
+		if isSummaryTimingPhase(phase.Name) {
+			continue
+		}
+		rows = append(rows, phase)
+	}
+	return rows
+}
+
+func summaryTimingPhases(phases []BlockTimingPhaseStats) []BlockTimingPhaseStats {
+	rows := make([]BlockTimingPhaseStats, 0, 2)
+	for _, phase := range phases {
+		if isSummaryTimingPhase(phase.Name) {
+			rows = append(rows, phase)
+		}
+	}
+	return rows
+}
+
+func isSummaryTimingPhase(name string) bool {
+	return name == "Task Queue Wait" || name == "Task Created -> Store Done"
+}
+
+func renderBlockTimingPhaseChart(phases []BlockTimingPhaseStats) template.HTML {
+	if len(phases) == 0 {
+		return ""
+	}
+
+	maxValue := uint64(0)
+	for _, phase := range phases {
+		maxValue = maxUint64(maxValue, phase.AvgUS)
+		maxValue = maxUint64(maxValue, phase.P95US)
+	}
+	if maxValue == 0 {
+		return ""
+	}
+
+	const (
+		width  = 960.0
+		left   = 210.0
+		right  = 34.0
+		top    = 34.0
+		bottom = 48.0
+		rowH   = 58.0
+		barH   = 12.0
+		gap    = 4.0
+	)
+	height := top + bottom + float64(len(phases))*rowH
+	plotW := width - left - right
+	plotH := height - top - bottom
+	scaleX := func(value uint64) float64 {
+		return left + float64(value)*plotW/float64(maxValue)
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf(`<svg class="progress-chart" viewBox="0 0 960 %.0f" role="img" aria-label="Timing phase percentiles">`, height))
+	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top+plotH, left+plotW, top+plotH))
+	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top, left, top+plotH))
+	for i := 0; i <= 4; i++ {
+		x := left + float64(i)*plotW/4
+		value := uint64(float64(maxValue) * float64(i) / 4)
+		b.WriteString(fmt.Sprintf(`<line class="gridline" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, x, top, x, top+plotH))
+		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">%s</text>`, x, height-16, template.HTMLEscapeString(formatSignedMicros(int64(value)))))
+	}
+	b.WriteString(fmt.Sprintf(`<text class="axis-title y-left-title" x="%.1f" y="%.1f">Duration</text>`, left, top-10))
+
+	for i, phase := range phases {
+		rowTop := top + float64(i)*rowH + 13
+		labelY := rowTop + barH + gap + 4
+		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">%s</text>`, left-12, labelY, template.HTMLEscapeString(phase.Name)))
+		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">n=%d</text>`, left-12, labelY+15, phase.Samples))
+		writePhaseBar(&b, "phase-avg", phase.AvgUS, left, rowTop, barH, scaleX)
+		writePhaseBar(&b, "phase-p95", phase.P95US, left, rowTop+barH+gap, barH, scaleX)
+	}
+	b.WriteString(`</svg>`)
+	return template.HTML(b.String())
+}
+
+func writePhaseBar(b *strings.Builder, class string, value uint64, left, y, height float64, scaleX func(uint64) float64) {
+	if value == 0 {
+		return
+	}
+	width := scaleX(value) - left
+	if width <= 0 {
+		return
+	}
+	b.WriteString(fmt.Sprintf(`<rect class="bar %s" x="%.1f" y="%.1f" width="%.1f" height="%.1f"></rect>`, template.HTMLEscapeString(class), left, y, width, height))
+	if width >= 44 {
+		b.WriteString(fmt.Sprintf(`<text class="bar-label" x="%.1f" y="%.1f">%s</text>`, left+6, y+height-2, template.HTMLEscapeString(formatSignedMicros(int64(value)))))
+	}
+}
+
 func renderBlockTimingChart(stats BlockTimingStats) template.HTML {
 	if stats.Blocks == 0 {
 		return ""
 	}
 
 	stageSegments := []blockTimingSegment{
-		{Label: "Task -> Header", Class: "stage-header", Value: stats.AvgFirstTaskToHeaderUS},
-		{Label: "Header -> Body", Class: "stage-body", Value: stats.AvgHeaderToBodyUS},
-		{Label: "Body -> Store", Class: "stage-store", Value: stats.AvgBodyToStoreUS},
+		{Label: "Prev Store -> Task", Class: "prev-store", Value: stats.AvgPrevStoreToTaskUS},
+		{Label: "Task -> Header Start", Class: "stage-header", Value: stats.AvgTaskToHeaderStartUS},
+		{Label: "Header Sync", Class: "rpc-header", Value: stats.AvgHeaderSyncCostUS},
+		{Label: "Header Done -> Body Start", Class: "stage-body", Value: stats.AvgHeaderToBodyStartUS},
+		{Label: "Body Sync", Class: "rpc-body", Value: stats.AvgBodySyncCostUS},
+		{Label: "Body Done -> Store Start", Class: "stage-store", Value: stats.AvgBodyToStoreStartUS},
+		{Label: "Store", Class: "store-write", Value: stats.AvgStoreCostUS},
 	}
 	costSegments := []blockTimingSegment{
 		{Label: "Task Queue", Class: "task-queue", Value: stats.AvgTaskQueueWaitUS},
 		{Label: "Header RPC", Class: "rpc-header", Value: stats.AvgHeaderSyncCostUS},
 		{Label: "Body RPC", Class: "rpc-body", Value: stats.AvgBodySyncCostUS},
-		{Label: "Store Write", Class: "store-write", Value: stats.AvgFullBlockStoreCostUS},
+		{Label: "Store Write", Class: "store-write", Value: stats.AvgStoreCostUS},
 		{Label: "Other Wait", Class: "other-wait", Value: stats.AvgUnattributedOverheadUS},
 	}
 
@@ -2106,7 +2698,7 @@ func renderBlockTimingChart(stats BlockTimingStats) template.HTML {
 	}
 
 	var b strings.Builder
-	b.WriteString(`<svg class="progress-chart" viewBox="0 0 960 260" role="img" aria-label="Block timing distribution by stage and cost attribution">`)
+	b.WriteString(`<svg class="progress-chart" viewBox="0 0 960 260" role="img" aria-label="Block timing overview with requested block time distribution and direct cost attribution">`)
 	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top+plotH, left+plotW, top+plotH))
 	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top, left, top+plotH))
 	for i := 0; i <= 4; i++ {
@@ -2115,11 +2707,16 @@ func renderBlockTimingChart(stats BlockTimingStats) template.HTML {
 		b.WriteString(fmt.Sprintf(`<line class="gridline" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, x, top, x, top+plotH))
 		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">%s</text>`, x, height-18, template.HTMLEscapeString(formatSignedMicros(int64(value)))))
 	}
-	b.WriteString(fmt.Sprintf(`<text class="axis-title y-left-title" x="%.1f" y="%.1f">Duration</text>`, left, top-10))
-	b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">Avg stage timing</text>`, left-12, rowY[0]+5))
-	b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">Measured costs</text>`, left-12, rowY[1]+5))
+	b.WriteString(fmt.Sprintf(`<text class="axis-title y-left-title" x="%.1f" y="%.1f">Time</text>`, left, top-10))
+	b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">Mean requested phases</text>`, left-12, rowY[0]+5))
+	b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">Mean direct costs</text>`, left-12, rowY[1]+5))
 	writeStackedTimingBar(&b, stageSegments, left, rowY[0]-barH/2, barH, scaleX)
 	writeStackedTimingBar(&b, costSegments, left, rowY[1]-barH/2, barH, scaleX)
+	if stats.AvgFirstTaskToStoreUS > 0 {
+		x := scaleX(stats.AvgFirstTaskToStoreUS)
+		b.WriteString(fmt.Sprintf(`<line class="marker mean" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, x, top, x, top+plotH))
+		b.WriteString(fmt.Sprintf(`<text class="axis-label y-right-label" x="%.1f" y="%.1f">mean E2E %sms</text>`, x+6, top+30, template.HTMLEscapeString(fmt.Sprintf("%.3f", float64(stats.AvgFirstTaskToStoreUS)/1000))))
+	}
 	if stats.P95FirstTaskToStoreUS > 0 {
 		x := scaleX(stats.P95FirstTaskToStoreUS)
 		b.WriteString(fmt.Sprintf(`<line class="marker p95" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, x, top, x, top+plotH))
@@ -2165,27 +2762,64 @@ func maxUint64(a, b uint64) uint64 {
 	return b
 }
 
-func renderBlockProgressIntervalChart(rows []BlockProgressInterval) template.HTML {
+func renderBodySyncDurationChart(rows []BlockTimingBlock) template.HTML {
+	return renderSingleBlockTimingDurationChart(filterBodySyncDurationRows(rows), "Body sync duration", "body-gap", func(row BlockTimingBlock) uint64 {
+		return row.BodySyncUS
+	})
+}
+
+func renderTaskToStoreDurationChart(rows []BlockTimingBlock) template.HTML {
+	return renderSingleBlockTimingDurationChart(filterBlockDurationRows(rows), "Block duration", "end-to-end", func(row BlockTimingBlock) uint64 {
+		return row.FirstTaskToStoreUS
+	})
+}
+
+func renderStoreDurationChart(rows []BlockTimingBlock) template.HTML {
+	return renderSingleBlockTimingDurationChart(rows, "Store duration", "store-gap", func(row BlockTimingBlock) uint64 {
+		return row.StoreUS
+	})
+}
+
+func filterBodySyncDurationRows(rows []BlockTimingBlock) []BlockTimingBlock {
+	filtered := make([]BlockTimingBlock, 0, len(rows))
+	for _, row := range rows {
+		if row.BodySyncUS > bodySyncDurationOutlierUS {
+			continue
+		}
+		filtered = append(filtered, row)
+	}
+	return filtered
+}
+
+func filterBlockDurationRows(rows []BlockTimingBlock) []BlockTimingBlock {
+	filtered := make([]BlockTimingBlock, 0, len(rows))
+	for _, row := range rows {
+		if row.FirstTaskToStoreUS > blockDurationOutlierUS {
+			continue
+		}
+		filtered = append(filtered, row)
+	}
+	return filtered
+}
+
+func renderSingleBlockTimingDurationChart(rows []BlockTimingBlock, label, lineClass string, selector func(BlockTimingBlock) uint64) template.HTML {
 	if len(rows) == 0 {
 		return ""
 	}
 
-	maxGapUS := uint64(0)
+	maxDurationUS := uint64(0)
 	for _, row := range rows {
-		if row.HasBodySyncGap && row.BodySyncGapUS > 0 && uint64(row.BodySyncGapUS) > maxGapUS {
-			maxGapUS = uint64(row.BodySyncGapUS)
-		}
-		if row.HasStoreGap && row.StoreGapUS > 0 && uint64(row.StoreGapUS) > maxGapUS {
-			maxGapUS = uint64(row.StoreGapUS)
+		if value := selector(row); value > maxDurationUS {
+			maxDurationUS = value
 		}
 	}
-	if maxGapUS == 0 {
+	if maxDurationUS == 0 {
 		return ""
 	}
 
 	const (
 		width  = 960.0
-		height = 300.0
+		height = 280.0
 		left   = 82.0
 		right  = 20.0
 		top    = 24.0
@@ -2200,57 +2834,43 @@ func renderBlockProgressIntervalChart(rows []BlockProgressInterval) template.HTM
 		return left + float64(i)*plotW/float64(len(rows)-1)
 	}
 	scaleY := func(value uint64) float64 {
-		return top + (float64(maxGapUS-value) * plotH / float64(maxGapUS))
+		return top + (float64(maxDurationUS-value) * plotH / float64(maxDurationUS))
 	}
 
-	var bodyPoints, storePoints strings.Builder
+	var points strings.Builder
 	for i, row := range rows {
-		x := scaleX(i)
-		if row.HasBodySyncGap && row.BodySyncGapUS >= 0 {
-			if bodyPoints.Len() > 0 {
-				bodyPoints.WriteByte(' ')
-			}
-			bodyPoints.WriteString(fmt.Sprintf("%.1f,%.1f", x, scaleY(uint64(row.BodySyncGapUS))))
+		value := selector(row)
+		if value == 0 {
+			continue
 		}
-		if row.HasStoreGap && row.StoreGapUS >= 0 {
-			if storePoints.Len() > 0 {
-				storePoints.WriteByte(' ')
-			}
-			storePoints.WriteString(fmt.Sprintf("%.1f,%.1f", x, scaleY(uint64(row.StoreGapUS))))
+		if points.Len() > 0 {
+			points.WriteByte(' ')
 		}
+		points.WriteString(fmt.Sprintf("%.1f,%.1f", scaleX(i), scaleY(value)))
+	}
+	if points.Len() == 0 {
+		return ""
 	}
 
+	escapedLabel := template.HTMLEscapeString(label)
 	var b strings.Builder
-	b.WriteString(`<svg class="progress-chart" viewBox="0 0 960 300" role="img" aria-label="Per-block sync and store intervals">`)
+	b.WriteString(fmt.Sprintf(`<svg class="progress-chart" viewBox="0 0 960 280" role="img" aria-label="Per-block %s">`, escapedLabel))
 	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top+plotH, left+plotW, top+plotH))
 	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top, left, top+plotH))
 	for i := 0; i <= 4; i++ {
 		y := top + float64(i)*plotH/4
-		value := maxGapUS - uint64(float64(maxGapUS)*float64(i)/4)
+		value := maxDurationUS - uint64(float64(maxDurationUS)*float64(i)/4)
 		b.WriteString(fmt.Sprintf(`<line class="gridline" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, y, left+plotW, y))
 		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">%s</text>`, left-8, y+4, template.HTMLEscapeString(formatSignedMicros(int64(value)))))
 	}
-	b.WriteString(fmt.Sprintf(`<text class="axis-title y-left-title" x="%.1f" y="%.1f">Interval</text>`, left, top-8))
+	b.WriteString(fmt.Sprintf(`<text class="axis-title y-left-title" x="%.1f" y="%.1f">%s</text>`, left, top-8, escapedLabel))
 	b.WriteString(fmt.Sprintf(`<text class="axis-label x-start" x="%.1f" y="%.1f">%d</text>`, left, height-16, rows[0].Height))
 	last := rows[len(rows)-1]
 	b.WriteString(fmt.Sprintf(`<text class="axis-label x-end" x="%.1f" y="%.1f">%d</text>`, left+plotW, height-16, last.Height))
-	b.WriteString(fmt.Sprintf(`<polyline class="line body-gap" points="%s"></polyline>`, bodyPoints.String()))
-	b.WriteString(fmt.Sprintf(`<polyline class="line store-gap" points="%s"></polyline>`, storePoints.String()))
+	b.WriteString(fmt.Sprintf(`<polyline class="line %s" points="%s"></polyline>`, template.HTMLEscapeString(lineClass), points.String()))
 	b.WriteString(`</svg>`)
 
 	return template.HTML(b.String())
-}
-
-func renderBodySyncIntervalChart(rows []BlockProgressInterval) template.HTML {
-	return renderSingleBlockProgressIntervalChart(rows, "Body sync interval", "body-gap", func(row BlockProgressInterval) (int64, bool) {
-		return row.BodySyncGapUS, row.HasBodySyncGap && row.BodySyncGapUS >= 0
-	})
-}
-
-func renderStoreIntervalChart(rows []BlockProgressInterval) template.HTML {
-	return renderSingleBlockProgressIntervalChart(rows, "Store interval", "store-gap", func(row BlockProgressInterval) (int64, bool) {
-		return row.StoreGapUS, row.HasStoreGap && row.StoreGapUS >= 0
-	})
 }
 
 func renderSingleBlockProgressIntervalChart(rows []BlockProgressInterval, label, lineClass string, selector func(BlockProgressInterval) (int64, bool)) template.HTML {

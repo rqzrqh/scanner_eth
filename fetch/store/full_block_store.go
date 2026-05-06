@@ -184,6 +184,7 @@ func StoreFullBlock(ctx context.Context, db *gorm.DB, chainID int64, runtime *Ru
 	height := handler.Block.Height
 	hash := handler.Block.Hash
 	storeStartedAt := time.Now()
+	logrus.Infof("store fullblock start. height:%v hash:%v", height, hash)
 
 	select {
 	case <-ctx.Done():
