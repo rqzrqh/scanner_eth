@@ -61,15 +61,6 @@ type TokenErc721KeyValue struct {
 	TokenId      string
 }
 
-type FetchResult struct {
-	NodeId      int
-	TaskId      int
-	ForkVersion uint64
-	Height      uint64
-	FullBlock   *data.FullBlock
-	CostTime    time.Duration
-}
-
 type FullBlockRPCAttempt struct {
 	OpName     string
 	NodeID     int

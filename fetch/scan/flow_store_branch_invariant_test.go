@@ -14,7 +14,9 @@ func TestInvariantStoredOnlyAfterSuccessfulStore(t *testing.T) {
 		env.seedStoredLinearBranch("a", "b")
 		env.attachStoreWorker(func(context.Context, *fetchstore.EventBlockData) error { return nil })
 
-		env.flow.SubmitStoreBranchesLowToHigh(context.Background())
+		if err := env.flow.SubmitStoreBranches(context.Background(), env.flow.BuildStoreBranches()); err != nil {
+			t.Fatalf("submit store branches failed: %v", err)
+		}
 		if !env.stored.IsStored("b") {
 			t.Fatal("expected b to be marked stored after successful DB write")
 		}
@@ -27,7 +29,9 @@ func TestInvariantStoredOnlyAfterSuccessfulStore(t *testing.T) {
 			return errors.New("db write failed")
 		})
 
-		env.flow.SubmitStoreBranchesLowToHigh(context.Background())
+		if err := env.flow.SubmitStoreBranches(context.Background(), env.flow.BuildStoreBranches()); err != nil {
+			t.Fatalf("submit store branches failed: %v", err)
+		}
 		if env.stored.IsStored("b") {
 			t.Fatal("expected b to remain not stored when DB write fails")
 		}
@@ -47,7 +51,9 @@ func TestProcessBranchesDoesNotStoreWhenParentNotStored(t *testing.T) {
 		return nil
 	})
 
-	env.flow.SubmitStoreBranchesLowToHigh(context.Background())
+	if err := env.flow.SubmitStoreBranches(context.Background(), env.flow.BuildStoreBranches()); err != nil {
+		t.Fatalf("submit store branches failed: %v", err)
+	}
 	if len(writeOrder) != 0 {
 		t.Fatalf("expected no writes when parent is not stored, got=%v", writeOrder)
 	}
@@ -69,7 +75,9 @@ func TestProcessBranchesMarksStoredOnlyOnSuccessfulWrite(t *testing.T) {
 		return errors.New("write failed")
 	})
 
-	env.flow.SubmitStoreBranchesLowToHigh(context.Background())
+	if err := env.flow.SubmitStoreBranches(context.Background(), env.flow.BuildStoreBranches()); err != nil {
+		t.Fatalf("submit store branches failed: %v", err)
+	}
 	if called != 1 {
 		t.Fatalf("expected one write attempt, got=%d", called)
 	}

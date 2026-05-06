@@ -142,52 +142,6 @@ func (w *Worker) Stop() {
 	w.wg.Wait()
 }
 
-func (w *Worker) Submit(ctx context.Context, hash string, height uint64, blockData *fetchstore.EventBlockData) error {
-	if w == nil {
-		return fmt.Errorf("store block worker is nil")
-	}
-	hash = util.NormalizeHash(hash)
-	if hash == "" {
-		return fmt.Errorf("invalid block hash")
-	}
-	if w.isZero != nil && w.isZero(blockData) {
-		return fmt.Errorf("block data is nil")
-	}
-	if w.storedBlocks != nil && w.storedBlocks.IsStored(hash) {
-		atomic.AddUint64(&w.skipped, 1)
-		atomic.AddUint64(&w.skippedAlreadyStored, 1)
-		return nil
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	req := &storeRequest{
-		Ctx:       ctx,
-		Hash:      hash,
-		Height:    height,
-		BlockData: blockData,
-		ResultCh:  make(chan error, 1),
-	}
-
-	select {
-	case <-ctx.Done():
-		atomic.AddUint64(&w.canceled, 1)
-		return ctx.Err()
-	case w.reqCh <- req:
-		_ = height
-		atomic.AddUint64(&w.submitted, 1)
-	}
-
-	select {
-	case <-ctx.Done():
-		atomic.AddUint64(&w.canceled, 1)
-		return ctx.Err()
-	case err := <-req.ResultCh:
-		return err
-	}
-}
-
 func (w *Worker) SubmitBranches(ctx context.Context, branches []Branch) error {
 	if w == nil {
 		return fmt.Errorf("store block worker is nil")

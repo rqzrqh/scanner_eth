@@ -38,13 +38,7 @@ func (sf *Flow) collectStoreBranchSuffixes() []fetchserialstore.Branch {
 		started := false
 		for i := len(branch.Nodes) - 1; i >= 0; i-- {
 			node := branch.Nodes[i]
-			if node == nil {
-				continue
-			}
 			hash := sf.normalize(node.Key)
-			if hash == "" {
-				continue
-			}
 			if !started && sf.storedBlocks != nil && sf.storedBlocks.IsStored(hash) {
 				continue
 			}
@@ -257,21 +251,4 @@ func (sf *Flow) CountStoredLinkedTreeNodes() int {
 		}
 	}
 	return count
-}
-
-func (sf *Flow) ProcessBranchesLowToHigh(ctx context.Context) {
-	sf.SubmitStoreBranchesLowToHigh(ctx)
-}
-
-func (sf *Flow) SubmitStoreBranchesLowToHigh(ctx context.Context) {
-	sf.BindRuntimeDeps()
-	if sf == nil {
-		return
-	}
-	// Scan only constructs low-to-high branches from blocktree and hands them to
-	// the serial store worker; branch-local stop conditions live in serial_store.
-	if sf.storeWorker == nil {
-		return
-	}
-	_ = sf.storeWorker.SubmitBranches(ctx, sf.collectStoreBranchesForWrite())
 }

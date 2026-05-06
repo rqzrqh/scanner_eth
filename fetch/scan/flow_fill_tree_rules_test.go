@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestRunScanCycleRule3SyncOrphanParentsByHash(t *testing.T) {
+func TestRunScanCycleRule3FillsMissingParentsByHash(t *testing.T) {
 	env := newTestFlowEnv(t, 2)
 	env.flow.taskRuntime.InsertTreeHeader(makeTestHeader(10, "0xroot", ""))
 	env.blockTree.Insert(12, "0xchild", "0xmissing", 1)

@@ -18,6 +18,4 @@ func TestStoreBranchEdgeBranches(t *testing.T) {
 	if ok, msg := env.flow.SyncStoreBranchTarget(context.Background(), "   "); ok || msg == "" {
 		t.Fatal("expected invalid body branch target error")
 	}
-
-	env.flow.ProcessBranchNode(context.Background(), nil)
 }

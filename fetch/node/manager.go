@@ -302,16 +302,6 @@ func (nm *NodeManager) MarkNodeUnavailable(id int, reason string) {
 	node.score = node.currentScore(node.lastFailureAt)
 }
 
-func (nm *NodeManager) RecordNodeAttemptStart(id int) {
-	nm.mu.Lock()
-	defer nm.mu.Unlock()
-	if !nm.validNodeLocked(id) {
-		return
-	}
-	nm.nodes[id].inflight++
-	nm.nodes[id].score = nm.nodes[id].currentScore(time.Now())
-}
-
 func (nm *NodeManager) RecordNodeResult(id int, delay int64, success bool) {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()

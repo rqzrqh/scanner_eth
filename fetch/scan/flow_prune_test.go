@@ -219,7 +219,9 @@ func TestPruneFrequentPruneAndStoreAlternationConsistency(t *testing.T) {
 	env.attachStoreWorker(func(context.Context, *fetchstore.EventBlockData) error { return nil })
 
 	for i := 0; i < 8; i++ {
-		env.flow.SubmitStoreBranchesLowToHigh(context.Background())
+		if err := env.flow.SubmitStoreBranches(context.Background(), env.flow.BuildStoreBranches()); err != nil {
+			t.Fatalf("submit store branches failed: %v", err)
+		}
 		testPruneRuntime(env).PruneStoredBlocks(context.Background(), env.irreversible)
 	}
 

@@ -126,9 +126,11 @@ Code: `fetch/task_process/runtime.go`, `fetch/scan/flow_sync_body.go`, `fetch/st
 
 When `parentReady` and body is storable:
 
-1. `scan/flow_store_branch.go` materializes low-to-high full body branches from `BlockTree` and submits them with `StoreWorker.SubmitBranches(...)`.
-2. `serial_store/serial_worker.go` traverses each branch serially, requiring the parent to be either already stored or already written earlier in the same branch traversal. It does not depend on `BlockTree` for this decision.
-3. `StoreBlockData(ctx, blockData)` is executed by the serial worker; on success it calls `StoredBlockState.MarkStored(k)`.
+1. `scan/flow_store_branch.go` materializes low-to-high suffix branches from `BlockTree` beginning after the already-stored prefix. Nodes may or may not already have body payload in \(P\).
+2. `RunSyncBodyStage` enqueues missing body tasks for branch nodes whose `BlockData` is nil. This is fetch-side orchestration; `serial_store` does not create body tasks.
+3. Before store submission, scan filters each suffix to the contiguous storable prefix: parent ready, non-empty hash, and `HasStorableNodeData(BlockData)`.
+4. `serial_store/serial_worker.go` traverses each submitted branch serially, requiring the parent to be either already stored or already written earlier in the same branch traversal. It does not depend on `BlockTree` or `taskpool` for this decision.
+5. `StoreBlockData(ctx, blockData)` is executed by the serial worker; on success it calls `StoredBlockState.MarkStored(k)`.
 
 Code: `fetch/scan/flow_store_branch.go`; `fetch/serial_store/serial_worker.go`.
 
@@ -165,7 +167,7 @@ Each scan coordinator round:
 2. Enumerate fill-tree targets: `GetFillTreeTargets()` from `UnlinkedNodes`.
 3. Enqueue header-height / header-hash tasks.
 4. Workers run header sync; newly inserted headers enqueue corresponding body tasks in `task_process/runtime.go`.
-5. Scan materializes current low-to-high full store-branch targets, backfills missing body tasks for branch nodes without payload, and hands the full branches to the serial store worker.
+5. Scan materializes current low-to-high branch suffixes, enqueues body tasks for missing payloads, and hands only the contiguous storable prefixes to the serial store worker.
 
 Code: `fetch/scan/flow.go`, `fetch/scan/flow_expand_tree.go`, `fetch/scan/flow_fill_tree.go`, `fetch/scan/flow_sync_body.go`, `fetch/scan/flow_store_branch.go`, `fetch/scan/worker.go`, `fetch/task_process/runtime.go`, `fetch/task_process/task_process.go`, `fetch/taskpool/pool.go`.
 
@@ -301,15 +303,15 @@ Goals in §1 match implementation (header/tree, P, D, store, prune cleanup, orph
 
 ## 7. Code map
 
-Packages under **`fetch/`**: root orchestration (`fetch_manager.go`, `runtime_state.go`, `fetch/scan/prune_runtime.go`, `fetch/restore/runtime.go`), **`fetch/scan/`** (pipeline coordinator and stage-specific files), **`fetch/store/`** (payload/stored/prune/`SerialWorker`), **`fetch/taskpool/`**, **`fetch/task_process/`**, **`fetch/node/`**, **`fetch/fetcher/`**, **`fetch/header_notify/`**, **`fetch/convert/`**.
+Packages under **`fetch/`**: root orchestration (`fetch_manager.go`, `runtime_state.go`, `fetch/scan/prune_runtime.go`, `fetch/restore/runtime.go`), **`fetch/scan/`** (pipeline coordinator, branch materialization, missing-body scheduling, prune runtime), **`fetch/store/`** (staging payloads, stored state, DB operator), **`fetch/serial_store/`** (serialized branch persistence), **`fetch/taskpool/`**, **`fetch/task_process/`**, **`fetch/node/`**, **`fetch/fetcher/`**, **`fetch/header_notify/`**, **`fetch/convert/`**.
 
 Current `fetch/scan/` split:
 
 - `flow.go`: stage orchestration, runtime binding, stage logging
 - `flow_expand_tree.go`: height-window expansion, expand-tree targets
 - `flow_fill_tree.go`: orphan-parent recovery, fill-tree targets
-- `flow_sync_body.go`: request missing body work and per-node body/store readiness
-- `flow_store_branch.go`: low-to-high branch materialization and serialized persistence handoff
+- `flow_sync_body.go`: request missing body work from low-to-high branch suffixes
+- `flow_store_branch.go`: low-to-high branch materialization, storable-prefix filtering, and serialized persistence handoff
 - `prune_runtime.go`: prune policy over stored tree state
 
 Legacy names in older docs (**`scan_flow.go`**, **`sync_block_data.go`** as monolithic files) refer to flows now split across the files above.
@@ -322,7 +324,7 @@ Legacy names in older docs (**`scan_flow.go`**, **`sync_block_data.go`** as mono
 | C1c full header sync | `SyncHeaderByHash` / `SyncHeaderByHeight` | `Flow.InsertTreeHeader`, `StagingStore.SetPendingHeader` | full fetched header cached after tree admission; no body payload |
 | C1b header reject | `Flow.InsertTreeHeader` | same | T unchanged; no header row for rejected key |
 | C2 body no implicit row | `StagingStore.SetPendingBody` | `GetPendingBody` | no silent create |
-| C3 D only on success/Complete/root-parent marker | `SerialWorker.runRequest` after DB ok / `RestoreBlockTree` / `MarkRootParentReady` | `MarkStored` | runtime + restore boundary |
+| C3 D only on success/Complete/root-parent marker | `serial_store.Worker.runRequest` after DB ok / `RestoreBlockTree` / `MarkRootParentReady` | `MarkStored` | runtime + restore boundary |
 | C4 prune cleans P/D/tasks except root-parent marker | `PruneRuntimeDeps.PruneStoredBlocks` + `MarkRootParentReady` | `scanFlowRuntimeDeps`, `restoreRuntimeDeps` | consistent |
 | C5 prune returns orphans | `BlockTree.Prune` | `Prune`/orphans | orphans in return |
 | C6 orphan height after prune | `Prune` | | heights > root |
@@ -389,7 +391,7 @@ Predicates as in §I7; successful parent fetch links children; failures remain r
 
 ## 9. Suggested test names
 
-`TestInsertTreeHeaderDoesNotCacheHeaderDirectly`, `TestSyncHeaderByHashCachesFullHeaderForBodySync`, `TestInvariantSetBlockBodyNoImplicitCreate`, `TestInvariantStoredOnlyAfterSuccessfulStore`, `TestInvariantPruneDeletesPendingAndStored`, `TestInvariantPruneReturnsRemovedOrphans`, `TestInvariantOrphansAboveRootAfterPrune`, `TestRestoreBlockTreeLoadsWindowAndCompleteState`, `TestLoadBlockWindowFromDBLoadsDoubleIrreversiblePlusOne`, `TestOnBecameLeaderUsesDBBootstrapWithoutRemoteFetch`, `TestOnBecameLeaderFallsBackToRemoteBootstrapWhenDBEmpty`, `TestExpandTreeWindow`, `TestGetHeaderByHeightSyncTargetsFormalPredicates`, `TestGetHeaderByHashSyncTargetsFormalPredicates`, `TestFillTreeMissingParents`, `TestFillTreeHashSyncFailureLeavesTargetRetryable`, `TestEnqueueRemoteHeaderCandidateRequiresContinuousParent`, `TestEnqueueRemoteHeaderCandidateRejectsInvalidContinuity`, `TestStartHeaderNotifiersEnqueuesConnectedHeaderHashCandidate`, `TestStartHeaderNotifiersRemoteUpdateRejectsUnlinkedHeaderCandidate`, `TestExpandTreeAdvancesExactlyByDerivedTargets`, `TestGetBodyBranchTargetsBuildsLowToHighBranches`, `TestSyncBodyBranchTargetStopsFailedBranchButContinuesOtherBranches`, `TestInvariantRunScanStagesWaitsForStoreCompletion`, `TestInvariantI5StoredBlockStateNormalizedClosure`, `TestFormalRuntimePointerIdentity`, `TestFormalCapturePruneSnapshot`, `TestFormalScanFlowPruneRuntimeIdentity`.
+`TestInsertTreeHeaderDoesNotCacheHeaderDirectly`, `TestSyncHeaderByHashCachesFullHeaderForBodySync`, `TestInvariantSetBlockBodyNoImplicitCreate`, `TestInvariantStoredOnlyAfterSuccessfulStore`, `TestInvariantPruneDeletesPendingAndStored`, `TestInvariantPruneReturnsRemovedOrphans`, `TestInvariantOrphansAboveRootAfterPrune`, `TestRestoreBlockTreeLoadsWindowAndCompleteState`, `TestLoadBlockWindowFromDBLoadsDoubleIrreversiblePlusOne`, `TestOnBecameLeaderUsesDBBootstrapWithoutRemoteFetch`, `TestOnBecameLeaderFallsBackToRemoteBootstrapWhenDBEmpty`, `TestExpandTreeWindow`, `TestGetHeaderByHeightSyncTargetsFormalPredicates`, `TestGetHeaderByHashSyncTargetsFormalPredicates`, `TestFillTreeMissingParents`, `TestFillTreeHashSyncFailureLeavesTargetRetryable`, `TestEnqueueRemoteHeaderCandidateRequiresContinuousParent`, `TestEnqueueRemoteHeaderCandidateRejectsInvalidContinuity`, `TestStartHeaderNotifiersEnqueuesConnectedHeaderHashCandidate`, `TestStartHeaderNotifiersRemoteUpdateRejectsUnlinkedHeaderCandidate`, `TestExpandTreeAdvancesExactlyByDerivedTargets`, `TestGetBodyBranchTargetsBuildsLowToHighBranches`, `TestRunSyncBodyStageEnqueuesMissingBodyTasksForBranchSuffixes`, `TestSubmitStoreBranchesWritesOnlyContiguousStorablePrefix`, `TestSyncBodyBranchTargetStopsFailedBranchButContinuesOtherBranches`, `TestInvariantRunScanStagesWaitsForStoreCompletion`, `TestInvariantI5StoredBlockStateNormalizedClosure`, `TestFormalRuntimePointerIdentity`, `TestFormalCapturePruneSnapshot`, `TestFormalScanFlowPruneRuntimeIdentity`.
 
 ## 10. Check ↔ test mapping
 
@@ -437,13 +439,13 @@ All C8/C9 templates in §10.2 are fully covered by the tests above.
 
 | Inv. | Tests |
 |---|---|
-| I1 | `TestInvariantStoredOnlyAfterSuccessfulStore`, `TestSyncBodyBranchTargetStopsFailedBranchButContinuesOtherBranches`, restore tests, `TestPlanP2DBIntermittentFailureThenRecovery` |
+| I1 | `TestInvariantStoredOnlyAfterSuccessfulStore`, `TestSubmitStoreBranchesWritesOnlyContiguousStorablePrefix`, `TestSyncBodyBranchTargetStopsFailedBranchButContinuesOtherBranches`, `TestSubmitBranchesStoresLowToHighFullBranch`, `TestSubmitBranchesUsesBranchLocalProgressForChildren`, restore tests, `TestPlanP2DBIntermittentFailureThenRecovery` |
 | I2 | `TestInvariantSetBlockBodyNoImplicitCreate` |
 | I3 | `TestInvariantPruneDeletesPendingAndStored`, `TestPruneComplexForkRemovesPrunedBranchesAndStoredState` |
 | I4 | `TestInvariantOrphansAboveRootAfterPrune` |
 | I5 | `TestInvariantI5StoredBlockStateNormalizedClosure` (`fetch/store/stored_block_state_invariant_test.go`), `fetch/store/stored_block_state_test.go` |
 | I6 | height-target tests, `TestRemoteChainUpdateMonotonicHeight`, `TestNodeManagerResetRemoteChainTips`, `TestStartHeaderNotifiersConsumerIgnoresRegressiveRemoteHeight` |
-| I7 | hash-target tests, `TestFillTreeHashSyncFailureLeavesTargetRetryable`, `TestGetHeaderByHashSyncTargetsFormalPredicates`, `TestFillTreeMissingParents`, `TestGetBodyBranchTargetsBuildsLowToHighBranches` |
+| I7 | hash-target tests, `TestFillTreeHashSyncFailureLeavesTargetRetryable`, `TestGetHeaderByHashSyncTargetsFormalPredicates`, `TestFillTreeMissingParents`, `TestGetBodyBranchTargetsBuildsLowToHighBranches`, `TestRunSyncBodyStageEnqueuesMissingBodyTasksForBranchSuffixes` |
 | I8 | No dedicated test (operational/DB-repair scope); I1 + C3 on restore; gap §11.5·8 |
 | I9 | `TestFormalRuntimePointerIdentity`, `TestFormalCapturePruneSnapshot`, `TestFormalScanFlowPruneRuntimeIdentity` — §2.2 wiring / identical scan/prune runtime pointers |
 | I10 | `TestRestoreBlockTreeLoadsWindowAndCompleteState`, `TestLoadBlockWindowFromDBLoadsDoubleIrreversiblePlusOne` |
@@ -456,7 +458,7 @@ Invariant **I9** requires `CaptureStateSnapshot` / `StoredHeightRangeOnTree` / `
 Run hints:
 
 1. Minimal (all packages under `fetch/` + `blocktree` invariants):
-   `go test ./fetch/... -run '^Test(Invariant|Formal)' -count=1 && go test ./blocktree -run TestInvariant -count=1`
+   `go test ./fetch/... -run 'Test(Invariant|Formal)|TestSubmitBranches(StoresLowToHighFullBranch|UsesBranchLocalProgressForChildren|MetricsReportSkipReasons|MetricsReportStoreDuration)|TestRunSyncBodyStageEnqueuesMissingBodyTasksForBranchSuffixes|TestSubmitStoreBranchesWritesOnlyContiguousStorablePrefix' -count=1 && go test ./blocktree -run TestInvariant -count=1`
    Note: `go test ./fetch` **only** runs the `fetch` root package; use `./fetch/...` to include `fetch/store`, `fetch/scan`, etc.
 2. Full formal suite: §14.2.2
 3. Full repo: `go test ./... -count=1 && go build ./...`; race: §11.4
@@ -503,7 +505,7 @@ Notes: I6 uses max tip across nodes; `ResetRemoteChainTips` on each `createRunti
 
 ### 11.6 Concurrency & lost leader (synchronous body branch stage)
 
-`SyncStoreBranchTarget` (compat wrapper: `SyncBodyBranchTarget`) uses scan `ctx`; cancel on lost leader; nil `blockTree` guards; `StoreBlockData` gets same `ctx`; `StoreFullBlock` workers respect `ctx`—no finalize/`MarkStored` if cancelled mid-flight. The store-branch stage itself is synchronous within a scan cycle, so prune waits for the serial-store submission to return. Tests: `TestSyncBodyBranchTargetStopsWhenContextCancelled`, `TestInvariantRunScanStagesWaitsForStoreCompletion`, `TestStoreFullBlockReturnsEarlyWhenContextAlreadyCancelled`, `TestStoreFullBlockManyTasksSmallChannelNoDeadlock`, `TestStoreFullBlockSkipsFinalizeWhenContextCancelledDuringWorkers`. **Residual**: in-flight SQL may finish; bounded retries may see `context canceled` tail.
+`SyncStoreBranchTarget` (compat wrapper: `SyncBodyBranchTarget`) uses scan `ctx`; cancel on lost leader; nil `blockTree` guards; `StoreBlockData` gets same `ctx`; `serial_store.Worker.SubmitBranches` waits for the worker result and checks cancellation before queueing and before returning. The store-branch stage itself is synchronous within a scan cycle, so prune waits for the serial-store submission to return. `StoreFullBlock` body-fetch workers also respect `ctx`, so no finalize/`MarkStored` after a cancelled body fetch. Tests: `TestSyncBodyBranchTargetStopsWhenContextCancelled`, `TestInvariantRunScanStagesWaitsForStoreCompletion`, `TestStoreFullBlockReturnsEarlyWhenContextAlreadyCancelled`, `TestStoreFullBlockManyTasksSmallChannelNoDeadlock`, `TestStoreFullBlockSkipsFinalizeWhenContextCancelledDuringWorkers`, `TestSubmitBranchesMetricsReportSkipReasons`, `TestSubmitBranchesMetricsReportStoreDuration`. **Residual**: in-flight SQL may finish; bounded retries may see `context canceled` tail.
 
 ## 12. Test plan P1–P6
 
@@ -539,7 +541,7 @@ Caching a full `BlockHeaderJson` under `P[k]` after `insertTreeHeader` could avo
 1. `Flow.EnqueueRemoteHeaderCandidate` — scan-level newHeads gate; continuous candidate only; enqueues header-by-hash, no direct tree insert.
 2. `Flow.InsertTreeHeader` — `BlockTree.Insert` only; no staging header/body cache population.
 3. `StagingStore.SetPendingBody` — no create if key missing (`TestInvariantSetBlockBodyNoImplicitCreate`).
-4. `Flow.SubmitStoreBranchesLowToHigh` / `SerialWorker` — full low-to-high body branches in, `MarkStored` only after successful `StoreBlockData`.
+4. `Flow.SubmitStoreBranchesLowToHigh` / `serial_store.Worker` — low-to-high branch suffixes in, contiguous storable prefixes written, `MarkStored` only after successful `StoreBlockData`.
 5. `RestoreBlockTree` / `RestoreRemoteRoot` — restore-owned leader bootstrap; DB irreversible ignored; height-ordered restore; `Complete` → stored only when inserted into tree; current root parent → readiness marker.
 6. `onBecameLeader` — DB restore vs remote restore, both through `fetch/restore`.
 7. `Flow` expand-tree / fill-tree target enumeration + task pool (`HandleTaskPoolTask`).
@@ -553,17 +555,17 @@ Caching a full `BlockHeaderJson` under `P[k]` after `insertTreeHeader` could avo
 
 One-line regression (full `-run` regex for fetch + blocktree):
 
-`go test ./fetch/... -run 'Test(InsertTreeHeaderDoesNotCacheHeaderDirectly|SyncHeaderByHashCachesFullHeaderForBodySync|Invariant(HeaderInsertRejectedTreeUnchanged|StoredOnlyAfterSuccessfulStore|PruneDeletesPendingAndStored)|TestInvariantSetBlockBodyNoImplicitCreate|TestInvariantI5StoredBlockStateNormalizedClosure|Formal|RestoreBlockTreeLoadsWindowAndCompleteState|LoadBlockWindowFromDBLoadsDoubleIrreversiblePlusOne|OnBecameLeaderUsesDBBootstrapWithoutRemoteFetch|OnBecameLeaderFallsBackToRemoteBootstrapWhenDBEmpty|GetHeaderByHeightSyncTargetsFormalPredicates|GetHeaderByHashSyncTargetsFormalPredicates|FillTreeHashSyncFailureLeavesTargetRetryable|EnqueueRemoteHeaderCandidate(RequiresContinuousParent|RejectsInvalidContinuity)|StartHeaderNotifiers(EnqueuesConnectedHeaderHashCandidate|RemoteUpdateRejectsUnlinkedHeaderCandidate)|ExpandTreeAdvancesExactlyByDerivedTargets|ExpandTreeWindow|FillTreeMissingParents|PruneComplexForkRemovesPrunedBranchesAndStoredState)' -count=1 && go test ./blocktree -run 'TestInvariant(PruneReturnsRemovedOrphans|OrphansAboveRootAfterPrune)' -count=1`
+`go test ./fetch/... -run 'Test(InsertTreeHeaderDoesNotCacheHeaderDirectly|SyncHeaderByHashCachesFullHeaderForBodySync|Invariant(HeaderInsertRejectedTreeUnchanged|StoredOnlyAfterSuccessfulStore|PruneDeletesPendingAndStored)|TestInvariantSetBlockBodyNoImplicitCreate|TestInvariantI5StoredBlockStateNormalizedClosure|Formal|RestoreBlockTreeLoadsWindowAndCompleteState|LoadBlockWindowFromDBLoadsDoubleIrreversiblePlusOne|OnBecameLeaderUsesDBBootstrapWithoutRemoteFetch|OnBecameLeaderFallsBackToRemoteBootstrapWhenDBEmpty|GetHeaderByHeightSyncTargetsFormalPredicates|GetHeaderByHashSyncTargetsFormalPredicates|FillTreeHashSyncFailureLeavesTargetRetryable|EnqueueRemoteHeaderCandidate(RequiresContinuousParent|RejectsInvalidContinuity)|StartHeaderNotifiers(EnqueuesConnectedHeaderHashCandidate|RemoteUpdateRejectsUnlinkedHeaderCandidate)|ExpandTreeAdvancesExactlyByDerivedTargets|ExpandTreeWindow|FillTreeMissingParents|RunSyncBodyStageEnqueuesMissingBodyTasksForBranchSuffixes|SubmitStoreBranchesWritesOnlyContiguousStorablePrefix|PruneComplexForkRemovesPrunedBranchesAndStoredState)|TestSubmitBranches(StoresLowToHighFullBranch|UsesBranchLocalProgressForChildren|MetricsReportSkipReasons|MetricsReportStoreDuration)' -count=1 && go test ./blocktree -run 'TestInvariant(PruneReturnsRemovedOrphans|OrphansAboveRootAfterPrune)' -count=1`
 
 #### 14.2.2 Full formal regression
 
 ```bash
 go test ./fetch/... -count=1 \
-  -run 'Test(Invariant|Formal)|TestInsertTreeHeaderDoesNotCacheHeaderDirectly|TestSyncHeaderByHashCachesFullHeaderForBodySync|TestRestoreBlockTreeLoadsWindowAndCompleteState|TestLoadBlockWindowFromDBLoadsDoubleIrreversiblePlusOne|TestOnBecameLeaderUsesDBBootstrapWithoutRemoteFetch|TestOnBecameLeaderFallsBackToRemoteBootstrapWhenDBEmpty|TestExpandTreeWindow|TestFillTreeMissingParents|TestGetHeaderByHeightSyncTargetsFormalPredicates|TestGetHeaderByHashSyncTargetsFormalPredicates|TestFillTreeHashSyncFailureLeavesTargetRetryable|TestEnqueueRemoteHeaderCandidate(RequiresContinuousParent|RejectsInvalidContinuity)|TestStartHeaderNotifiers(ConsumerIgnoresRegressiveRemoteHeight|EnqueuesConnectedHeaderHashCandidate|RemoteUpdateRejectsUnlinkedHeaderCandidate)|TestExpandTreeAdvancesExactlyByDerivedTargets|TestPruneComplexForkRemovesPrunedBranchesAndStoredState|TestPlanP[2345]|TestRemoteChainUpdateMonotonicHeight|TestNodeManagerResetRemoteChainTips|TestStoredBlockState' \
+  -run 'Test(Invariant|Formal)|TestInsertTreeHeaderDoesNotCacheHeaderDirectly|TestSyncHeaderByHashCachesFullHeaderForBodySync|TestRestoreBlockTreeLoadsWindowAndCompleteState|TestLoadBlockWindowFromDBLoadsDoubleIrreversiblePlusOne|TestOnBecameLeaderUsesDBBootstrapWithoutRemoteFetch|TestOnBecameLeaderFallsBackToRemoteBootstrapWhenDBEmpty|TestExpandTreeWindow|TestFillTreeMissingParents|TestGetHeaderByHeightSyncTargetsFormalPredicates|TestGetHeaderByHashSyncTargetsFormalPredicates|TestFillTreeHashSyncFailureLeavesTargetRetryable|TestEnqueueRemoteHeaderCandidate(RequiresContinuousParent|RejectsInvalidContinuity)|TestStartHeaderNotifiers(ConsumerIgnoresRegressiveRemoteHeight|EnqueuesConnectedHeaderHashCandidate|RemoteUpdateRejectsUnlinkedHeaderCandidate)|TestExpandTreeAdvancesExactlyByDerivedTargets|TestRunSyncBodyStageEnqueuesMissingBodyTasksForBranchSuffixes|TestSubmitStoreBranchesWritesOnlyContiguousStorablePrefix|TestPruneComplexForkRemovesPrunedBranchesAndStoredState|TestPlanP[2345]|TestRemoteChainUpdateMonotonicHeight|TestNodeManagerResetRemoteChainTips|TestStoredBlockState|TestSubmitBranches(StoresLowToHighFullBranch|UsesBranchLocalProgressForChildren|MetricsReportSkipReasons|MetricsReportStoreDuration)' \
 && go test ./blocktree -count=1 -run 'TestInvariant'
 ```
 
-Step-by-step (19 commands, audit trail): run each line below in order.
+Step-by-step (21 commands, audit trail): run each line below in order.
 
 1. `go test ./fetch/scan -run TestInsertTreeHeaderDoesNotCacheHeaderDirectly -count=1`
 2. `go test ./fetch/scan -run TestSyncHeaderByHashCachesFullHeaderForBodySync -count=1`
@@ -582,8 +584,10 @@ Step-by-step (19 commands, audit trail): run each line below in order.
 15. `go test ./fetch/scan -run 'Test(ExpandTreeWindow|FillTreeMissingParents)' -count=1`
 16. `go test ./fetch/scan -run 'TestEnqueueRemoteHeaderCandidate(RequiresContinuousParent|RejectsInvalidContinuity)' -count=1`
 17. `go test ./fetch -run 'TestStartHeaderNotifiers(EnqueuesConnectedHeaderHashCandidate|RemoteUpdateRejectsUnlinkedHeaderCandidate)' -count=1`
-18. `go test ./blocktree -run TestInvariantPruneReturnsRemovedOrphans -count=1`
-19. `go test ./blocktree -run TestInvariantOrphansAboveRootAfterPrune -count=1`
+18. `go test ./fetch/scan -run 'Test(RunSyncBodyStageEnqueuesMissingBodyTasksForBranchSuffixes|SubmitStoreBranchesWritesOnlyContiguousStorablePrefix)' -count=1`
+19. `go test ./fetch/serial_store -run 'TestSubmitBranches(StoresLowToHighFullBranch|UsesBranchLocalProgressForChildren|MetricsReportSkipReasons|MetricsReportStoreDuration)' -count=1`
+20. `go test ./blocktree -run TestInvariantPruneReturnsRemovedOrphans -count=1`
+21. `go test ./blocktree -run TestInvariantOrphansAboveRootAfterPrune -count=1`
 
 #### C8/C9 minimal
 
@@ -610,11 +614,12 @@ flowchart LR
       H["Header insert<br/>Flow.InsertTreeHeader"]
       TI["BlockTree.Insert"]
 
-      B["Body fill<br/>syncNodeDataByHash"]
+      B["Body fill<br/>SyncNodeDataByHash"]
       PB["SetPendingBody"]
       PN["No new row"]
 
-      W["Persist<br/>storeNodeBodyData"]
+      W["Persist<br/>serial_store.SubmitBranches"]
+      WF["Scan filters<br/>storable prefix"]
       DB[("StoreBlockData(ctx)")]
       DA["storedBlocks.MarkStored"]
       DN["Skip D"]
@@ -644,7 +649,8 @@ flowchart LR
    PB -->|key exists| P
    PB -->|key missing| PN
 
-   W -->|scan ctx| DB
+   W --> WF
+   WF -->|scan ctx| DB
    DB -->|ok| DA
    DB -->|err| DN
    DA --> D
@@ -670,7 +676,7 @@ flowchart LR
    subgraph KeyFns[Key functions]
      F1[Flow.InsertTreeHeader]
      F2[SetPendingBody]
-     F3[storeNodeBodyData]
+     F3[serial_store.SubmitBranches]
      F4[RestoreBlockTree/RestoreRemoteRoot]
    F5[onBecameLeader]
    F6[getHeaderByHeight/HashSyncTargets]

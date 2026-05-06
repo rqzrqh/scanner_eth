@@ -3,6 +3,7 @@ package scan
 import (
 	"context"
 	fetchstore "scanner_eth/fetch/store"
+	fetchtask "scanner_eth/fetch/taskpool"
 	"strings"
 	"testing"
 )
@@ -50,6 +51,34 @@ func TestGetBodyBranchTargetsBuildsLowToHighBranches(t *testing.T) {
 	}
 }
 
+func TestRunSyncBodyStageEnqueuesMissingBodyTasksForBranchSuffixes(t *testing.T) {
+	env := newTestFlowEnv(t, 2)
+	env.blockTree.Insert(1, "a", "", 1)
+	env.blockTree.Insert(2, "b", "a", 1)
+	env.blockTree.Insert(3, "c", "b", 1)
+	env.blockTree.Insert(2, "d", "a", 1)
+	env.stored.MarkStored("a")
+	env.stagingStore.SetPendingHeader("b", makeTestHeader(2, "b", "a"))
+	env.stagingStore.SetPendingHeader("c", makeTestHeader(3, "c", "b"))
+	env.stagingStore.SetPendingHeader("d", makeTestHeader(2, "d", "a"))
+	env.stagingStore.SetPendingBody("c", makeTestEventBlockData(3, "c", "b"))
+	env.taskPool.HandleTaskFn = func(_ *fetchtask.SyncTask, stopCh <-chan struct{}) bool {
+		<-stopCh
+		return false
+	}
+
+	bodyBranches := env.flow.RunSyncBodyStage(context.Background())
+	if got := strings.Join(env.flow.serializeStoreBranches(bodyBranches), bodyTargetBranchSep); got != "b,c;d" {
+		t.Fatalf("expected body sync stage to inspect branch suffixes, got=%q", got)
+	}
+	if !env.taskPool.HasTask("b") || !env.taskPool.HasTask("d") {
+		t.Fatalf("missing body nodes should be enqueued, tracked=%+v", env.taskPool.Tracked)
+	}
+	if env.taskPool.HasTask("c") {
+		t.Fatalf("node with body payload should not be enqueued, tracked=%+v", env.taskPool.Tracked)
+	}
+}
+
 func TestSubmitStoreBranchesFiltersMissingBodiesBeforeSerialStore(t *testing.T) {
 	env := newTestFlowEnv(t, 2)
 	env.blockTree.Insert(1, "a", "", 1)
@@ -79,5 +108,45 @@ func TestSubmitStoreBranchesFiltersMissingBodiesBeforeSerialStore(t *testing.T) 
 	}
 	if reasons["missing_body"] != 0 {
 		t.Fatalf("scan should filter missing bodies before serial_store, got=%+v", reasons)
+	}
+}
+
+func TestSubmitStoreBranchesWritesOnlyContiguousStorablePrefix(t *testing.T) {
+	env := newTestFlowEnv(t, 2)
+	env.blockTree.Insert(1, "a", "", 1)
+	env.blockTree.Insert(2, "b", "a", 1)
+	env.blockTree.Insert(3, "c", "b", 1)
+	env.stored.MarkStored("a")
+	env.stagingStore.SetPendingHeader("b", makeTestHeader(2, "b", "a"))
+	env.stagingStore.SetPendingHeader("c", makeTestHeader(3, "c", "b"))
+	env.stagingStore.SetPendingBody("b", makeTestEventBlockData(2, "b", "a"))
+
+	writes := make([]string, 0, 1)
+	env.attachStoreWorker(func(_ context.Context, blockData *fetchstore.EventBlockData) error {
+		if blockData != nil && blockData.StorageFullBlock != nil {
+			writes = append(writes, blockData.StorageFullBlock.Block.Hash)
+		}
+		return nil
+	})
+
+	if err := env.flow.SubmitStoreBranches(context.Background(), env.flow.collectStoreBranchesForBodySync()); err != nil {
+		t.Fatalf("submit branches failed: %v", err)
+	}
+	if got := strings.Join(writes, ","); got != "b" {
+		t.Fatalf("expected only contiguous storable prefix to be written, got=%q", got)
+	}
+	if !env.stored.IsStored("b") {
+		t.Fatal("storable prefix node should be marked stored after successful write")
+	}
+	if env.stored.IsStored("c") {
+		t.Fatal("node after missing body must not be marked stored")
+	}
+	metrics := env.store.MetricsPayload()
+	reasons, ok := metrics["skip_reasons"].(map[string]uint64)
+	if !ok {
+		t.Fatalf("missing skip reasons payload: %+v", metrics)
+	}
+	if reasons["missing_body"] != 0 {
+		t.Fatalf("scan should not submit missing-body suffix to serial_store, got=%+v", reasons)
 	}
 }

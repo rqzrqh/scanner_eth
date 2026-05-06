@@ -48,10 +48,9 @@ type testFlowEnv struct {
 	store        *fetchserialstore.Worker
 	stored       *fetchstore.StoredBlockState
 
-	fetchHeaderByHeightFn     func(context.Context, uint64) *fetcherpkg.BlockHeaderJson
-	fetchHeaderByHashFn       func(context.Context, string) *fetcherpkg.BlockHeaderJson
-	bootstrapHeaderByHeightFn func(context.Context, uint64) *fetcherpkg.BlockHeaderJson
-	fetchBodyByHashFn         func(context.Context, string, uint64, *fetcherpkg.BlockHeaderJson) (*fetchstore.EventBlockData, int, int64, bool)
+	fetchHeaderByHeightFn func(context.Context, uint64) *fetcherpkg.BlockHeaderJson
+	fetchHeaderByHashFn   func(context.Context, string) *fetcherpkg.BlockHeaderJson
+	fetchBodyByHashFn     func(context.Context, string, uint64, *fetcherpkg.BlockHeaderJson) (*fetchstore.EventBlockData, int, int64, bool)
 
 	flow *Flow
 }
@@ -62,9 +61,6 @@ func testFetchHeaderByHeight(env *testFlowEnv, ctx context.Context, height uint6
 	}
 	if env.fetchHeaderByHeightFn != nil {
 		return env.fetchHeaderByHeightFn(ctx, height)
-	}
-	if env.bootstrapHeaderByHeightFn != nil {
-		return env.bootstrapHeaderByHeightFn(ctx, height)
 	}
 	return nil
 }

@@ -6,23 +6,6 @@ import (
 	"testing"
 )
 
-func TestFillTreeMissingParents(t *testing.T) {
-	env := newTestFlowEnv(t, 2)
-	env.flow.taskRuntime.InsertTreeHeader(makeTestHeader(7, "0x07", ""))
-	env.blockTree.Insert(17, "0x11", "0x10", 1)
-	env.fetchHeaderByHashFn = func(_ context.Context, hash string) *fetcherpkg.BlockHeaderJson {
-		if normalizeTestHash(hash) == "0x10" {
-			return makeTestHeader(16, "0x10", "0x07")
-		}
-		return nil
-	}
-
-	env.flow.FillTreeMissingParents()
-	if env.blockTree.Get("0x10") == nil || env.blockTree.Get("0x11") == nil {
-		t.Fatal("expected orphan parent and child to be linked after fillTreeMissingParents")
-	}
-}
-
 func TestGetHeaderByHashSyncTargetsFormalPredicates(t *testing.T) {
 	env := newTestFlowEnv(t, 2)
 

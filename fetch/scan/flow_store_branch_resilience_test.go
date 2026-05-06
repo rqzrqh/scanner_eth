@@ -20,7 +20,9 @@ func TestPlanP2DBIntermittentFailureThenRecovery(t *testing.T) {
 		return nil
 	})
 
-	env.flow.SubmitStoreBranchesLowToHigh(context.Background())
+	if err := env.flow.SubmitStoreBranches(context.Background(), env.flow.BuildStoreBranches()); err != nil {
+		t.Fatalf("submit store branches failed: %v", err)
+	}
 	if env.stored.IsStored("b") {
 		t.Fatal("b should not be marked stored after first failed write")
 	}
@@ -28,7 +30,9 @@ func TestPlanP2DBIntermittentFailureThenRecovery(t *testing.T) {
 		t.Fatal("pending header/body for b must remain after failed DB write for retry")
 	}
 
-	env.flow.SubmitStoreBranchesLowToHigh(context.Background())
+	if err := env.flow.SubmitStoreBranches(context.Background(), env.flow.BuildStoreBranches()); err != nil {
+		t.Fatalf("submit store branches failed: %v", err)
+	}
 	if env.stored.IsStored("b") {
 		t.Fatal("b should not be marked stored after second failed write")
 	}
@@ -36,7 +40,9 @@ func TestPlanP2DBIntermittentFailureThenRecovery(t *testing.T) {
 		t.Fatal("pending header/body for b must remain after second failed DB write")
 	}
 
-	env.flow.SubmitStoreBranchesLowToHigh(context.Background())
+	if err := env.flow.SubmitStoreBranches(context.Background(), env.flow.BuildStoreBranches()); err != nil {
+		t.Fatalf("submit store branches failed: %v", err)
+	}
 	if !env.stored.IsStored("b") {
 		t.Fatal("b should be marked stored after recovery write succeeds")
 	}

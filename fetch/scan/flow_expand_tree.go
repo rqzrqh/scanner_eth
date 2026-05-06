@@ -6,8 +6,6 @@ import (
 	"strings"
 	"time"
 
-	fetcherpkg "scanner_eth/fetch/fetcher"
-
 	"github.com/sirupsen/logrus"
 )
 
@@ -49,18 +47,6 @@ func (sf *Flow) latestRemoteHeight() uint64 {
 	return sf.nodeManager.GetLatestHeight()
 }
 
-func (sf *Flow) bootstrapHeaderByHeight(ctx context.Context, height uint64) *fetcherpkg.BlockHeaderJson {
-	if sf == nil {
-		return nil
-	}
-	for _, nodeOp := range sf.nodeManager.NodeOperators() {
-		if header := sf.fetcher.FetchBlockHeaderByHeight(ctx, nodeOp, 0, height); header != nil {
-			return header
-		}
-	}
-	return nil
-}
-
 func (sf *Flow) GetExpandTreeTargets() []uint64 {
 	return sf.collectExpandTreeTargets()
 }
@@ -86,19 +72,10 @@ func (sf *Flow) collectExpandTreeTargets() []uint64 {
 		return nil
 	}
 	window := end - start + 1
-	if window >= targetSize {
-		return nil
-	}
 	maxEnd := end + (targetSize - window)
 	latestRemote := sf.latestRemoteHeight()
-	if latestRemote == 0 {
-		return nil
-	}
 	if maxEnd > latestRemote {
 		maxEnd = latestRemote
-	}
-	if maxEnd <= end {
-		return nil
 	}
 
 	heights := make([]uint64, 0, maxEnd-end)
@@ -137,26 +114,6 @@ func (sf *Flow) SyncExpandTreeTarget(target string) (bool, string) {
 	return true, ""
 }
 
-func (sf *Flow) EnsureBootstrapHeader() bool {
-	sf.BindRuntimeDeps()
-	if sf == nil {
-		return false
-	}
-	if _, _, ok := sf.blockTree.HeightRange(); ok {
-		return true
-	}
-	height := sf.startHeight
-	header := sf.bootstrapHeaderByHeight(context.Background(), height)
-	if header == nil {
-		logrus.Warnf("bootstrap get header failed from all nodes. height:%v", height)
-		return false
-	}
-	sf.taskRuntime.InsertTreeHeader(header)
-	sf.MarkRootParentReady()
-	logrus.Debugf("bootstrap blocktree root by startHeight success. height:%v hash:%v", height, sf.normalize(header.Hash))
-	return true
-}
-
 func (sf *Flow) MarkRootParentReady() bool {
 	if sf == nil || sf.blockTree == nil || sf.storedBlocks == nil {
 		return false
@@ -172,40 +129,6 @@ func (sf *Flow) MarkRootParentReady() bool {
 	sf.storedBlocks.MarkStored(parentHash)
 	logrus.Debugf("mark blocktree root parent ready. root_height:%v root_hash:%v parent_hash:%v", root.Height, sf.normalize(root.Key), parentHash)
 	return true
-}
-
-func (sf *Flow) SyncHeaderWindow() {
-	sf.ExpandTreeWindow()
-}
-
-func (sf *Flow) ExpandTreeWindow() {
-	sf.BindRuntimeDeps()
-	if sf == nil {
-		return
-	}
-	targetSize, ok := sf.HeaderWindowTargetSize()
-	if !ok {
-		return
-	}
-	for {
-		start, end, hasRange := sf.blockTree.HeightRange()
-		if !hasRange {
-			height := sf.startHeight
-			header := sf.taskRuntime.FetchAndInsertHeaderByHeight(height)
-			if header == nil {
-				return
-			}
-			sf.MarkRootParentReady()
-			logrus.Debugf("sync header window bootstrap by startHeight success. height:%v hash:%v", height, sf.normalize(header.Hash))
-			continue
-		}
-		if sf.ShouldStopHeaderWindowSync(start, end, targetSize) {
-			return
-		}
-		if sf.taskRuntime.FetchAndInsertHeaderByHeight(end+1) == nil {
-			return
-		}
-	}
 }
 
 func (sf *Flow) HeaderWindowTargetSize() (uint64, bool) {

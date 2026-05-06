@@ -75,22 +75,6 @@ func (sf *Flow) SyncFillTreeTarget(target string) (bool, string) {
 	return true, ""
 }
 
-func (sf *Flow) SyncOrphanParents() {
-	sf.FillTreeMissingParents()
-}
-
-func (sf *Flow) FillTreeMissingParents() {
-	if sf == nil {
-		return
-	}
-	for _, missingParent := range sf.blockTree.UnlinkedNodes() {
-		hash := sf.normalize(missingParent)
-		if sf.ShouldSyncOrphanParent(hash) {
-			sf.taskRuntime.FetchAndInsertHeaderByHash(hash)
-		}
-	}
-}
-
 func (sf *Flow) ShouldSyncOrphanParent(hash string) bool {
 	return sf != nil && hash != "" && sf.blockTree.Get(hash) == nil
 }

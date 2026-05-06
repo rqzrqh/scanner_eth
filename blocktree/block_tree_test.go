@@ -944,3 +944,98 @@ func TestBranchesWeightTieBreakComparator(t *testing.T) {
 		t.Fatalf("expected weight-order C,B got %s,%s", branches[0].Header.Key, branches[1].Header.Key)
 	}
 }
+
+func TestSelectPruneRootDefensiveBranches(t *testing.T) {
+	t.Run("candidate below minimum returns nil", func(t *testing.T) {
+		bt := NewBlockTree(2)
+		nv := &LinkedNode{Node: Node{Height: 2, Key: "B"}}
+		if got := bt.selectPruneRoot(nv, 3, 4); got != nil {
+			t.Fatalf("expected nil root below minimum height, got=%+v", got)
+		}
+	})
+
+	t.Run("walk reaches parentless node above maximum", func(t *testing.T) {
+		bt := NewBlockTree(2)
+		nv := &LinkedNode{Node: Node{Height: 5, Key: "B"}}
+		if got := bt.selectPruneRoot(nv, 1, 4); got != nil {
+			t.Fatalf("expected nil root when parentless node is above maximum, got=%+v", got)
+		}
+	})
+
+	t.Run("nil candidate returns nil", func(t *testing.T) {
+		bt := NewBlockTree(2)
+		if got := bt.selectPruneRoot(nil, 1, 4); got != nil {
+			t.Fatalf("expected nil root for nil candidate, got=%+v", got)
+		}
+	})
+}
+
+func TestCollectDescendantsDefensiveBranches(t *testing.T) {
+	bt := NewBlockTree(2)
+	bt.Insert(1, "A", "", 1)
+	bt.Insert(2, "B", "A", 1)
+
+	retained := make(map[Key]struct{})
+	bt.collectDescendants("A", retained)
+	if _, ok := retained["A"]; !ok {
+		t.Fatal("expected A to be retained")
+	}
+	if _, ok := retained["B"]; !ok {
+		t.Fatal("expected B descendant to be retained")
+	}
+
+	before := len(retained)
+	bt.collectDescendants("A", retained)
+	if len(retained) != before {
+		t.Fatalf("seen node should not change retained set, got=%v", retained)
+	}
+
+	bt.collectDescendants("missing", retained)
+	if len(retained) != before {
+		t.Fatalf("missing node should not change retained set, got=%v", retained)
+	}
+}
+
+func TestPruneOrphansAtOrBelowDropsNilOrphans(t *testing.T) {
+	bt := NewBlockTree(2)
+	bt.orphanParentToChild["missing"] = map[Key]*Node{
+		"nil-child": nil,
+		"old":       {Height: 2, Key: "old", ParentKey: "missing", Weight: 1},
+		"new":       {Height: 3, Key: "new", ParentKey: "missing", Weight: 1},
+	}
+	bt.orphanKeySet["nil-child"] = struct{}{}
+	bt.orphanKeySet["old"] = struct{}{}
+	bt.orphanKeySet["new"] = struct{}{}
+
+	pruned := bt.pruneOrphansAtOrBelow(2)
+	prunedKeys := nodeValueKeys(pruned)
+	if _, ok := prunedKeys["old"]; !ok {
+		t.Fatal("expected old orphan to be pruned")
+	}
+	if _, ok := prunedKeys["new"]; ok {
+		t.Fatal("new orphan should remain above threshold")
+	}
+	if _, ok := bt.orphanKeySet["nil-child"]; ok {
+		t.Fatal("nil orphan should be removed from orphanKeySet")
+	}
+	if _, ok := bt.orphanKeySet["old"]; ok {
+		t.Fatal("old orphan should be removed from orphanKeySet")
+	}
+	if _, ok := bt.orphanKeySet["new"]; !ok {
+		t.Fatal("new orphan should remain in orphanKeySet")
+	}
+}
+
+func TestSnapshotNilAndEmptyOrphanBuckets(t *testing.T) {
+	var nilTree *BlockTree
+	if got := nilTree.Snapshot(); got != (Snapshot{}) {
+		t.Fatalf("nil tree snapshot should be zero, got=%+v", got)
+	}
+
+	bt := NewBlockTree(2)
+	bt.orphanParentToChild["empty"] = map[Key]*Node{}
+	snapshot := bt.Snapshot()
+	if snapshot.OrphanParentCount != 0 || snapshot.OrphanCount != 0 {
+		t.Fatalf("empty orphan bucket should not affect counts, got=%+v", snapshot)
+	}
+}
