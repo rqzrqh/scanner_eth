@@ -11,6 +11,7 @@ import (
 	"scanner_eth/util"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -36,11 +37,23 @@ type Fetcher interface {
 }
 
 var (
-	enableInternalTx bool
+	enableInternalTx         bool
+	fullBlockBodyConcurrency = 3
 )
 
 func SetEnableInternalTx(enable bool) {
 	enableInternalTx = enable
+}
+
+func SetFullBlockBodyConcurrency(concurrency int) {
+	fullBlockBodyConcurrency = normalizeFullBlockBodyConcurrency(concurrency)
+}
+
+func normalizeFullBlockBodyConcurrency(concurrency int) int {
+	if concurrency <= 0 {
+		return 1
+	}
+	return concurrency
 }
 
 type TokenErc721KeyValue struct {
@@ -237,6 +250,62 @@ func compactNodeOperators(nodeOps []nodepkg.NodeOperator) []nodepkg.NodeOperator
 	return compact
 }
 
+type fullBlockStageTask func(context.Context) bool
+
+func runFullBlockStage(ctx context.Context, tasks ...fullBlockStageTask) bool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if len(tasks) == 0 {
+		return true
+	}
+	if len(tasks) == 1 {
+		return tasks[0](ctx)
+	}
+	concurrency := normalizeFullBlockBodyConcurrency(fullBlockBodyConcurrency)
+	if concurrency > len(tasks) {
+		concurrency = len(tasks)
+	}
+
+	stageCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	sem := make(chan struct{}, concurrency)
+	results := make(chan bool, len(tasks))
+	var wg sync.WaitGroup
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		wg.Add(1)
+		go func(task fullBlockStageTask) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-stageCtx.Done():
+				results <- false
+				return
+			}
+			defer func() { <-sem }()
+			ok := task(stageCtx)
+			if !ok {
+				cancel()
+			}
+			results <- ok
+		}(task)
+	}
+	wg.Wait()
+	close(results)
+
+	ok := true
+	for result := range results {
+		if !result {
+			ok = false
+		}
+	}
+	return ok
+}
+
 // FetchFullBlockWithAttempts loads txs, receipts, internal traces (if enabled), and token/balance state from RPC using the given header.
 func FetchFullBlockWithAttempts(ctx context.Context, nodeOps []nodepkg.NodeOperator, taskId int, db *gorm.DB, header *BlockHeaderJson) *FullBlockFetchResult {
 	if ctx == nil {
@@ -248,9 +317,17 @@ func FetchFullBlockWithAttempts(ctx context.Context, nodeOps []nodepkg.NodeOpera
 	}
 	height := hexutil.MustDecodeUint64(header.Number)
 	attempts := make([]FullBlockRPCAttempt, 0)
-	fullBlock, itemTimings := fetchFullBlock(ctx, func(opName string, call func(nodepkg.NodeOperator) error) fullBlockRPCResult {
-		result := withFullBlockRPCRetry(ctx, nodeOps, height, taskId, opName, call)
+	var attemptsMu sync.Mutex
+	fullBlock, itemTimings := fetchFullBlock(ctx, func(rpcCtx context.Context, opName string, call func(context.Context, nodepkg.NodeOperator) error) fullBlockRPCResult {
+		if rpcCtx == nil {
+			rpcCtx = ctx
+		}
+		result := withFullBlockRPCRetry(rpcCtx, nodeOps, height, taskId, opName, func(nodeOp nodepkg.NodeOperator) error {
+			return call(rpcCtx, nodeOp)
+		})
+		attemptsMu.Lock()
 		attempts = append(attempts, result.Attempts...)
+		attemptsMu.Unlock()
 		return result
 	}, taskId, db, header)
 	return &FullBlockFetchResult{
@@ -262,7 +339,7 @@ func FetchFullBlockWithAttempts(ctx context.Context, nodeOps []nodepkg.NodeOpera
 
 func fetchFullBlock(
 	ctx context.Context,
-	runRPC func(string, func(nodepkg.NodeOperator) error) fullBlockRPCResult,
+	runRPC func(context.Context, string, func(context.Context, nodepkg.NodeOperator) error) fullBlockRPCResult,
 	taskId int,
 	db *gorm.DB,
 	header *BlockHeaderJson,
@@ -276,13 +353,16 @@ func fetchFullBlock(
 	height := hexutil.MustDecodeUint64(header.Number)
 	blockHash := header.Hash
 	itemTimings := make([]FullBlockItemTiming, 0, 16)
+	var itemTimingsMu sync.Mutex
 	recordItemTiming := func(item string, count int, startedAt time.Time) {
 		costMicros := time.Since(startedAt).Microseconds()
+		itemTimingsMu.Lock()
 		itemTimings = append(itemTimings, FullBlockItemTiming{
 			Item:       item,
 			Count:      count,
 			CostMicros: costMicros,
 		})
+		itemTimingsMu.Unlock()
 		logrus.Debugf("fetch full block item cost. height:%v hash:%v item:%v count:%v cost_us:%v", height, blockHash, item, count, costMicros)
 	}
 	gasUsed := hexutil.MustDecodeUint64(header.GasUsed)
@@ -338,81 +418,92 @@ func fetchFullBlock(
 	recordItemTiming("build_block", 1, blockStartedAt)
 
 	txList := make([]*TxJson, 0, len(header.Transactions))
-	txStartedAt := time.Now()
-	if len(header.Transactions) > 0 {
-		var txSlots []*TxJson
-		rpcResult := runRPC("FetchTransactionsByHashBatch", func(nodeOp nodepkg.NodeOperator) error {
-			localSlots := make([]*TxJson, len(header.Transactions))
-			for i := range header.Transactions {
-				localSlots[i] = &TxJson{}
-			}
-			if err := nodeOp.FetchTransactionsByHashBatch(ctx, header.Transactions, localSlots); err != nil {
-				return err
-			}
-			for idx, tx := range localSlots {
-				if tx == nil || tx.Hash == "" {
-					return fmt.Errorf("tx elem invalid at index %d", idx)
-				}
-			}
-			txSlots = localSlots
-			return nil
-		})
-		if !rpcResult.OK {
-			logrus.Warnf("fetch tx by header hash failed. nodeId:%v taskId:%v height:%v", rpcResult.NodeID, taskId, height)
-			return nil, itemTimings
-		}
-		for _, tx := range txSlots {
-			txList = append(txList, tx)
-		}
-		logrus.Debugf("fetch tx by header hash success. nodeId:%v taskId:%v height:%v txs:%v cost:%v", rpcResult.NodeID, taskId, height, len(txList), time.Since(txStartedAt).String())
-	}
-	recordItemTiming("fetch_txs", len(txList), txStartedAt)
-
 	receipts := make(map[string]*ethTypes.Receipt)
-	{
-		startTime := time.Now()
-		nodeId := -1
-		if len(header.Transactions) > 0 {
-			rpcResult := runRPC("FetchReceiptsBatch", func(nodeOp nodepkg.NodeOperator) error {
-				receiptList := make([]*ethTypes.Receipt, len(header.Transactions))
-				localReceipts := make(map[string]*ethTypes.Receipt, len(header.Transactions))
-				for i, txHash := range header.Transactions {
-					r := &ethTypes.Receipt{}
-					receiptList[i] = r
-					localReceipts[txHash] = r
+	txInternalJsonList := make([]*TxInternalTraceResultJson, 0)
+
+	firstStageTasks := []fullBlockStageTask{
+		func(stageCtx context.Context) bool {
+			txStartedAt := time.Now()
+			if len(header.Transactions) > 0 {
+				var txSlots []*TxJson
+				rpcResult := runRPC(stageCtx, "FetchTransactionsByHashBatch", func(rpcCtx context.Context, nodeOp nodepkg.NodeOperator) error {
+					localSlots := make([]*TxJson, len(header.Transactions))
+					for i := range header.Transactions {
+						localSlots[i] = &TxJson{}
+					}
+					if err := nodeOp.FetchTransactionsByHashBatch(rpcCtx, header.Transactions, localSlots); err != nil {
+						return err
+					}
+					for idx, tx := range localSlots {
+						if tx == nil || tx.Hash == "" {
+							return fmt.Errorf("tx elem invalid at index %d", idx)
+						}
+					}
+					txSlots = localSlots
+					return nil
+				})
+				if !rpcResult.OK {
+					logrus.Warnf("fetch tx by header hash failed. nodeId:%v taskId:%v height:%v", rpcResult.NodeID, taskId, height)
+					return false
 				}
-				if err := nodeOp.FetchReceiptsBatch(ctx, header.Transactions, receiptList); err != nil {
+				for _, tx := range txSlots {
+					txList = append(txList, tx)
+				}
+				logrus.Debugf("fetch tx by header hash success. nodeId:%v taskId:%v height:%v txs:%v cost:%v", rpcResult.NodeID, taskId, height, len(txList), time.Since(txStartedAt).String())
+			}
+			recordItemTiming("fetch_txs", len(txList), txStartedAt)
+			return true
+		},
+		func(stageCtx context.Context) bool {
+			startTime := time.Now()
+			nodeId := -1
+			if len(header.Transactions) > 0 {
+				rpcResult := runRPC(stageCtx, "FetchReceiptsBatch", func(rpcCtx context.Context, nodeOp nodepkg.NodeOperator) error {
+					receiptList := make([]*ethTypes.Receipt, len(header.Transactions))
+					localReceipts := make(map[string]*ethTypes.Receipt, len(header.Transactions))
+					for i, txHash := range header.Transactions {
+						r := &ethTypes.Receipt{}
+						receiptList[i] = r
+						localReceipts[txHash] = r
+					}
+					if err := nodeOp.FetchReceiptsBatch(rpcCtx, header.Transactions, receiptList); err != nil {
+						return err
+					}
+					receipts = localReceipts
+					return nil
+				})
+				nodeId = rpcResult.NodeID
+				if !rpcResult.OK {
+					logrus.Warnf("fetch receipts failed. nodeId:%v taskId:%v height:%v", nodeId, taskId, height)
+					return false
+				}
+			}
+			logrus.Debugf("fetch receipts success. nodeId:%v taskId:%v txs:%v height:%v cost:%v", nodeId, taskId, len(header.Transactions), height, time.Since(startTime).String())
+			recordItemTiming("fetch_receipts", len(receipts), startTime)
+			return true
+		},
+	}
+	if enableInternalTx {
+		firstStageTasks = append(firstStageTasks, func(stageCtx context.Context) bool {
+			startTime := time.Now()
+			rpcResult := runRPC(stageCtx, "FetchInternalTxTracesByBlockHash", func(rpcCtx context.Context, nodeOp nodepkg.NodeOperator) error {
+				localList, err := nodeOp.FetchInternalTxTracesByBlockHash(rpcCtx, taskId, header.Hash, height)
+				if err != nil {
 					return err
 				}
-				receipts = localReceipts
+				txInternalJsonList = localList
 				return nil
 			})
-			nodeId = rpcResult.NodeID
 			if !rpcResult.OK {
-				logrus.Warnf("fetch receipts failed. nodeId:%v taskId:%v height:%v", nodeId, taskId, height)
-				return nil, itemTimings
+				logrus.Warnf("fetch internal tx failed. nodeId:%v taskId:%v height:%v", rpcResult.NodeID, taskId, height)
+				return false
 			}
-		}
-		logrus.Debugf("fetch receipts success. nodeId:%v taskId:%v txs:%v height:%v cost:%v", nodeId, taskId, len(txList), height, time.Since(startTime).String())
-		recordItemTiming("fetch_receipts", len(receipts), startTime)
-	}
-
-	txInternalJsonList := make([]*TxInternalTraceResultJson, 0)
-	if enableInternalTx {
-		startTime := time.Now()
-		rpcResult := runRPC("FetchInternalTxTracesByBlockHash", func(nodeOp nodepkg.NodeOperator) error {
-			localList, err := nodeOp.FetchInternalTxTracesByBlockHash(ctx, taskId, header.Hash, height)
-			if err != nil {
-				return err
-			}
-			txInternalJsonList = localList
-			return nil
+			recordItemTiming("fetch_internal_txs", len(txInternalJsonList), startTime)
+			return true
 		})
-		if !rpcResult.OK {
-			logrus.Warnf("fetch internal tx failed. nodeId:%v taskId:%v height:%v", rpcResult.NodeID, taskId, height)
-			return nil, itemTimings
-		}
-		recordItemTiming("fetch_internal_txs", len(txInternalJsonList), startTime)
+	}
+	if !runFullBlockStage(ctx, firstStageTasks...) {
+		return nil, itemTimings
 	}
 
 	parseTxStartedAt := time.Now()
@@ -456,16 +547,6 @@ func fetchFullBlock(
 	for addr := range balanceNativeAddress {
 		balanceNativeList = append(balanceNativeList, &data.BalanceNative{Addr: addr})
 	}
-	startTime := time.Now()
-	rpcResult := runRPC("FetchBalanceNative", func(nodeOp nodepkg.NodeOperator) error {
-		return nodeOp.FetchBalanceNative(ctx, balanceNativeList, height)
-	})
-	nodeId := rpcResult.NodeID
-	if !rpcResult.OK {
-		logrus.Warnf("fetch balance failed. nodeId:%v taskId:%v height:%v", nodeId, taskId, height)
-		return nil, itemTimings
-	}
-	recordItemTiming("fetch_native_balances", len(balanceNativeList), startTime)
 
 	balanceErc20List := make([]*data.BalanceErc20, 0)
 	for addr, v := range balanceErc20Address {
@@ -473,16 +554,6 @@ func fetchFullBlock(
 			balanceErc20List = append(balanceErc20List, &data.BalanceErc20{Addr: addr, ContractAddr: contractAddr})
 		}
 	}
-	startTime = time.Now()
-	rpcResult = runRPC("FetchErc20BalancesBatch", func(nodeOp nodepkg.NodeOperator) error {
-		return nodeOp.FetchErc20BalancesBatch(ctx, balanceErc20List, height)
-	})
-	nodeId = rpcResult.NodeID
-	if !rpcResult.OK {
-		logrus.Warnf("fetch erc20balance failed. nodeId:%v taskId:%v height:%v", nodeId, taskId, height)
-		return nil, itemTimings
-	}
-	recordItemTiming("fetch_erc20_balances", len(balanceErc20List), startTime)
 
 	balanceErc1155List := make([]*data.BalanceErc1155, 0)
 	for contractAddr, v := range txParseResult.BalanceErc1155Address {
@@ -494,31 +565,61 @@ func fetchFullBlock(
 			})
 		}
 	}
-	startTime = time.Now()
-	rpcResult = runRPC("FetchErc1155BalancesBatch", func(nodeOp nodepkg.NodeOperator) error {
-		return nodeOp.FetchErc1155BalancesBatch(ctx, balanceErc1155List, height)
-	})
-	nodeId = rpcResult.NodeID
-	if !rpcResult.OK {
-		logrus.Warnf("fetch erc1155balance failed. nodeId:%v taskId:%v height:%v", nodeId, taskId, height)
+
+	if !runFullBlockStage(ctx,
+		func(stageCtx context.Context) bool {
+			startTime := time.Now()
+			rpcResult := runRPC(stageCtx, "FetchBalanceNative", func(rpcCtx context.Context, nodeOp nodepkg.NodeOperator) error {
+				return nodeOp.FetchBalanceNative(rpcCtx, balanceNativeList, height)
+			})
+			if !rpcResult.OK {
+				logrus.Warnf("fetch balance failed. nodeId:%v taskId:%v height:%v", rpcResult.NodeID, taskId, height)
+				return false
+			}
+			recordItemTiming("fetch_native_balances", len(balanceNativeList), startTime)
+			return true
+		},
+		func(stageCtx context.Context) bool {
+			startTime := time.Now()
+			rpcResult := runRPC(stageCtx, "FetchErc20BalancesBatch", func(rpcCtx context.Context, nodeOp nodepkg.NodeOperator) error {
+				return nodeOp.FetchErc20BalancesBatch(rpcCtx, balanceErc20List, height)
+			})
+			if !rpcResult.OK {
+				logrus.Warnf("fetch erc20balance failed. nodeId:%v taskId:%v height:%v", rpcResult.NodeID, taskId, height)
+				return false
+			}
+			recordItemTiming("fetch_erc20_balances", len(balanceErc20List), startTime)
+			return true
+		},
+		func(stageCtx context.Context) bool {
+			startTime := time.Now()
+			rpcResult := runRPC(stageCtx, "FetchErc1155BalancesBatch", func(rpcCtx context.Context, nodeOp nodepkg.NodeOperator) error {
+				return nodeOp.FetchErc1155BalancesBatch(rpcCtx, balanceErc1155List, height)
+			})
+			if !rpcResult.OK {
+				logrus.Warnf("fetch erc1155balance failed. nodeId:%v taskId:%v height:%v", rpcResult.NodeID, taskId, height)
+				return false
+			}
+			recordItemTiming("fetch_erc1155_balances", len(balanceErc1155List), startTime)
+			return true
+		},
+	) {
 		return nil, itemTimings
 	}
-	recordItemTiming("fetch_erc1155_balances", len(balanceErc1155List), startTime)
 
 	contractErc20List := make([]*data.ContractErc20, 0, len(txParseResult.Erc20ContractAddrs))
-	startTime = time.Now()
+	startTime := time.Now()
 	for k := range txParseResult.Erc20ContractAddrs {
 		contractErc20, ok := tokenCacheInst.Get(k, db)
 		if !ok {
 			addr := common.HexToAddress(k)
-			rpcResult = runRPC("FetchContractErc20", func(nodeOp nodepkg.NodeOperator) error {
+			rpcResult := runRPC(ctx, "FetchContractErc20", func(rpcCtx context.Context, nodeOp nodepkg.NodeOperator) error {
 				var err error
-				contractErc20, err = nodeOp.FetchContractErc20(ctx, &addr, height)
+				contractErc20, err = nodeOp.FetchContractErc20(rpcCtx, &addr, height)
 				return err
 			})
-			nodeId = rpcResult.NodeID
 			if !rpcResult.OK {
-				logrus.Warnf("fetch erc20 contract failed. nodeId:%v taskId:%v height:%v contract:%v", nodeId, taskId, height, k)
+				logrus.Warnf("fetch erc20 contract failed. nodeId:%v taskId:%v height:%v contract:%v", rpcResult.NodeID, taskId, height, k)
 				return nil, itemTimings
 			}
 		}
@@ -532,14 +633,13 @@ func fetchFullBlock(
 		contractErc721, ok := erc721ContractCacheInst.Get(k, db)
 		if !ok {
 			addr := common.HexToAddress(k)
-			rpcResult = runRPC("FetchContractErc721", func(nodeOp nodepkg.NodeOperator) error {
+			rpcResult := runRPC(ctx, "FetchContractErc721", func(rpcCtx context.Context, nodeOp nodepkg.NodeOperator) error {
 				var err error
-				contractErc721, err = nodeOp.FetchContractErc721(ctx, &addr)
+				contractErc721, err = nodeOp.FetchContractErc721(rpcCtx, &addr)
 				return err
 			})
-			nodeId = rpcResult.NodeID
 			if !rpcResult.OK {
-				logrus.Warnf("fetch erc721 contract failed. nodeId:%v taskId:%v height:%v contract:%v", nodeId, taskId, height, k)
+				logrus.Warnf("fetch erc721 contract failed. nodeId:%v taskId:%v height:%v contract:%v", rpcResult.NodeID, taskId, height, k)
 				return nil, itemTimings
 			}
 		}
@@ -557,14 +657,13 @@ func fetchFullBlock(
 			continue
 		}
 		var tokenErc721 *data.TokenErc721
-		rpcResult = runRPC("FetchTokenErc721", func(nodeOp nodepkg.NodeOperator) error {
+		rpcResult := runRPC(ctx, "FetchTokenErc721", func(rpcCtx context.Context, nodeOp nodepkg.NodeOperator) error {
 			var err error
-			tokenErc721, err = nodeOp.FetchTokenErc721(ctx, &contractAddr, tokenId)
+			tokenErc721, err = nodeOp.FetchTokenErc721(rpcCtx, &contractAddr, tokenId)
 			return err
 		})
-		nodeId = rpcResult.NodeID
 		if !rpcResult.OK {
-			logrus.Warnf("fetch erc721 token failed. nodeId:%v taskId:%v height:%v contract:%v token_id:%v", nodeId, taskId, height, k.ContractAddr, k.TokenId)
+			logrus.Warnf("fetch erc721 token failed. nodeId:%v taskId:%v height:%v contract:%v token_id:%v", rpcResult.NodeID, taskId, height, k.ContractAddr, k.TokenId)
 			return nil, itemTimings
 		}
 		tokenErc721List = append(tokenErc721List, tokenErc721)

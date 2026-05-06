@@ -39,6 +39,7 @@ type Fetch struct {
 	StartHeight      uint64        `mapstructure:"start_height"`
 	EndHeight        uint64        `mapstructure:"end_height"`
 	EnableInternalTx bool          `mapstructure:"enable_internal_tx"`
+	BodyConcurrency  int           `mapstructure:"body_concurrency"`
 	Store            Store         `mapstructure:"store"`
 	TaskPool         TaskPool      `mapstructure:"task_pool"`
 }
@@ -109,6 +110,7 @@ func LoadConf(fpath string, env string) (*Config, error) {
 			StartHeight:      math.MaxUint64,
 			EndHeight:        math.MaxUint64,
 			EnableInternalTx: true,
+			BodyConcurrency:  3,
 			Store: Store{
 				AutoCreateTables: true,
 				Optional:         []string{},

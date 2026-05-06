@@ -29,11 +29,11 @@ redis:
 
 fetch:
   rpc_nodes:
-    - "wss://bsc-testnet-rpc.publicnode.com"
-    - "https://api.zan.top/bsc-testnet"
-    - "https://bnb-testnet.api.onfinality.io/public"
-    - "https://bsc-testnet.drpc.org"
-    - "https://bnb-testnet.api.onfinality.io/public"
+    # - "wss://bsc-testnet-rpc.publicnode.com"
+    # - "https://api.zan.top/bsc-testnet"
+    # - "https://bnb-testnet.api.onfinality.io/public"
+    # - "https://bsc-testnet.drpc.org"
+    # - "https://bnb-testnet.api.onfinality.io/public"
     - "https://data-seed-prebsc-1-s1.bnbchain.org:8545"
     - "https://data-seed-prebsc-2-s1.bnbchain.org:8545"
     - "https://data-seed-prebsc-1-s2.bnbchain.org:8545"
@@ -49,6 +49,7 @@ fetch:
   #If set false, balanceChanged and contractCreated is incomplete.
   #For test, set false is ok.
   enable_internal_tx: false
+  body_concurrency: 3 # max concurrent RPC goroutines inside one block body fetch
   store:
     auto_create_tables: true # prd environment set false
     batch_size: 128

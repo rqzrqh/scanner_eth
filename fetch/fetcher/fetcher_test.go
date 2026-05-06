@@ -4,13 +4,16 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"scanner_eth/data"
 	nodepkg "scanner_eth/fetch/node"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	ethTypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"gorm.io/gorm"
 )
@@ -23,6 +26,20 @@ func TestSetEnableInternalTx(t *testing.T) {
 	SetEnableInternalTx(false)
 	if enableInternalTx {
 		t.Fatal("expected enableInternalTx=false")
+	}
+}
+
+func TestSetFullBlockBodyConcurrency(t *testing.T) {
+	oldConcurrency := fullBlockBodyConcurrency
+	defer SetFullBlockBodyConcurrency(oldConcurrency)
+
+	SetFullBlockBodyConcurrency(4)
+	if fullBlockBodyConcurrency != 4 {
+		t.Fatalf("expected concurrency 4, got %d", fullBlockBodyConcurrency)
+	}
+	SetFullBlockBodyConcurrency(0)
+	if fullBlockBodyConcurrency != 1 {
+		t.Fatalf("expected non-positive concurrency to normalize to 1, got %d", fullBlockBodyConcurrency)
 	}
 }
 
@@ -172,5 +189,219 @@ func TestWalkTxInternalTraceAndParseTxInternal(t *testing.T) {
 	}
 	if len(result.InternalContractList) != 1 {
 		t.Fatalf("unexpected parsed contract size: %d", len(result.InternalContractList))
+	}
+}
+
+func TestFetchFullBlockWithAttemptsRunsIndependentRPCsConcurrently(t *testing.T) {
+	oldEnableInternalTx := enableInternalTx
+	oldConcurrency := fullBlockBodyConcurrency
+	SetEnableInternalTx(false)
+	SetFullBlockBodyConcurrency(3)
+	defer func() {
+		SetEnableInternalTx(oldEnableInternalTx)
+		SetFullBlockBodyConcurrency(oldConcurrency)
+	}()
+
+	node := &testFullBlockNode{txDelay: 80 * time.Millisecond, receiptDelay: 80 * time.Millisecond}
+	result := FetchFullBlockWithAttempts(context.Background(), []nodepkg.NodeOperator{node}, 1, nil, testFullBlockHeader())
+
+	if result == nil || result.FullBlock == nil {
+		t.Fatalf("expected full block result, got %+v", result)
+	}
+	if node.maxActiveRPC.Load() < 2 {
+		t.Fatalf("expected tx and receipt RPCs to overlap, max_active=%d", node.maxActiveRPC.Load())
+	}
+	if node.internalCalls.Load() != 0 {
+		t.Fatalf("internal traces should stay disabled, got calls=%d", node.internalCalls.Load())
+	}
+}
+
+func TestFetchFullBlockWithAttemptsRespectsConfiguredConcurrency(t *testing.T) {
+	oldEnableInternalTx := enableInternalTx
+	oldConcurrency := fullBlockBodyConcurrency
+	SetEnableInternalTx(false)
+	SetFullBlockBodyConcurrency(1)
+	defer func() {
+		SetEnableInternalTx(oldEnableInternalTx)
+		SetFullBlockBodyConcurrency(oldConcurrency)
+	}()
+
+	node := &testFullBlockNode{txDelay: 10 * time.Millisecond, receiptDelay: 10 * time.Millisecond}
+	result := FetchFullBlockWithAttempts(context.Background(), []nodepkg.NodeOperator{node}, 1, nil, testFullBlockHeader())
+	if result == nil || result.FullBlock == nil {
+		t.Fatalf("expected full block result, got %+v", result)
+	}
+	if node.maxActiveRPC.Load() != 1 {
+		t.Fatalf("expected configured concurrency to serialize RPCs, max_active=%d", node.maxActiveRPC.Load())
+	}
+}
+
+func TestFetchFullBlockWithAttemptsRecordsFailedConcurrentAttempt(t *testing.T) {
+	oldEnableInternalTx := enableInternalTx
+	oldConcurrency := fullBlockBodyConcurrency
+	SetEnableInternalTx(false)
+	SetFullBlockBodyConcurrency(3)
+	defer func() {
+		SetEnableInternalTx(oldEnableInternalTx)
+		SetFullBlockBodyConcurrency(oldConcurrency)
+	}()
+
+	node := &testFullBlockNode{failReceipts: true}
+	result := FetchFullBlockWithAttempts(context.Background(), []nodepkg.NodeOperator{node}, 1, nil, testFullBlockHeader())
+	if result == nil {
+		t.Fatal("expected result wrapper")
+	}
+	if result.FullBlock != nil {
+		t.Fatalf("expected full block fetch to fail, got %+v", result.FullBlock)
+	}
+	var foundFailedReceipt bool
+	for _, attempt := range result.Attempts {
+		if attempt.OpName == "FetchReceiptsBatch" && !attempt.Success {
+			foundFailedReceipt = true
+			break
+		}
+	}
+	if !foundFailedReceipt {
+		t.Fatalf("expected failed receipt attempt, got %+v", result.Attempts)
+	}
+}
+
+type testFullBlockNode struct {
+	txDelay       time.Duration
+	receiptDelay  time.Duration
+	failReceipts  bool
+	internalCalls atomic.Int32
+	activeRPC     atomic.Int32
+	maxActiveRPC  atomic.Int32
+}
+
+func (n *testFullBlockNode) ID() int { return 1 }
+
+func (n *testFullBlockNode) FetchBlockHeaderByHeight(context.Context, int, uint64) *BlockHeaderJson {
+	return nil
+}
+
+func (n *testFullBlockNode) FetchBlockHeaderByHash(context.Context, int, string) *BlockHeaderJson {
+	return nil
+}
+
+func (n *testFullBlockNode) FetchTransactionsByHashBatch(ctx context.Context, txHashes []string, txs []*TxJson) error {
+	done := n.trackRPC()
+	defer done()
+	if err := waitForTestDelay(ctx, n.txDelay); err != nil {
+		return err
+	}
+	for i, hash := range txHashes {
+		txs[i] = testFullBlockTx(hash)
+	}
+	return nil
+}
+
+func (n *testFullBlockNode) FetchReceiptsBatch(ctx context.Context, txHashes []string, receipts []*ethTypes.Receipt) error {
+	done := n.trackRPC()
+	defer done()
+	if err := waitForTestDelay(ctx, n.receiptDelay); err != nil {
+		return err
+	}
+	if n.failReceipts {
+		return errors.New("receipt rpc failed")
+	}
+	for i := range txHashes {
+		receipts[i] = &ethTypes.Receipt{Status: 1, GasUsed: 21000}
+	}
+	return nil
+}
+
+func (n *testFullBlockNode) FetchInternalTxTracesByBlockHash(context.Context, int, string, uint64) ([]*TxInternalTraceResultJson, error) {
+	n.internalCalls.Add(1)
+	return nil, nil
+}
+
+func (n *testFullBlockNode) FetchBalanceNative(context.Context, []*data.BalanceNative, uint64) error {
+	return nil
+}
+
+func (n *testFullBlockNode) FetchErc20BalancesBatch(context.Context, []*data.BalanceErc20, uint64) error {
+	return nil
+}
+
+func (n *testFullBlockNode) FetchErc1155BalancesBatch(context.Context, []*data.BalanceErc1155, uint64) error {
+	return nil
+}
+
+func (n *testFullBlockNode) FetchContractErc20(context.Context, *common.Address, uint64) (*data.ContractErc20, error) {
+	return &data.ContractErc20{}, nil
+}
+
+func (n *testFullBlockNode) FetchContractErc721(context.Context, *common.Address) (*data.ContractErc721, error) {
+	return &data.ContractErc721{}, nil
+}
+
+func (n *testFullBlockNode) FetchTokenErc721(context.Context, *common.Address, *big.Int) (*data.TokenErc721, error) {
+	return &data.TokenErc721{}, nil
+}
+
+func (n *testFullBlockNode) trackRPC() func() {
+	active := n.activeRPC.Add(1)
+	for {
+		maxActive := n.maxActiveRPC.Load()
+		if active <= maxActive || n.maxActiveRPC.CompareAndSwap(maxActive, active) {
+			break
+		}
+	}
+	return func() {
+		n.activeRPC.Add(-1)
+	}
+}
+
+func waitForTestDelay(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func testFullBlockHeader() *BlockHeaderJson {
+	return &BlockHeaderJson{
+		BaseFeePerGas:   "0x0",
+		Difficulty:      "0x1",
+		ExtraData:       "0x",
+		GasLimit:        "0x1c9c380",
+		GasUsed:         "0x5208",
+		Hash:            "0x0000000000000000000000000000000000000000000000000000000000000001",
+		Miner:           "0x0000000000000000000000000000000000000001",
+		Nonce:           "0x0000000000000000",
+		Number:          "0x1",
+		ParentHash:      "0x0000000000000000000000000000000000000000000000000000000000000000",
+		ReceiptsRoot:    "0x0",
+		Sha3Uncles:      "0x0",
+		Size:            "0x1",
+		StateRoot:       "0x0",
+		TimeStamp:       "0x1",
+		TotalDifficulty: "0x1",
+		TransactionRoot: "0x0",
+		Transactions:    []string{"0x00000000000000000000000000000000000000000000000000000000000000aa"},
+	}
+}
+
+func testFullBlockTx(hash string) *TxJson {
+	return &TxJson{
+		Hash:             hash,
+		From:             "0x00000000000000000000000000000000000000aa",
+		To:               "0x00000000000000000000000000000000000000bb",
+		Gas:              "0x5208",
+		GasPrice:         "0x1",
+		Input:            "0x",
+		Nonce:            "0x1",
+		TransactionIndex: "0x0",
+		Type:             "0x0",
+		Value:            "0x0",
 	}
 }
