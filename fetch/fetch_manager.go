@@ -47,6 +47,7 @@ func NewFetchManager(
 	redisClient *redis.Client,
 	startHeight uint64,
 	endHeight uint64,
+	headerWindowSize int,
 	reversibleBlocks int,
 	rpcTimeout time.Duration,
 	taskPoolOptions fetchtask.TaskPoolOptions,
@@ -74,7 +75,8 @@ func NewFetchManager(
 		irreversibleBlocks:   reversibleBlocks,
 		taskPoolOptions:      taskPoolOptions,
 		scanConfig: fetchscan.Config{
-			StartHeight: startHeight,
+			StartHeight:      startHeight,
+			HeaderWindowSize: headerWindowSize,
 		},
 		dbOperator: dbOperator,
 		fetcher:    fetcher,

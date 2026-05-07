@@ -147,6 +147,33 @@ func TestInvariantPruneDeletesPendingAndStored(t *testing.T) {
 	}
 }
 
+func TestRunPruneStageMarksRootParentReadyAfterPrune(t *testing.T) {
+	env := newTestFlowEnv(t, 2)
+
+	parent := ""
+	for h := uint64(1); h <= 6; h++ {
+		hash := fmt.Sprintf("h%v", h)
+		env.blockTree.Insert(h, hash, parent, 1)
+		env.stored.MarkStored(hash)
+		parent = hash
+	}
+
+	env.flow.RunPruneStage(context.Background())
+
+	root := env.blockTree.Root()
+	if root == nil || root.Key != "h4" {
+		t.Fatalf("unexpected root after prune stage: %+v", root)
+	}
+	if !env.stored.IsStored("h3") {
+		t.Fatal("expected pruned root parent to remain as readiness marker")
+	}
+	for _, hash := range []string{"h1", "h2"} {
+		if env.stored.IsStored(hash) {
+			t.Fatalf("expected pruned non-boundary hash %s to be removed from stored state", hash)
+		}
+	}
+}
+
 func TestPruneComplexForkRemovesPrunedBranchesAndStoredState(t *testing.T) {
 	env := newTestFlowEnv(t, 2)
 

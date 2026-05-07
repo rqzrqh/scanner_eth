@@ -126,6 +126,8 @@
     .legend-item.stored { color: #087443; }
     .legend-item.tree { color: #b54708; }
     .legend-item.lag { color: #155eef; }
+    .legend-item.speed-tree { color: #b54708; }
+    .legend-item.speed-stored { color: #087443; }
     .legend-item.body-gap { color: #155eef; }
     .legend-item.store-gap { color: #087443; }
     .legend-item.failure { color: #f04438; }
@@ -141,6 +143,15 @@
     .legend-item.phase-avg { color: #155eef; }
     .legend-item.phase-p95 { color: #f79009; }
     .legend-item.end-to-end { color: #7a5af8; }
+    .legend-item.task-enqueued { color: #155eef; }
+    .legend-item.task-dequeued { color: #2e90fa; }
+    .legend-item.task-succeeded { color: #12b76a; }
+    .legend-item.task-failed { color: #f04438; }
+    .legend-item.task-retried { color: #f79009; }
+    .legend-item.task-dropped { color: #b42318; }
+    .legend-item.task-tracked { color: #7a5af8; }
+    .legend-item.task-pending-high { color: #d444f1; }
+    .legend-item.task-pending-normal { color: #667085; }
     .progress-chart {
       display: block;
       width: 100%;
@@ -179,10 +190,15 @@
     .progress-chart .line.stored { stroke: #087443; }
     .progress-chart .line.tree { stroke: #b54708; stroke-dasharray: 6 5; }
     .progress-chart .line.lag { stroke: #155eef; }
+    .progress-chart .line.speed-tree { stroke: #b54708; }
+    .progress-chart .line.speed-stored { stroke: #087443; }
     .progress-chart .line.body-gap { stroke: #155eef; }
     .progress-chart .line.store-gap { stroke: #087443; }
     .progress-chart .line.end-to-end { stroke: #7a5af8; }
     .progress-chart .line.cost { stroke: #155eef; }
+    .progress-chart .line.task-pending-high { stroke: #d444f1; }
+    .progress-chart .line.task-pending-normal { stroke: #667085; }
+    .progress-chart .line.task-tracked { stroke: #7a5af8; }
     .progress-chart .bar.success { fill: #12b76a; }
     .progress-chart .bar.failure { fill: #f04438; }
     .progress-chart .bar.prev-store { fill: #98a2b3; }
@@ -196,10 +212,27 @@
     .progress-chart .bar.other-wait { fill: #667085; }
     .progress-chart .bar.phase-avg { fill: #155eef; }
     .progress-chart .bar.phase-p95 { fill: #f79009; }
+    .progress-chart .bar.task-enqueued { fill: #155eef; }
+    .progress-chart .bar.task-dequeued { fill: #2e90fa; }
+    .progress-chart .bar.task-succeeded { fill: #12b76a; }
+    .progress-chart .bar.task-failed { fill: #f04438; }
+    .progress-chart .bar.task-retried { fill: #f79009; }
+    .progress-chart .bar.task-dropped { fill: #b42318; }
+    .progress-chart .bar.task-tracked { fill: #7a5af8; }
+    .progress-chart .bar.task-pending-high { fill: #d444f1; }
+    .progress-chart .bar.task-pending-normal { fill: #667085; }
     .progress-chart .marker.mean { stroke: #344054; stroke-width: 2; stroke-dasharray: 2 4; }
     .progress-chart .marker.p95 { stroke: #b42318; stroke-width: 2; stroke-dasharray: 5 4; }
     .progress-chart .bar-label { fill: #ffffff; font-size: 12px; font-weight: 700; }
+    .progress-chart .point { stroke: #ffffff; stroke-width: 1.5; }
     .progress-chart .point.cost { fill: #155eef; }
+    .progress-chart .point.stored { fill: #087443; }
+    .progress-chart .point.tree { fill: #b54708; }
+    .progress-chart .point.speed-tree { fill: #b54708; }
+    .progress-chart .point.speed-stored { fill: #087443; }
+    .progress-chart .point.task-pending-high { fill: #d444f1; }
+    .progress-chart .point.task-pending-normal { fill: #667085; }
+    .progress-chart .point.task-tracked { fill: #7a5af8; }
     .sources { margin: 8px 0 0; padding-left: 18px; }
     @media print {
       body { padding: 0; background: #fff; }
@@ -224,7 +257,7 @@
       <div class="metric"><div class="label">Task Success Rate</div><div class="value">{{.Summary.TaskSuccessRate}}</div><div class="muted">success {{.Summary.TaskSucceeded}} / failure {{.Summary.TaskFailed}}</div></div>
       <div class="metric"><div class="label">Body Sync Success Rate</div><div class="value">{{.BodySync.SuccessRate}}</div><div class="muted">success {{.BodySync.Succeeded}} / failure {{.BodySync.Failed}}</div></div>
       <div class="metric"><div class="label">Store Success Rate</div><div class="value">{{.Summary.StoreSuccessRate}}</div><div class="muted">success {{.Summary.StoreSucceeded}} / failure {{.Summary.StoreFailed}}</div></div>
-      <div class="metric"><div class="label">Sync Progress</div><div class="value">{{.Summary.StoredHeight}}</div><div class="muted">remote {{.Summary.RemoteLatest}} / lag {{.Summary.Lag}} / stored count {{.Summary.StoredCount}}</div></div>
+      <div class="metric"><div class="label">Stored Height</div><div class="value">{{.Summary.StoredHeight}}</div><div class="muted">remote {{.Summary.RemoteLatest}} / total lag {{.Summary.Lag}} / store lag {{.Summary.StoreLag}}</div></div>
       <div class="metric"><div class="label">Avg Block E2E</div><div class="value">{{microsToMillis .BlockTiming.AvgFirstTaskToStoreUS}}ms</div><div class="muted">samples {{.BlockTiming.EndToEndSamples}} / p95 {{microsToMillis .BlockTiming.P95FirstTaskToStoreUS}}ms</div></div>
     </div>
   </section>
@@ -233,10 +266,13 @@
     <h2>Sync Overview</h2>
     <h3>Sync Progress</h3>
     {{if .RuntimeSeries}}
+    <p class="muted">Progress uses runtime health samples. Stored state count is an in-memory state size, not a block height.</p>
     <div class="chart-wrap">
       <div class="legend">
         <span class="legend-item tree">BlockTree end</span>
         <span class="legend-item stored">Stored block height</span>
+        <span class="legend-item speed-tree">BlockTree speed</span>
+        <span class="legend-item speed-stored">Store speed</span>
       </div>
       {{syncProgressChart .RuntimeSeries}}
     </div>
@@ -246,6 +282,13 @@
       </div>
       {{blocktreeLagChart .RuntimeSeries}}
     </div>
+    <h3>Latest Runtime Snapshot</h3>
+    <table>
+      <thead><tr><th>Remote Latest</th><th>BlockTree Range</th><th>Stored Height</th><th>BlockTree Lag</th><th>Store Lag</th><th>Staging</th><th>Pending Headers</th><th>Pending Bodies</th><th>Complete Blocks</th><th>Stored State Count</th></tr></thead>
+      <tbody>
+        <tr><td>{{.Summary.RemoteLatest}}</td><td>{{.Summary.BlocktreeStart}} - {{.Summary.BlocktreeEnd}}</td><td>{{.Summary.StoredHeight}}</td><td>{{.Summary.BlocktreeLag}}</td><td>{{.Summary.StoreLag}}</td><td>{{.Summary.StagingBlocks}}</td><td>{{.Summary.PendingHeaders}}</td><td>{{.Summary.PendingBodies}}</td><td>{{.Summary.CompleteBlocks}}</td><td>{{.Summary.StoredCount}}</td></tr>
+      </tbody>
+    </table>
     {{end}}
     {{if not .RuntimeSeries}}<div class="empty">No sync progress data.</div>{{end}}
   </section>
@@ -383,6 +426,50 @@
   </section>
 
   <section class="card section">
+    <h2>Task Pool</h2>
+    {{if .TaskPool.Kinds}}
+    {{if .RuntimeSeries}}
+    <h3>Backlog Over Time</h3>
+    <p class="muted">Blocking is visible when pending queues or tracked tasks stay high or keep rising across runtime samples. High is the priority queue; tracked is tasks still in the pool's in-flight/dedup tracking set.</p>
+    <div class="chart-wrap">
+      <div class="legend">
+        <span class="legend-item task-pending-high">Pending high</span>
+        <span class="legend-item task-pending-normal">Pending normal</span>
+        <span class="legend-item task-tracked">Tracked</span>
+      </div>
+      {{taskPoolBacklogChart .RuntimeSeries}}
+    </div>
+    {{end}}
+    <h3>Lifecycle Counters</h3>
+    <p class="muted">Counters show throughput and error pressure during the report window; they do not by themselves prove blocking.</p>
+    <div class="chart-wrap">
+      <div class="legend">
+        <span class="legend-item task-enqueued">Enqueued</span>
+        <span class="legend-item task-dequeued">Dequeued</span>
+        <span class="legend-item task-succeeded">Succeeded</span>
+        <span class="legend-item task-failed">Failed</span>
+        <span class="legend-item task-retried">Retried</span>
+        <span class="legend-item task-dropped">Dropped</span>
+        <span class="legend-item task-tracked">Tracked</span>
+        <span class="legend-item task-pending-high">Pending high</span>
+        <span class="legend-item task-pending-normal">Pending normal</span>
+      </div>
+      {{taskPoolChart .TaskPool}}
+    </div>
+    <table>
+      <thead><tr><th>Task Kind</th><th>Enqueued</th><th>Dequeued</th><th>Success</th><th>Failure</th><th>Retries</th><th>Dropped</th><th>Tracked</th><th>Success Rate</th></tr></thead>
+      <tbody>
+      {{range .TaskPool.Kinds}}
+        <tr><td>{{.Name}}</td><td>{{.Enqueued}}</td><td>{{.Dequeued}}</td><td>{{.Succeeded}}</td><td>{{.Failed}}</td><td>{{.Retried}}</td><td>{{.Dropped}}</td><td>{{.Tracked}}</td><td>{{.SuccessRate}}</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+    <p class="muted">Queues: high={{.TaskPool.PendingHigh}}, normal={{.TaskPool.PendingNormal}}, workers={{.TaskPool.WorkerCount}}, max_retry={{.TaskPool.MaxRetry}}</p>
+    <p class="muted">Tracked age: oldest={{microsToMillis .TaskPool.TrackedOldestAgeUS}}ms, avg={{microsToMillis .TaskPool.TrackedAvgAgeUS}}ms, body_oldest={{microsToMillis .TaskPool.TrackedBodyOldestAgeUS}}ms, header_height_oldest={{microsToMillis .TaskPool.TrackedHeaderHOldestAgeUS}}ms, header_hash_oldest={{microsToMillis .TaskPool.TrackedHeaderHashOldestAgeUS}}ms</p>
+    {{else}}<div class="empty">No task pool stats.</div>{{end}}
+  </section>
+
+  <section class="card section">
     <h2>Sync Detail</h2>
     <h3>Header Sync</h3>
     <table>
@@ -464,22 +551,6 @@
         <tr><td>{{.NodeSelection.Events}}</td><td>{{.NodeSelection.ValidNodes}}</td><td>{{.NodeSelection.NoValidNodes}}</td><td>{{.NodeSelection.Disabled}}</td><td>{{.NodeSelection.NotReady}}</td><td>{{.NodeSelection.Cooldown}}</td><td>{{.NodeSelection.HeightTooLow}}</td><td>{{.NodeSelection.RemoteUnknown}}</td><td>{{.NodeSelection.NilNodes}}</td></tr>
       </tbody>
     </table>
-  </section>
-
-  <section class="card section">
-    <h2>Task Pool</h2>
-    {{if .TaskPool.Kinds}}
-    <table>
-      <thead><tr><th>Task Kind</th><th>Enqueued</th><th>Dequeued</th><th>Success</th><th>Failure</th><th>Retries</th><th>Dropped</th><th>Tracked</th><th>Success Rate</th></tr></thead>
-      <tbody>
-      {{range .TaskPool.Kinds}}
-        <tr><td>{{.Name}}</td><td>{{.Enqueued}}</td><td>{{.Dequeued}}</td><td>{{.Succeeded}}</td><td>{{.Failed}}</td><td>{{.Retried}}</td><td>{{.Dropped}}</td><td>{{.Tracked}}</td><td>{{.SuccessRate}}</td></tr>
-      {{end}}
-      </tbody>
-    </table>
-    <p class="muted">Queues: high={{.TaskPool.PendingHigh}}, normal={{.TaskPool.PendingNormal}}, workers={{.TaskPool.WorkerCount}}, max_retry={{.TaskPool.MaxRetry}}</p>
-    <p class="muted">Tracked age: oldest={{microsToMillis .TaskPool.TrackedOldestAgeUS}}ms, avg={{microsToMillis .TaskPool.TrackedAvgAgeUS}}ms, body_oldest={{microsToMillis .TaskPool.TrackedBodyOldestAgeUS}}ms, header_height_oldest={{microsToMillis .TaskPool.TrackedHeaderHOldestAgeUS}}ms, header_hash_oldest={{microsToMillis .TaskPool.TrackedHeaderHashOldestAgeUS}}ms</p>
-    {{else}}<div class="empty">No task pool stats.</div>{{end}}
   </section>
 
   <section class="card section">

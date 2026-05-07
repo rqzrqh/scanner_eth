@@ -4,7 +4,7 @@ chain:
   chain_name: "bsc_testnet"
   chain_id: 97
   genesis_block_hash: "0x6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe34"
-  reversible_blocks: 5
+  reversible_blocks: 10
 
 database:
   host: "127.0.0.1"
@@ -44,6 +44,7 @@ fetch:
   timeout: 10s
   start_height: 103340305 #if db has blocks, this config would be ignored
   end_height:  -1
+  header_window_size: 50 # extra header window beyond chain.reversible_blocks; 0 means use chain.reversible_blocks
   #With internal txs, all account balance changed action and all contract created action could be captured.
   #But this api need archive node, and always it is not free.
   #If set false, balanceChanged and contractCreated is incomplete.
@@ -71,7 +72,7 @@ fetch:
       - "contract_erc721"
       - "token_erc721"
   task_pool:
-    worker_count: 0 # 0 means use rpc_nodes count
+    worker_count: 20 # 0 means use rpc_nodes count
     high_queue_size: 1024
     normal_queue_size: 2048
     max_retry: 2

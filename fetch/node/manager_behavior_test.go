@@ -98,6 +98,45 @@ func TestGetAllValidNodeOperatorsFiltersAndSortsByScore(t *testing.T) {
 	}
 }
 
+func TestNodeManagerBalancesCandidatesWithinScoreTolerance(t *testing.T) {
+	nm := NewNodeManager([]*ethclient.Client{nil, nil}, 0)
+	nm.UpdateNodeChainInfo(0, 100, "0x64")
+	nm.UpdateNodeChainInfo(1, 100, "0x64")
+	nm.RecordNodeResult(0, 1_000, true)
+
+	ops := nm.GetAllValidNodeOperators(100, "0x64")
+	if len(ops) != 2 || ops[0].ID() != 0 || ops[1].ID() != 1 {
+		t.Fatalf("unexpected first balanced order: %v", operatorIDsForTest(ops))
+	}
+	ops = nm.GetAllValidNodeOperators(100, "0x64")
+	if len(ops) != 2 || ops[0].ID() != 1 || ops[1].ID() != 0 {
+		t.Fatalf("unexpected rotated balanced order: %v", operatorIDsForTest(ops))
+	}
+}
+
+func TestGetBestNodeMarksInflightAndBalancesConcurrentSelection(t *testing.T) {
+	nm := NewNodeManager([]*ethclient.Client{nil, nil}, 0)
+	nm.UpdateNodeChainInfo(0, 100, "0x64")
+	nm.UpdateNodeChainInfo(1, 100, "0x64")
+	nm.RecordNodeResult(0, 1_000, true)
+
+	firstID, _, err := nm.GetBestNode(100)
+	if err != nil {
+		t.Fatalf("expected first node, got error: %v", err)
+	}
+	secondID, _, err := nm.GetBestNode(100)
+	if err != nil {
+		t.Fatalf("expected second node, got error: %v", err)
+	}
+	if firstID == secondID {
+		t.Fatalf("expected balanced selections, got %d then %d", firstID, secondID)
+	}
+	snapshot := nm.Snapshot()
+	if snapshot.Nodes[firstID].Inflight == 0 || snapshot.Nodes[secondID].Inflight == 0 {
+		t.Fatalf("expected selected nodes to be marked inflight, got %+v", snapshot.Nodes)
+	}
+}
+
 func TestNodeManagerMarkNodeUnavailableExcludesNode(t *testing.T) {
 	nm := NewNodeManager([]*ethclient.Client{nil, nil}, 0)
 	nm.UpdateNodeChainInfo(0, 100, "0x64")
@@ -124,4 +163,15 @@ func TestNodeManagerMarkNodeUnavailableExcludesNode(t *testing.T) {
 	if snapshot.ReadyCount != 1 {
 		t.Fatalf("unexpected ready count: %d", snapshot.ReadyCount)
 	}
+}
+
+func operatorIDsForTest(ops []NodeOperator) []int {
+	ids := make([]int, 0, len(ops))
+	for _, op := range ops {
+		if op == nil {
+			continue
+		}
+		ids = append(ids, op.ID())
+	}
+	return ids
 }

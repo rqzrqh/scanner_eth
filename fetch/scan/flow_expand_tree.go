@@ -136,7 +136,11 @@ func (sf *Flow) HeaderWindowTargetSize() (uint64, bool) {
 	if sf == nil || sf.irreversible <= 0 {
 		return 0, false
 	}
-	targetSize := uint64(2 * sf.irreversible)
+	extraSize := sf.irreversible
+	if sf.headerWindowSize > 0 {
+		extraSize = sf.headerWindowSize
+	}
+	targetSize := uint64(sf.irreversible + extraSize)
 	return targetSize, targetSize != 0
 }
 

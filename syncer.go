@@ -34,7 +34,7 @@ func newFetchManager(conf *config.Config, clients []*ethclient.Client, db *gorm.
 	startHeight, endHeight, enableInternalTx := conf.Fetch.StartHeight, conf.Fetch.EndHeight, conf.Fetch.EnableInternalTx
 
 	logrus.Infof("reversibleBlocks:%v", reversibleBlocks)
-	logrus.Infof("startHeight:%v endHeight:%v enableInternalTx:%v bodyConcurrency:%v", startHeight, endHeight, enableInternalTx, conf.Fetch.BodyConcurrency)
+	logrus.Infof("startHeight:%v endHeight:%v headerWindowSize:%v enableInternalTx:%v bodyConcurrency:%v", startHeight, endHeight, conf.Fetch.HeaderWindowSize, enableInternalTx, conf.Fetch.BodyConcurrency)
 
 	if startHeight > endHeight {
 		logrus.Errorf("start height must be less than end height. startHeight:%v endHeight:%v", startHeight, endHeight)
@@ -79,6 +79,7 @@ func newFetchManager(conf *config.Config, clients []*ethclient.Client, db *gorm.
 		redisClient,
 		startHeight,
 		endHeight,
+		conf.Fetch.HeaderWindowSize,
 		reversibleBlocks,
 		conf.Fetch.Timeout,
 		taskPoolOptions,

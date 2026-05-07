@@ -16,6 +16,7 @@ const (
 	nodeScoreFailurePenaltyMicros     int64 = 5_000_000
 	nodeScoreInflightPenaltyMicros    int64 = 500_000
 	nodeScoreColdStartDelayMicros     int64 = 100_000
+	nodeScoreBalanceToleranceMicros   int64 = 250_000
 	nodeScoreMaxCooldown                    = time.Minute
 	nodeScoreBaseCooldown                   = 5 * time.Second
 	nodeScoreEWMANewSampleWeightParts int64 = 3
@@ -111,8 +112,9 @@ func (n *NodeState) currentScore(now time.Time) int64 {
 }
 
 type NodeManager struct {
-	mu    sync.RWMutex
-	nodes []*NodeState
+	mu              sync.RWMutex
+	nodes           []*NodeState
+	selectionCursor uint64
 }
 
 func NewNodeManager(clients []*ethclient.Client, rpcTimeout time.Duration) *NodeManager {
@@ -213,6 +215,33 @@ func (nm *NodeManager) validCandidatesLocked(height uint64, now time.Time) ([]no
 	return nodes, stats
 }
 
+func (nm *NodeManager) balancedCandidatesLocked(candidates []nodeCandidate) []nodeCandidate {
+	if len(candidates) <= 1 {
+		return candidates
+	}
+	bestScore := candidates[0].score
+	eligibleCount := 0
+	for _, candidate := range candidates {
+		if candidate.score > bestScore+nodeScoreBalanceToleranceMicros {
+			break
+		}
+		eligibleCount++
+	}
+	if eligibleCount <= 1 {
+		return candidates
+	}
+	shift := int(nm.selectionCursor % uint64(eligibleCount))
+	nm.selectionCursor++
+	if shift == 0 {
+		return candidates
+	}
+	ordered := make([]nodeCandidate, 0, len(candidates))
+	ordered = append(ordered, candidates[shift:eligibleCount]...)
+	ordered = append(ordered, candidates[:shift]...)
+	ordered = append(ordered, candidates[eligibleCount:]...)
+	return ordered
+}
+
 func (nm *NodeManager) GetAllValidNodeOperators(height uint64, blockHash string) []NodeOperator {
 	if nm == nil {
 		return nil
@@ -220,9 +249,10 @@ func (nm *NodeManager) GetAllValidNodeOperators(height uint64, blockHash string)
 	if strings.TrimSpace(blockHash) == "" {
 		return nil
 	}
-	nm.mu.RLock()
-	defer nm.mu.RUnlock()
+	nm.mu.Lock()
+	defer nm.mu.Unlock()
 	candidates, stats := nm.validCandidatesLocked(height, time.Now())
+	candidates = nm.balancedCandidatesLocked(candidates)
 	ops := make([]NodeOperator, 0, len(candidates))
 	nodeIDs := make([]int, 0, len(candidates))
 	scores := make([]int64, 0, len(candidates))
@@ -404,13 +434,16 @@ func (nm *NodeManager) GetLatestHeight() uint64 {
 }
 
 func (nm *NodeManager) GetBestNode(height uint64) (int, NodeOperator, error) {
-	nm.mu.RLock()
-	defer nm.mu.RUnlock()
+	nm.mu.Lock()
+	defer nm.mu.Unlock()
 	candidates, _ := nm.validCandidatesLocked(height, time.Now())
+	candidates = nm.balancedCandidatesLocked(candidates)
 	if len(candidates) == 0 {
 		return -1, nil, fmt.Errorf("no valid node with height >= %d", height)
 	}
 	best := candidates[0]
+	best.node.inflight++
+	best.node.score = best.node.currentScore(time.Now())
 	return best.id, best.node.operator, nil
 }
 

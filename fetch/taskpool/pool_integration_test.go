@@ -150,6 +150,51 @@ func TestTaskPoolRetryAndStats(t *testing.T) {
 	}
 }
 
+func TestTaskPoolRetryDelayKeepsTaskTracked(t *testing.T) {
+	var attempts int32
+	done := make(chan struct{})
+
+	pool := NewTaskPoolWithStop(
+		TaskPoolOptions{WorkerCount: 1, HighQueueSize: 16, NormalQueueSize: 16, MaxRetry: 1, RetryDelay: 100 * time.Millisecond},
+		1,
+		func(task *SyncTask, stopCh <-chan struct{}) bool {
+			_ = stopCh
+			current := atomic.AddInt32(&attempts, 1)
+			if current >= 2 {
+				close(done)
+				return true
+			}
+			return false
+		},
+	)
+	pool.Start()
+	t.Cleanup(func() { pool.Stop() })
+
+	pool.EnqueueTask("retry-delayed")
+
+	deadline := time.Now().Add(100 * time.Millisecond)
+	for atomic.LoadInt32(&attempts) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Fatalf("expected first attempt before retry delay, got=%v", got)
+	}
+	if !pool.HasTask("retry-delayed") {
+		t.Fatal("task should remain tracked while waiting to retry")
+	}
+
+	time.Sleep(30 * time.Millisecond)
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Fatalf("retry ran before delay elapsed, attempts=%v", got)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("timeout waiting delayed retry")
+	}
+}
+
 func TestNormalizeTaskPoolOptions(t *testing.T) {
 	options := NormalizeTaskPoolOptions(TaskPoolOptions{}, 3)
 	if options.WorkerCount != 3 {

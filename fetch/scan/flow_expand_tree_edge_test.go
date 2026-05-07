@@ -45,6 +45,10 @@ func TestExpandTreeEdgeBranches(t *testing.T) {
 	}
 
 	env.setIrreversible(2)
+	env.flow.headerWindowSize = 7
+	if sz, ok := env.flow.HeaderWindowTargetSize(); !ok || sz != 9 {
+		t.Fatalf("expected configured header window target size, got size=%d ok=%v", sz, ok)
+	}
 	_ = env.taskPool.TryStartHeaderHeightSync(15)
 	if got := env.flow.taskRuntime.FetchAndInsertHeaderByHeight(15); got != nil {
 		t.Fatal("expected nil when height already syncing")

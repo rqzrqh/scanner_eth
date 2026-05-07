@@ -28,7 +28,7 @@ func newTestFetchManager(t *testing.T, irreversible int) *FetchManager {
 	}
 	fm.nodeManager = nodepkg.NewNodeManager([]*ethclient.Client{nil}, 0)
 	rt := fm.currentRuntime()
-	flow := fetchscan.NewFlow(fm.scanFlowRuntimeDeps, fetchscan.Config{StartHeight: fm.scanConfig.StartHeight})
+	flow := fetchscan.NewFlow(fm.scanFlowRuntimeDeps, fm.scanConfig)
 	rt.scanFlow = flow
 	rt.scanWorker = fm.newScanWorker(flow)
 	pool := fetchtask.NewTaskPoolWithStop(

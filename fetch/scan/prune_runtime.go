@@ -45,6 +45,7 @@ func (sf *Flow) RunPruneStage(ctx context.Context) {
 	// full branch snapshots without prune interleaving during the same cycle.
 	before := sf.pruneRuntime.CaptureStateSnapshot()
 	sf.pruneRuntime.PruneStoredBlocks(ctx, sf.irreversible)
+	sf.MarkRootParentReady()
 	after := sf.pruneRuntime.CaptureStateSnapshot()
 	beforeCount := 0
 	afterCount := 0

@@ -83,18 +83,19 @@ func scanStageName(stage scanStage) string {
 type Flow struct {
 	runtimeDepsFn func() RuntimeDeps
 
-	startHeight  uint64
-	irreversible int
-	blockTree    *blocktree.BlockTree
-	taskPool     *fetchtask.Pool
-	storeWorker  *fetchserialstore.Worker
-	storedBlocks *fetchstore.StoredBlockState
-	scanWorker   *Worker
-	stagingStore *fetchstore.StagingStore
-	nodeManager  *nodepkg.NodeManager
-	fetcher      fetcherpkg.Fetcher
-	taskRuntime  fetchtaskprocess.RuntimeDeps
-	pruneRuntime PruneRuntimeDeps
+	startHeight      uint64
+	headerWindowSize int
+	irreversible     int
+	blockTree        *blocktree.BlockTree
+	taskPool         *fetchtask.Pool
+	storeWorker      *fetchserialstore.Worker
+	storedBlocks     *fetchstore.StoredBlockState
+	scanWorker       *Worker
+	stagingStore     *fetchstore.StagingStore
+	nodeManager      *nodepkg.NodeManager
+	fetcher          fetcherpkg.Fetcher
+	taskRuntime      fetchtaskprocess.RuntimeDeps
+	pruneRuntime     PruneRuntimeDeps
 
 	metricsMu    sync.RWMutex
 	stageMetrics map[scanStage]scanStageMetrics
@@ -102,8 +103,9 @@ type Flow struct {
 
 func NewFlow(runtimeDepsFn func() RuntimeDeps, config Config) *Flow {
 	sf := &Flow{
-		runtimeDepsFn: runtimeDepsFn,
-		startHeight:   config.StartHeight,
+		runtimeDepsFn:    runtimeDepsFn,
+		startHeight:      config.StartHeight,
+		headerWindowSize: config.HeaderWindowSize,
 	}
 	sf.BindRuntimeDeps()
 	return sf
@@ -143,6 +145,11 @@ func (sf *Flow) BindRuntimeDeps() {
 		deps.TaskPool.TryStartHeaderHashSync,
 		deps.TaskPool.FinishHeaderHashSync,
 	)
+	if deps.ScanWorker != nil {
+		sf.taskRuntime.OnBodySynced = func(string) {
+			deps.ScanWorker.Trigger()
+		}
+	}
 	sf.pruneRuntime = deps.PruneRuntime
 }
 

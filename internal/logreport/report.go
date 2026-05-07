@@ -68,9 +68,17 @@ type Summary struct {
 	StoreFailed       uint64
 	StoreSuccessRate  string
 	RemoteLatest      uint64
+	BlocktreeStart    uint64
+	BlocktreeEnd      uint64
 	StoredHeight      uint64
 	StoredCount       uint64
 	Lag               string
+	BlocktreeLag      string
+	StoreLag          string
+	PendingHeaders    uint64
+	PendingBodies     uint64
+	CompleteBlocks    uint64
+	StagingBlocks     uint64
 }
 
 type HeaderSyncStats struct {
@@ -491,6 +499,7 @@ type syncNodeChartSegment struct {
 type syncNodeChartRow struct {
 	Method   string
 	TotalUS  uint64
+	Calls    uint64
 	Segments []syncNodeChartSegment
 }
 
@@ -2035,12 +2044,28 @@ func (a *analyzer) finishSummary() {
 	a.report.Summary.StoreFailed = a.report.Store.Failed
 	a.report.Summary.StoreSuccessRate = percent(a.report.Store.Succeeded, a.report.Store.Succeeded+a.report.Store.Failed)
 	a.report.Summary.RemoteLatest = a.report.RuntimeLatest.RemoteLatest
+	a.report.Summary.BlocktreeStart = a.report.RuntimeLatest.BlocktreeStart
+	a.report.Summary.BlocktreeEnd = a.report.RuntimeLatest.BlocktreeEnd
 	a.report.Summary.StoredHeight = a.report.RuntimeLatest.StoredHeight
 	a.report.Summary.StoredCount = a.report.RuntimeLatest.StoredCount
+	a.report.Summary.PendingHeaders = a.report.RuntimeLatest.PendingHeaders
+	a.report.Summary.PendingBodies = a.report.RuntimeLatest.PendingBodies
+	a.report.Summary.CompleteBlocks = a.report.RuntimeLatest.CompleteBlocks
+	a.report.Summary.StagingBlocks = a.report.RuntimeLatest.StagingBlocks
 	if a.report.RuntimeLatest.RemoteLatest > 0 && a.report.RuntimeLatest.StoredHeight > 0 && a.report.RuntimeLatest.RemoteLatest >= a.report.RuntimeLatest.StoredHeight {
 		a.report.Summary.Lag = strconv.FormatUint(a.report.RuntimeLatest.RemoteLatest-a.report.RuntimeLatest.StoredHeight, 10)
 	} else {
 		a.report.Summary.Lag = "no data"
+	}
+	if a.report.RuntimeLatest.RemoteLatest > 0 && a.report.RuntimeLatest.BlocktreeEnd > 0 && a.report.RuntimeLatest.RemoteLatest >= a.report.RuntimeLatest.BlocktreeEnd {
+		a.report.Summary.BlocktreeLag = strconv.FormatUint(a.report.RuntimeLatest.RemoteLatest-a.report.RuntimeLatest.BlocktreeEnd, 10)
+	} else {
+		a.report.Summary.BlocktreeLag = "no data"
+	}
+	if a.report.RuntimeLatest.BlocktreeEnd > 0 && a.report.RuntimeLatest.StoredHeight > 0 && a.report.RuntimeLatest.BlocktreeEnd >= a.report.RuntimeLatest.StoredHeight {
+		a.report.Summary.StoreLag = strconv.FormatUint(a.report.RuntimeLatest.BlocktreeEnd-a.report.RuntimeLatest.StoredHeight, 10)
+	} else {
+		a.report.Summary.StoreLag = "no data"
 	}
 }
 
@@ -2229,6 +2254,7 @@ func TemplateFuncs() template.FuncMap {
 		},
 		"formatSignedMicros":          formatSignedMicros,
 		"syncProgressChart":           renderSyncProgressChart,
+		"syncSpeedChart":              renderSyncSpeedChart,
 		"blocktreeLagChart":           renderBlocktreeLagChart,
 		"blockTimingChart":            renderBlockTimingChart,
 		"blockTimingPhaseChart":       renderBlockTimingPhaseChart,
@@ -2236,6 +2262,8 @@ func TemplateFuncs() template.FuncMap {
 		"bodySyncDurationChart":       renderBodySyncDurationChart,
 		"storeDurationChart":          renderStoreDurationChart,
 		"syncNodeOperatorChart":       renderSyncNodeOperatorChart,
+		"taskPoolChart":               renderTaskPoolChart,
+		"taskPoolBacklogChart":        renderTaskPoolBacklogChart,
 		"bodySyncNodeOperatorMethods": bodySyncNodeOperatorMethods,
 		"pipelineTimingPhases":        pipelineTimingPhases,
 		"summaryTimingPhases":         summaryTimingPhases,
@@ -2285,7 +2313,7 @@ func renderSyncNodeOperatorChart(methods []NodeOperatorMethodStats) template.HTM
 	const (
 		width       = 960.0
 		left        = 230.0
-		right       = 70.0
+		right       = 180.0
 		top         = 26.0
 		bottom      = 42.0
 		rowH        = 36.0
@@ -2336,7 +2364,8 @@ func renderSyncNodeOperatorChart(methods []NodeOperatorMethodStats) template.HTM
 				b.WriteString(fmt.Sprintf(`<text class="bar-label" x="%.1f" y="%.1f">N%d %.0f%%</text>`, x1+6, y+barH-4, segment.NodeID, percent))
 			}
 		}
-		b.WriteString(fmt.Sprintf(`<text class="axis-label y-right-label" x="%.1f" y="%.1f">%s</text>`, left+plotW+8, labelY, template.HTMLEscapeString(formatSignedMicros(int64(row.TotalUS)))))
+		rightText := fmt.Sprintf("%s / %d calls", formatSignedMicros(int64(row.TotalUS)), row.Calls)
+		b.WriteString(fmt.Sprintf(`<text class="axis-label y-right-label" x="%.1f" y="%.1f">%s</text>`, left+plotW+8, labelY, template.HTMLEscapeString(rightText)))
 	}
 	b.WriteString(`</svg>`)
 	return template.HTML(b.String())
@@ -2345,6 +2374,7 @@ func renderSyncNodeOperatorChart(methods []NodeOperatorMethodStats) template.HTM
 func syncNodeOperatorChartRows(methods []NodeOperatorMethodStats) ([]syncNodeChartRow, []int) {
 	byMethod := make(map[string]map[int]uint64)
 	methodTotals := make(map[string]uint64)
+	methodCalls := make(map[string]uint64)
 	nodeSeen := make(map[int]bool)
 	for _, method := range methods {
 		if method.TotalCostUS == 0 {
@@ -2357,6 +2387,7 @@ func syncNodeOperatorChartRows(methods []NodeOperatorMethodStats) ([]syncNodeCha
 		}
 		nodeValues[method.NodeID] += method.TotalCostUS
 		methodTotals[method.Method] += method.TotalCostUS
+		methodCalls[method.Method] += method.Calls
 		nodeSeen[method.NodeID] = true
 	}
 
@@ -2380,7 +2411,7 @@ func syncNodeOperatorChartRows(methods []NodeOperatorMethodStats) ([]syncNodeCha
 	rows := make([]syncNodeChartRow, 0, len(methodNames))
 	for _, method := range methodNames {
 		nodeValues := byMethod[method]
-		row := syncNodeChartRow{Method: method}
+		row := syncNodeChartRow{Method: method, Calls: methodCalls[method]}
 		for _, nodeID := range nodeIDs {
 			value := nodeValues[nodeID]
 			if value == 0 {
@@ -2554,6 +2585,182 @@ func syncNodeOperatorNodeColor(nodeID int) string {
 		nodeID = -nodeID
 	}
 	return palette[nodeID%len(palette)]
+}
+
+func renderTaskPoolChart(stats TaskPoolStats) template.HTML {
+	if len(stats.Kinds) == 0 {
+		return ""
+	}
+	maxValue := uint64(0)
+	for _, kind := range stats.Kinds {
+		maxValue = maxUint64(maxValue, kind.Enqueued)
+		maxValue = maxUint64(maxValue, kind.Dequeued)
+		maxValue = maxUint64(maxValue, kind.Succeeded)
+		maxValue = maxUint64(maxValue, kind.Failed)
+		maxValue = maxUint64(maxValue, kind.Retried)
+		maxValue = maxUint64(maxValue, kind.Dropped)
+		maxValue = maxUint64(maxValue, kind.Tracked)
+	}
+	maxValue = maxUint64(maxValue, stats.PendingHigh)
+	maxValue = maxUint64(maxValue, stats.PendingNormal)
+	maxValue = maxUint64(maxValue, stats.Tracked)
+	if maxValue == 0 {
+		return ""
+	}
+
+	const (
+		width  = 960.0
+		left   = 150.0
+		right  = 34.0
+		top    = 36.0
+		bottom = 48.0
+		rowH   = 124.0
+		barH   = 9.0
+		gap    = 7.0
+	)
+	height := top + bottom + float64(len(stats.Kinds)+1)*rowH
+	plotW := width - left - right
+	plotH := height - top - bottom
+	scaleX := func(value uint64) float64 {
+		return left + float64(value)*plotW/float64(maxValue)
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf(`<svg class="progress-chart" viewBox="0 0 960 %.0f" role="img" aria-label="Task pool queue and lifecycle counters">`, height))
+	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top+plotH, left+plotW, top+plotH))
+	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top, left, top+plotH))
+	for i := 0; i <= 4; i++ {
+		x := left + float64(i)*plotW/4
+		value := uint64(float64(maxValue) * float64(i) / 4)
+		b.WriteString(fmt.Sprintf(`<line class="gridline" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, x, top, x, top+plotH))
+		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">%d</text>`, x, height-16, value))
+	}
+	b.WriteString(fmt.Sprintf(`<text class="axis-title y-left-title" x="%.1f" y="%.1f">Tasks</text>`, left, top-12))
+
+	for i, kind := range stats.Kinds {
+		rowTop := top + float64(i)*rowH + 10
+		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">%s</text>`, left-12, rowTop+22, template.HTMLEscapeString(kind.Name)))
+		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">success %s</text>`, left-12, rowTop+37, template.HTMLEscapeString(kind.SuccessRate)))
+		writeTaskPoolBar(&b, "task-enqueued", "enq", kind.Enqueued, left, rowTop, barH, scaleX)
+		writeTaskPoolBar(&b, "task-dequeued", "deq", kind.Dequeued, left, rowTop+(barH+gap), barH, scaleX)
+		writeTaskPoolBar(&b, "task-succeeded", "ok", kind.Succeeded, left, rowTop+2*(barH+gap), barH, scaleX)
+		writeTaskPoolBar(&b, "task-failed", "fail", kind.Failed, left, rowTop+3*(barH+gap), barH, scaleX)
+		writeTaskPoolBar(&b, "task-retried", "retry", kind.Retried, left, rowTop+4*(barH+gap), barH, scaleX)
+		writeTaskPoolBar(&b, "task-dropped", "drop", kind.Dropped, left, rowTop+5*(barH+gap), barH, scaleX)
+		writeTaskPoolBar(&b, "task-tracked", "tracked", kind.Tracked, left, rowTop+6*(barH+gap), barH, scaleX)
+	}
+
+	rowTop := top + float64(len(stats.Kinds))*rowH + 10
+	b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">current</text>`, left-12, rowTop+22))
+	b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">workers %d</text>`, left-12, rowTop+37, stats.WorkerCount))
+	writeTaskPoolBar(&b, "task-pending-high", "high", stats.PendingHigh, left, rowTop, barH, scaleX)
+	writeTaskPoolBar(&b, "task-pending-normal", "normal", stats.PendingNormal, left, rowTop+(barH+gap), barH, scaleX)
+	writeTaskPoolBar(&b, "task-tracked", "tracked", stats.Tracked, left, rowTop+2*(barH+gap), barH, scaleX)
+	b.WriteString(`</svg>`)
+	return template.HTML(b.String())
+}
+
+func writeTaskPoolBar(b *strings.Builder, class string, label string, value uint64, left, y, height float64, scaleX func(uint64) float64) {
+	if value == 0 {
+		return
+	}
+	width := scaleX(value) - left
+	if width <= 0 {
+		return
+	}
+	b.WriteString(fmt.Sprintf(`<rect class="bar %s" x="%.1f" y="%.1f" width="%.1f" height="%.1f"></rect>`, template.HTMLEscapeString(class), left, y, width, height))
+	text := fmt.Sprintf("%s %d", label, value)
+	if width >= 54 {
+		b.WriteString(fmt.Sprintf(`<text class="bar-label" x="%.1f" y="%.1f">%s</text>`, left+6, y+height-1, template.HTMLEscapeString(text)))
+		return
+	}
+	b.WriteString(fmt.Sprintf(`<text class="axis-label y-right-label" x="%.1f" y="%.1f">%s</text>`, left+width+5, y+height, template.HTMLEscapeString(text)))
+}
+
+func renderTaskPoolBacklogChart(series []RuntimeSnapshot) template.HTML {
+	if len(series) == 0 {
+		return ""
+	}
+	maxValue := uint64(0)
+	for _, snap := range series {
+		maxValue = maxUint64(maxValue, snap.TaskPendingHigh)
+		maxValue = maxUint64(maxValue, snap.TaskPendingNormal)
+		maxValue = maxUint64(maxValue, snap.TaskTracked)
+	}
+	if maxValue == 0 {
+		maxValue = 1
+	}
+
+	const (
+		width  = 960.0
+		height = 280.0
+		left   = 70.0
+		right  = 20.0
+		top    = 24.0
+		bottom = 42.0
+		plotW  = width - left - right
+		plotH  = height - top - bottom
+	)
+	scaleX := func(i int) float64 {
+		if len(series) == 1 {
+			return left + plotW/2
+		}
+		return left + float64(i)*plotW/float64(len(series)-1)
+	}
+	scaleY := func(value uint64) float64 {
+		return top + (float64(maxValue-value) * plotH / float64(maxValue))
+	}
+	pointsFor := func(selector func(RuntimeSnapshot) uint64) (string, int, string) {
+		var points strings.Builder
+		count := 0
+		lastPoint := ""
+		for i, snap := range series {
+			value := selector(snap)
+			if points.Len() > 0 {
+				points.WriteByte(' ')
+			}
+			lastPoint = fmt.Sprintf("%.1f,%.1f", scaleX(i), scaleY(value))
+			points.WriteString(lastPoint)
+			count++
+		}
+		return points.String(), count, lastPoint
+	}
+	highPoints, highCount, highPoint := pointsFor(func(s RuntimeSnapshot) uint64 { return s.TaskPendingHigh })
+	normalPoints, normalCount, normalPoint := pointsFor(func(s RuntimeSnapshot) uint64 { return s.TaskPendingNormal })
+	trackedPoints, trackedCount, trackedPoint := pointsFor(func(s RuntimeSnapshot) uint64 { return s.TaskTracked })
+
+	var b strings.Builder
+	b.WriteString(`<svg class="progress-chart" viewBox="0 0 960 280" role="img" aria-label="Task pool backlog over time">`)
+	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top+plotH, left+plotW, top+plotH))
+	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top, left, top+plotH))
+	for i := 0; i <= 4; i++ {
+		y := top + float64(i)*plotH/4
+		value := maxValue - uint64(float64(maxValue)*float64(i)/4)
+		b.WriteString(fmt.Sprintf(`<line class="gridline" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, y, left+plotW, y))
+		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">%d</text>`, left-8, y+4, value))
+	}
+	b.WriteString(fmt.Sprintf(`<text class="axis-title y-left-title" x="%.1f" y="%.1f">Tasks in pool</text>`, left, top-8))
+	if !series[0].Time.IsZero() {
+		b.WriteString(fmt.Sprintf(`<text class="axis-label x-start" x="%.1f" y="%.1f">%s</text>`, left, height-12, template.HTMLEscapeString(series[0].Time.Format("15:04:05"))))
+	}
+	last := series[len(series)-1]
+	if !last.Time.IsZero() {
+		b.WriteString(fmt.Sprintf(`<text class="axis-label x-end" x="%.1f" y="%.1f">%s</text>`, left+plotW, height-12, template.HTMLEscapeString(last.Time.Format("15:04:05"))))
+	}
+	b.WriteString(fmt.Sprintf(`<polyline class="line task-pending-high" points="%s"></polyline>`, highPoints))
+	b.WriteString(fmt.Sprintf(`<polyline class="line task-pending-normal" points="%s"></polyline>`, normalPoints))
+	b.WriteString(fmt.Sprintf(`<polyline class="line task-tracked" points="%s"></polyline>`, trackedPoints))
+	if highCount == 1 {
+		b.WriteString(renderChartPoint("task-pending-high", highPoint))
+	}
+	if normalCount == 1 {
+		b.WriteString(renderChartPoint("task-pending-normal", normalPoint))
+	}
+	if trackedCount == 1 {
+		b.WriteString(renderChartPoint("task-tracked", trackedPoint))
+	}
+	b.WriteString(`</svg>`)
+	return template.HTML(b.String())
 }
 
 func pipelineTimingPhases(phases []BlockTimingPhaseStats) []BlockTimingPhaseStats {
@@ -3059,11 +3266,47 @@ func renderSyncProgressChart(series []RuntimeSnapshot) template.HTML {
 		maxHeight++
 	}
 
+	type speedPoint struct {
+		Index    int
+		TreeBPS  float64
+		StoreBPS float64
+	}
+	speedPoints := make([]speedPoint, 0, len(series)-1)
+	maxSpeed := 0.0
+	for i := 1; i < len(series); i++ {
+		prev := series[i-1]
+		curr := series[i]
+		if prev.Time.IsZero() || curr.Time.IsZero() {
+			continue
+		}
+		seconds := curr.Time.Sub(prev.Time).Seconds()
+		if seconds <= 0 {
+			continue
+		}
+		point := speedPoint{Index: i}
+		if curr.BlocktreeEnd >= prev.BlocktreeEnd {
+			point.TreeBPS = float64(curr.BlocktreeEnd-prev.BlocktreeEnd) / seconds
+		}
+		if curr.StoredHeight >= prev.StoredHeight {
+			point.StoreBPS = float64(curr.StoredHeight-prev.StoredHeight) / seconds
+		}
+		if point.TreeBPS > maxSpeed {
+			maxSpeed = point.TreeBPS
+		}
+		if point.StoreBPS > maxSpeed {
+			maxSpeed = point.StoreBPS
+		}
+		speedPoints = append(speedPoints, point)
+	}
+	if maxSpeed <= 0 {
+		maxSpeed = 1
+	}
+
 	const (
 		width  = 960.0
 		height = 280.0
 		left   = 82.0
-		right  = 20.0
+		right  = 86.0
 		top    = 24.0
 		bottom = 42.0
 		plotW  = width - left - right
@@ -3078,35 +3321,70 @@ func renderSyncProgressChart(series []RuntimeSnapshot) template.HTML {
 	scaleHeightY := func(value uint64) float64 {
 		return top + (float64(maxHeight-value) * plotH / float64(maxHeight-minHeight))
 	}
+	scaleSpeedY := func(value float64) float64 {
+		return top + ((maxSpeed - value) * plotH / maxSpeed)
+	}
 
-	var treePoints, storedPoints strings.Builder
+	var treePoints, storedPoints, treeSpeedPoints, storedSpeedPoints strings.Builder
+	var treePoint, storedPoint, treeSpeedPoint, storedSpeedPoint string
+	treePointCount, storedPointCount, treeSpeedPointCount, storedSpeedPointCount := 0, 0, 0, 0
 	for i, snap := range series {
 		x := scaleX(i)
 		if snap.BlocktreeEnd > 0 {
 			if treePoints.Len() > 0 {
 				treePoints.WriteByte(' ')
 			}
-			treePoints.WriteString(fmt.Sprintf("%.1f,%.1f", x, scaleHeightY(snap.BlocktreeEnd)))
+			treePoint = fmt.Sprintf("%.1f,%.1f", x, scaleHeightY(snap.BlocktreeEnd))
+			treePoints.WriteString(treePoint)
+			treePointCount++
 		}
 		if snap.StoredHeight > 0 {
 			if storedPoints.Len() > 0 {
 				storedPoints.WriteByte(' ')
 			}
-			storedPoints.WriteString(fmt.Sprintf("%.1f,%.1f", x, scaleHeightY(snap.StoredHeight)))
+			storedPoint = fmt.Sprintf("%.1f,%.1f", x, scaleHeightY(snap.StoredHeight))
+			storedPoints.WriteString(storedPoint)
+			storedPointCount++
 		}
+	}
+	for _, point := range speedPoints {
+		x := scaleX(point.Index)
+		if treeSpeedPoints.Len() > 0 {
+			treeSpeedPoints.WriteByte(' ')
+		}
+		treeSpeedPoint = fmt.Sprintf("%.1f,%.1f", x, scaleSpeedY(point.TreeBPS))
+		treeSpeedPoints.WriteString(treeSpeedPoint)
+		treeSpeedPointCount++
+
+		if storedSpeedPoints.Len() > 0 {
+			storedSpeedPoints.WriteByte(' ')
+		}
+		storedSpeedPoint = fmt.Sprintf("%.1f,%.1f", x, scaleSpeedY(point.StoreBPS))
+		storedSpeedPoints.WriteString(storedSpeedPoint)
+		storedSpeedPointCount++
 	}
 
 	var b strings.Builder
-	b.WriteString(`<svg class="progress-chart" viewBox="0 0 960 280" role="img" aria-label="Sync progress with local block heights">`)
+	b.WriteString(`<svg class="progress-chart" viewBox="0 0 960 280" role="img" aria-label="Sync progress and speed with local block heights">`)
 	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top+plotH, left+plotW, top+plotH))
 	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top, left, top+plotH))
+	if len(speedPoints) > 0 {
+		b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left+plotW, top, left+plotW, top+plotH))
+	}
 	for i := 0; i <= 4; i++ {
 		y := top + float64(i)*plotH/4
 		heightValue := maxHeight - uint64(float64(maxHeight-minHeight)*float64(i)/4)
 		b.WriteString(fmt.Sprintf(`<line class="gridline" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, y, left+plotW, y))
 		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">%d</text>`, left-8, y+4, heightValue))
+		if len(speedPoints) > 0 {
+			speedValue := maxSpeed - maxSpeed*float64(i)/4
+			b.WriteString(fmt.Sprintf(`<text class="axis-label y-right-label" x="%.1f" y="%.1f">%.2f</text>`, left+plotW+8, y+4, speedValue))
+		}
 	}
 	b.WriteString(fmt.Sprintf(`<text class="axis-title y-left-title" x="%.1f" y="%.1f">Block height</text>`, left, top-8))
+	if len(speedPoints) > 0 {
+		b.WriteString(fmt.Sprintf(`<text class="axis-title y-right-title" x="%.1f" y="%.1f">Blocks/s</text>`, left+plotW, top-8))
+	}
 	if !series[0].Time.IsZero() {
 		b.WriteString(fmt.Sprintf(`<text class="axis-label x-start" x="%.1f" y="%.1f">%s</text>`, left, height-12, template.HTMLEscapeString(series[0].Time.Format("15:04:05"))))
 	}
@@ -3116,9 +3394,144 @@ func renderSyncProgressChart(series []RuntimeSnapshot) template.HTML {
 	}
 	b.WriteString(fmt.Sprintf(`<polyline class="line tree" points="%s"></polyline>`, treePoints.String()))
 	b.WriteString(fmt.Sprintf(`<polyline class="line stored" points="%s"></polyline>`, storedPoints.String()))
+	if treeSpeedPointCount > 0 {
+		b.WriteString(fmt.Sprintf(`<polyline class="line speed-tree" points="%s"></polyline>`, treeSpeedPoints.String()))
+	}
+	if storedSpeedPointCount > 0 {
+		b.WriteString(fmt.Sprintf(`<polyline class="line speed-stored" points="%s"></polyline>`, storedSpeedPoints.String()))
+	}
+	if treePointCount == 1 {
+		b.WriteString(renderChartPoint("tree", treePoint))
+	}
+	if storedPointCount == 1 {
+		b.WriteString(renderChartPoint("stored", storedPoint))
+	}
+	if treeSpeedPointCount == 1 {
+		b.WriteString(renderChartPoint("speed-tree", treeSpeedPoint))
+	}
+	if storedSpeedPointCount == 1 {
+		b.WriteString(renderChartPoint("speed-stored", storedSpeedPoint))
+	}
 	b.WriteString(`</svg>`)
 
 	return template.HTML(b.String())
+}
+
+func renderSyncSpeedChart(series []RuntimeSnapshot) template.HTML {
+	if len(series) < 2 {
+		return ""
+	}
+
+	type speedPoint struct {
+		Time     time.Time
+		TreeBPS  float64
+		StoreBPS float64
+	}
+	points := make([]speedPoint, 0, len(series)-1)
+	maxSpeed := 0.0
+	for i := 1; i < len(series); i++ {
+		prev := series[i-1]
+		curr := series[i]
+		if prev.Time.IsZero() || curr.Time.IsZero() {
+			continue
+		}
+		seconds := curr.Time.Sub(prev.Time).Seconds()
+		if seconds <= 0 {
+			continue
+		}
+		point := speedPoint{Time: curr.Time}
+		if curr.BlocktreeEnd >= prev.BlocktreeEnd {
+			point.TreeBPS = float64(curr.BlocktreeEnd-prev.BlocktreeEnd) / seconds
+		}
+		if curr.StoredHeight >= prev.StoredHeight {
+			point.StoreBPS = float64(curr.StoredHeight-prev.StoredHeight) / seconds
+		}
+		if point.TreeBPS > maxSpeed {
+			maxSpeed = point.TreeBPS
+		}
+		if point.StoreBPS > maxSpeed {
+			maxSpeed = point.StoreBPS
+		}
+		points = append(points, point)
+	}
+	if len(points) == 0 {
+		return ""
+	}
+	if maxSpeed <= 0 {
+		maxSpeed = 1
+	}
+
+	const (
+		width  = 960.0
+		height = 260.0
+		left   = 70.0
+		right  = 20.0
+		top    = 20.0
+		bottom = 42.0
+		plotW  = width - left - right
+		plotH  = height - top - bottom
+	)
+	scaleX := func(i int) float64 {
+		if len(points) == 1 {
+			return left + plotW/2
+		}
+		return left + float64(i)*plotW/float64(len(points)-1)
+	}
+	scaleY := func(value float64) float64 {
+		return top + ((maxSpeed - value) * plotH / maxSpeed)
+	}
+	pointsFor := func(selector func(speedPoint) float64) (string, int, string) {
+		var b strings.Builder
+		lastPoint := ""
+		for i, point := range points {
+			if b.Len() > 0 {
+				b.WriteByte(' ')
+			}
+			lastPoint = fmt.Sprintf("%.1f,%.1f", scaleX(i), scaleY(selector(point)))
+			b.WriteString(lastPoint)
+		}
+		return b.String(), len(points), lastPoint
+	}
+	treePoints, treeCount, treePoint := pointsFor(func(point speedPoint) float64 { return point.TreeBPS })
+	storePoints, storeCount, storePoint := pointsFor(func(point speedPoint) float64 { return point.StoreBPS })
+
+	var b strings.Builder
+	b.WriteString(`<svg class="progress-chart" viewBox="0 0 960 260" role="img" aria-label="Sync speed over time">`)
+	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top+plotH, left+plotW, top+plotH))
+	b.WriteString(fmt.Sprintf(`<line class="axis" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, top, left, top+plotH))
+	for i := 0; i <= 4; i++ {
+		y := top + float64(i)*plotH/4
+		value := maxSpeed - maxSpeed*float64(i)/4
+		b.WriteString(fmt.Sprintf(`<line class="gridline" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"></line>`, left, y, left+plotW, y))
+		b.WriteString(fmt.Sprintf(`<text class="axis-label" x="%.1f" y="%.1f">%.2f</text>`, left-8, y+4, value))
+	}
+	b.WriteString(fmt.Sprintf(`<text class="axis-title y-left-title" x="%.1f" y="%.1f">Blocks/s</text>`, left, top-7))
+	b.WriteString(fmt.Sprintf(`<text class="axis-label x-start" x="%.1f" y="%.1f">%s</text>`, left, height-12, template.HTMLEscapeString(points[0].Time.Format("15:04:05"))))
+	last := points[len(points)-1]
+	b.WriteString(fmt.Sprintf(`<text class="axis-label x-end" x="%.1f" y="%.1f">%s</text>`, left+plotW, height-12, template.HTMLEscapeString(last.Time.Format("15:04:05"))))
+	b.WriteString(fmt.Sprintf(`<polyline class="line speed-tree" points="%s"></polyline>`, treePoints))
+	b.WriteString(fmt.Sprintf(`<polyline class="line speed-stored" points="%s"></polyline>`, storePoints))
+	if treeCount == 1 {
+		b.WriteString(renderChartPoint("speed-tree", treePoint))
+	}
+	if storeCount == 1 {
+		b.WriteString(renderChartPoint("speed-stored", storePoint))
+	}
+	b.WriteString(`</svg>`)
+	return template.HTML(b.String())
+}
+
+func renderChartPoint(className, point string) string {
+	parts := strings.Split(point, ",")
+	if len(parts) != 2 {
+		return ""
+	}
+	return fmt.Sprintf(
+		`<circle class="point %s" cx="%s" cy="%s" r="4"></circle>`,
+		template.HTMLEscapeString(className),
+		template.HTMLEscapeString(parts[0]),
+		template.HTMLEscapeString(parts[1]),
+	)
 }
 
 func renderStoredHeightChart(series []RuntimeSnapshot) template.HTML {

@@ -57,6 +57,9 @@ func TestAnalyzeParsesScannerLogSummary(t *testing.T) {
 	if report.RuntimeLatest.RemoteLatest != 120 || report.RuntimeLatest.StoredCount != 105 || report.RuntimeLatest.StoredHeight != 106 {
 		t.Fatalf("unexpected runtime latest: %+v", report.RuntimeLatest)
 	}
+	if report.Summary.BlocktreeEnd != 110 || report.Summary.BlocktreeLag != "10" || report.Summary.StoreLag != "4" || report.Summary.PendingBodies != 2 || report.Summary.CompleteBlocks != 1 {
+		t.Fatalf("unexpected sync progress summary: %+v", report.Summary)
+	}
 	if report.FullBlockStore.Count != 1 || report.FullBlockStore.AvgTotalUS != 2000 || report.FullBlockStore.AvgDataUS != 700 || report.FullBlockStore.AvgFinalizeUS != 1000 {
 		t.Fatalf("unexpected fullblock store stats: %+v", report.FullBlockStore)
 	}
@@ -94,12 +97,12 @@ func TestAnalyzeParsesScannerLogSummary(t *testing.T) {
 		t.Fatalf("unexpected body sync node operator method filtering: %+v", methods)
 	}
 	chart := string(renderSyncNodeOperatorChart([]NodeOperatorMethodStats{
-		{NodeID: 1, Method: "FetchReceiptsBatch", TotalCostUS: 3000},
-		{NodeID: 1, Method: "FetchTransactionsByHashBatch", TotalCostUS: 1000},
-		{NodeID: 2, Method: "FetchReceiptsBatch", TotalCostUS: 2000},
-		{NodeID: 2, Method: "FetchBlockHeaderByHash", TotalCostUS: 1000},
+		{NodeID: 1, Method: "FetchReceiptsBatch", Calls: 2, TotalCostUS: 3000},
+		{NodeID: 1, Method: "FetchTransactionsByHashBatch", Calls: 1, TotalCostUS: 1000},
+		{NodeID: 2, Method: "FetchReceiptsBatch", Calls: 3, TotalCostUS: 2000},
+		{NodeID: 2, Method: "FetchBlockHeaderByHash", Calls: 1, TotalCostUS: 1000},
 	}))
-	if !strings.Contains(chart, "Sync node remote interface duration ratio") || !strings.Contains(chart, "FetchReceiptsBatch") || !strings.Contains(chart, "FetchTransactionsByHashBatch") || !strings.Contains(chart, "FetchBlockHeaderByHash") || !strings.Contains(chart, ">N1<") || !strings.Contains(chart, ">N2<") || !strings.Contains(chart, "N1 60%") {
+	if !strings.Contains(chart, "Sync node remote interface duration ratio") || !strings.Contains(chart, "FetchReceiptsBatch") || !strings.Contains(chart, "FetchTransactionsByHashBatch") || !strings.Contains(chart, "FetchBlockHeaderByHash") || !strings.Contains(chart, ">N1<") || !strings.Contains(chart, ">N2<") || !strings.Contains(chart, "N1 60%") || !strings.Contains(chart, "5.000ms / 5 calls") {
 		t.Fatalf("sync node operator chart missing expected content: %s", chart)
 	}
 	if len(report.Anomalies) == 0 {
@@ -136,8 +139,14 @@ func TestRenderHTMLSmoke(t *testing.T) {
 	if strings.Contains(html, "Per-Block Store Duration") {
 		t.Fatalf("rendered HTML should not show per-block store duration table: %s", html)
 	}
-	if strings.Index(html, "Sync Progress") > strings.Index(html, "Node Request Overview") || strings.Index(html, "Node Request Overview") > strings.Index(html, "Time Distribution") || strings.Index(html, "Time Distribution") > strings.Index(html, "Sync Detail") || strings.Index(html, "Sync Detail") > strings.Index(html, "Store Detail") || strings.Index(html, "Store Detail") > strings.Index(html, "Task Pool") {
+	if strings.Index(html, "Sync Progress") > strings.Index(html, "Node Request Overview") || strings.Index(html, "Node Request Overview") > strings.Index(html, "Time Distribution") || strings.Index(html, "Time Distribution") > strings.Index(html, "Task Pool") || strings.Index(html, "Task Pool") > strings.Index(html, "Sync Detail") || strings.Index(html, "Sync Detail") > strings.Index(html, "Store Detail") {
 		t.Fatalf("rendered HTML should show overall sections before module details: %s", html)
+	}
+	if !strings.Contains(html, "Task pool queue and lifecycle counters") || !strings.Contains(html, "Pending high") {
+		t.Fatalf("rendered HTML should include task pool chart: %s", html)
+	}
+	if !strings.Contains(html, "Backlog Over Time") || !strings.Contains(html, "Task pool backlog over time") {
+		t.Fatalf("rendered HTML should include task pool backlog chart: %s", html)
 	}
 	if strings.Index(html, "Node Request Overview") > strings.Index(html, "Sync Node Remote Interface Duration") || strings.Index(html, "Sync Node Remote Interface Duration") > strings.Index(html, "Time Distribution") {
 		t.Fatalf("sync node remote interface duration should render in node request overview: %s", html)
@@ -147,6 +156,12 @@ func TestRenderHTMLSmoke(t *testing.T) {
 	}
 	if !strings.Contains(html, "BlockTree end") || !strings.Contains(html, "Stored block height") || !strings.Contains(html, "Remote latest - BlockTree end") {
 		t.Fatalf("rendered HTML should keep sync progress charts: %s", html)
+	}
+	if !strings.Contains(html, "Latest Runtime Snapshot") || !strings.Contains(html, "Stored State Count") || !strings.Contains(html, "Store Lag") || !strings.Contains(html, "Stored state count is an in-memory state size") {
+		t.Fatalf("rendered HTML should clarify sync progress fields: %s", html)
+	}
+	if !strings.Contains(html, "BlockTree speed") || !strings.Contains(html, "Store speed") || strings.Contains(html, `aria-label="Sync speed over time"`) {
+		t.Fatalf("rendered HTML should merge sync speed into sync progress: %s", html)
 	}
 	if strings.Index(html, "Anomaly Summary") < strings.Index(html, "Store Data Type Duration") {
 		t.Fatalf("anomaly summary should render after store details: %s", html)
@@ -175,6 +190,9 @@ func TestSyncProgressChartExcludesRemoteLatestFromHeightAxis(t *testing.T) {
 	if !strings.Contains(html, `class="line tree"`) || !strings.Contains(html, `class="line stored"`) {
 		t.Fatalf("sync progress chart missing expected local progress lines: %s", html)
 	}
+	if !strings.Contains(html, `class="point tree"`) || !strings.Contains(html, `class="point stored"`) {
+		t.Fatalf("single-sample sync progress chart should render visible point markers: %s", html)
+	}
 }
 
 func TestBlocktreeLagChartRendersLagSeparately(t *testing.T) {
@@ -188,6 +206,28 @@ func TestBlocktreeLagChartRendersLagSeparately(t *testing.T) {
 
 	if !strings.Contains(html, `class="line lag"`) || !strings.Contains(html, "Blocks behind") {
 		t.Fatalf("blocktree lag chart missing expected lag line: %s", html)
+	}
+}
+
+func TestSyncProgressChartRendersProgressRates(t *testing.T) {
+	html := string(renderSyncProgressChart([]RuntimeSnapshot{
+		{
+			Time:         time.Date(2026, 5, 5, 1, 2, 0, 0, time.Local),
+			BlocktreeEnd: 100,
+			StoredHeight: 90,
+		},
+		{
+			Time:         time.Date(2026, 5, 5, 1, 2, 10, 0, time.Local),
+			BlocktreeEnd: 130,
+			StoredHeight: 110,
+		},
+	}))
+
+	if !strings.Contains(html, `aria-label="Sync progress and speed with local block heights"`) || !strings.Contains(html, `class="line speed-tree"`) || !strings.Contains(html, `class="line speed-stored"`) {
+		t.Fatalf("sync progress chart missing expected speed series: %s", html)
+	}
+	if !strings.Contains(html, "Blocks/s") || !strings.Contains(html, ">3.00<") {
+		t.Fatalf("sync progress chart should show blocks per second axis: %s", html)
 	}
 }
 

@@ -161,6 +161,11 @@ func (fm *FetchManager) createRuntimeState() {
 			fm.nodeManager,
 			fm.fetcher,
 		)
+		taskRuntime.OnBodySynced = func(string) {
+			if rt.scanWorker != nil {
+				rt.scanWorker.Trigger()
+			}
+		}
 		return fetchtask.DispatchSyncTask(
 			task,
 			stopCh,

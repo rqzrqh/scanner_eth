@@ -68,7 +68,7 @@ database:
   loc: Local
 ```
 
-Start the mock nodes:
+Start the mock nodes in one terminal:
 
 ```bash
 go run . mocknode --conf mocknode.conf
@@ -85,6 +85,12 @@ Child logs are printed by the parent with a node prefix, such as `[mocknode:0 st
 
 The `nodes` section configures per-node network behavior and also determines node count. `latency` adds fixed delay before each request, `latency_jitter` adds a random extra delay from `0` to that duration, and `drop_rate` is a probability from `0` to `1` that closes the request connection without a JSON-RPC response.
 
+### Run Scanner Against Mock Node
+
+Use `mocknode.conf.database` as the mock RPC data source. It should point to a database that already contains the persisted scanner tables to replay, especially `scanner_info`, complete `block` rows, transactions, receipts/log-derived rows, and any optional tables needed by the scanner features you enable.
+
+Use `config.yaml.database` as the scanner runtime database. For a replay sync, point it at a different or empty database so the scanner writes fresh data while mocknode serves historical data from the source database. If both configs point to the same database, the scanner will see the existing stored blocks and resume from that state instead of replaying from scratch.
+
 To make the scanner use these mock nodes, point `fetch.rpc_nodes` in `config.yaml` to the local URLs:
 
 ```yaml
@@ -99,6 +105,8 @@ Alternatively, start the scanner with `--mocknode`. In this mode `fetch.rpc_node
 ```bash
 go run . scanner -conf config.yaml -env prd --mocknode
 ```
+
+Keep the `mocknode` process running while the scanner is syncing. The scanner still reads all non-RPC settings from `config.yaml`, including chain metadata, Redis, store options, task pool settings, and metrics. The chain ID and genesis hash in `config.yaml` must match the `scanner_info` row in the mocknode source database.
 
 ## Documentation
 

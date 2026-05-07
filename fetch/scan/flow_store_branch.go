@@ -201,6 +201,7 @@ func (sf *Flow) waitStoreBranchesWrite(ctx context.Context, bodyBranches []fetch
 	sf.logScanStageEvent(event)
 	if event.success && (ctx == nil || ctx.Err() == nil) {
 		sf.inspectBlockTreeState("after_store_branches")
+		sf.TriggerScan()
 	}
 }
 

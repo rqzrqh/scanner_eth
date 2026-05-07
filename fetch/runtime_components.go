@@ -11,7 +11,7 @@ func (fm *FetchManager) newScanFlow() *fetchscan.Flow {
 	if fm == nil {
 		return nil
 	}
-	return fetchscan.NewFlow(fm.scanFlowRuntimeDeps, fetchscan.Config{StartHeight: fm.scanConfig.StartHeight})
+	return fetchscan.NewFlow(fm.scanFlowRuntimeDeps, fm.scanConfig)
 }
 
 func (fm *FetchManager) newScanWorker(flow *fetchscan.Flow) *fetchscan.Worker {

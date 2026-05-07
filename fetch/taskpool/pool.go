@@ -87,6 +87,7 @@ type TaskPoolOptions struct {
 	HighQueueSize    int
 	NormalQueueSize  int
 	MaxRetry         int
+	RetryDelay       time.Duration
 	StatsLogInterval time.Duration
 }
 
@@ -108,6 +109,9 @@ func NormalizeTaskPoolOptions(options TaskPoolOptions, clientCount int) TaskPool
 	}
 	if options.MaxRetry == 0 {
 		options.MaxRetry = 2
+	}
+	if options.RetryDelay < 0 {
+		options.RetryDelay = 0
 	}
 	if options.StatsLogInterval < 0 {
 		options.StatsLogInterval = 0
@@ -131,6 +135,7 @@ type Pool struct {
 	StopCh           chan struct{}
 	WorkerCount      int
 	MaxRetry         int
+	RetryDelay       time.Duration
 	StatsLogInterval time.Duration
 
 	enqueued          uint64
@@ -171,6 +176,7 @@ func NewTaskPoolWithStop(options TaskPoolOptions, clientCount int, handleTaskFn 
 		StopCh:           make(chan struct{}),
 		WorkerCount:      options.WorkerCount,
 		MaxRetry:         options.MaxRetry,
+		RetryDelay:       options.RetryDelay,
 		StatsLogInterval: options.StatsLogInterval,
 	}
 }
@@ -508,6 +514,10 @@ func (tp *Pool) executeTask(task *SyncTask) {
 		atomic.AddUint64(&tp.retried, 1)
 		tp.addKindCounter(&tp.retriedBody, &tp.retriedHeaderH, &tp.retriedHeaderHs, task.Kind)
 		logTaskLifecycle("retried", task, 0, taskTotalMicros(task))
+		if !tp.waitBeforeRetry(task) {
+			tp.DelTaskKey(task.Key)
+			return
+		}
 		if tp.PushTask(task, false) {
 			return
 		}
@@ -530,6 +540,21 @@ func (tp *Pool) handleTask(task *SyncTask) bool {
 		return false
 	}
 	return handler(task, tp.StopCh)
+}
+
+func (tp *Pool) waitBeforeRetry(task *SyncTask) bool {
+	if tp == nil || tp.RetryDelay <= 0 {
+		return true
+	}
+	timer := time.NewTimer(tp.RetryDelay)
+	defer timer.Stop()
+	select {
+	case <-tp.StopCh:
+		logTaskLifecycle("canceled", task, 0, taskTotalMicros(task))
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func taskTotalMicros(task *SyncTask) int64 {

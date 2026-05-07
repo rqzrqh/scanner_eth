@@ -39,6 +39,7 @@ type Fetch struct {
 	Timeout          time.Duration `mapstructure:"timeout"`
 	StartHeight      uint64        `mapstructure:"start_height"`
 	EndHeight        uint64        `mapstructure:"end_height"`
+	HeaderWindowSize int           `mapstructure:"header_window_size"`
 	EnableInternalTx bool          `mapstructure:"enable_internal_tx"`
 	BodyConcurrency  int           `mapstructure:"body_concurrency"`
 	Store            Store         `mapstructure:"store"`

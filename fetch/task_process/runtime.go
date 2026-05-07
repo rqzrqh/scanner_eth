@@ -22,6 +22,7 @@ type RuntimeDeps struct {
 	NodeManager     *nodepkg.NodeManager
 	Fetcher         fetcherpkg.Fetcher
 	EnqueueBodyTask func(string)
+	OnBodySynced    func(string)
 
 	TryClaimHeaderHeight func(uint64) bool
 	ReleaseHeaderHeight  func(uint64)
@@ -289,5 +290,8 @@ func (deps RuntimeDeps) SyncNodeDataByHash(ctx context.Context, hash string) boo
 	}
 
 	deps.setPendingBody(hash, body)
+	if deps.OnBodySynced != nil {
+		deps.OnBodySynced(hash)
+	}
 	return true
 }
