@@ -21,13 +21,13 @@ Important: this repository ignores `logs` in `.gitignore`, so file discovery too
 2. Run the built-in report generator from the repository root:
 
 ```bash
-go run ./cmd/logreport -input <log-path> -output report.html
+go run . reporter -input <log-path> -output report.html
 ```
 
 For multiple files or a time window:
 
 ```bash
-go run ./cmd/logreport \
+go run . reporter \
   -input logs/app.log,logs/app-2026-05-04T06-40-43.530.log \
   -since "2026-05-04 06:40:00" \
   -until "2026-05-04 07:00:00" \

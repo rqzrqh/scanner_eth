@@ -30,6 +30,7 @@ type TaskPool struct {
 	HighQueueSize    int           `mapstructure:"high_queue_size"`
 	NormalQueueSize  int           `mapstructure:"normal_queue_size"`
 	MaxRetry         int           `mapstructure:"max_retry"`
+	RetryDelay       time.Duration `mapstructure:"retry_delay"`
 	StatsLogInterval time.Duration `mapstructure:"stats_log_interval"`
 }
 
@@ -121,6 +122,7 @@ func LoadConf(fpath string, env string) (*Config, error) {
 				HighQueueSize:    1024,
 				NormalQueueSize:  2048,
 				MaxRetry:         2,
+				RetryDelay:       time.Second,
 				StatsLogInterval: 30 * time.Second,
 			},
 		},

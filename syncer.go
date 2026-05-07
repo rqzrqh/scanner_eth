@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"os"
 	"scanner_eth/config"
 	"scanner_eth/fetch"
@@ -12,6 +11,7 @@ import (
 	fetchstore "scanner_eth/fetch/store"
 	fetchtask "scanner_eth/fetch/taskpool"
 	"scanner_eth/filter"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/redis/go-redis/v9"
@@ -22,6 +22,10 @@ import (
 type unavailableNode struct {
 	id     int
 	reason string
+}
+
+type genesisHeaderRPCResult struct {
+	Hash string `json:"hash"`
 }
 
 func newFetchManager(conf *config.Config, clients []*ethclient.Client, db *gorm.DB, redisClient *redis.Client, chainId int64, genesisBlockHash string, optionalTables map[string]struct{}) *fetch.FetchManager {
@@ -54,13 +58,15 @@ func newFetchManager(conf *config.Config, clients []*ethclient.Client, db *gorm.
 		HighQueueSize:    conf.Fetch.TaskPool.HighQueueSize,
 		NormalQueueSize:  conf.Fetch.TaskPool.NormalQueueSize,
 		MaxRetry:         conf.Fetch.TaskPool.MaxRetry,
+		RetryDelay:       conf.Fetch.TaskPool.RetryDelay,
 		StatsLogInterval: conf.Fetch.TaskPool.StatsLogInterval,
 	}
-	logrus.Infof("taskPoolConfig workerCount:%v highQueueSize:%v normalQueueSize:%v maxRetry:%v statsLogInterval:%v",
+	logrus.Infof("taskPoolConfig workerCount:%v highQueueSize:%v normalQueueSize:%v maxRetry:%v retryDelay:%v statsLogInterval:%v",
 		taskPoolOptions.WorkerCount,
 		taskPoolOptions.HighQueueSize,
 		taskPoolOptions.NormalQueueSize,
 		taskPoolOptions.MaxRetry,
+		taskPoolOptions.RetryDelay,
 		taskPoolOptions.StatsLogInterval,
 	)
 
@@ -110,14 +116,14 @@ func checkNodeChainInfo(clients []*ethclient.Client, dbChainId int64, dbGenesisB
 			os.Exit(0)
 		}
 
-		header, err := client.HeaderByNumber(context.Background(), new(big.Int).SetUint64(0))
-		if err != nil {
+		var header genesisHeaderRPCResult
+		if err := client.Client().CallContext(context.Background(), &header, "eth_getBlockByNumber", "0x0", false); err != nil {
 			logrus.Errorf("get genesis block header failed. id:%v err:%v", i, err)
 			os.Exit(0)
 		}
 
-		if header.Hash().Hex() != dbGenesisBlockHash {
-			logrus.Errorf("genesis block not equal with db. id:%v db:%v node:%v", i, dbGenesisBlockHash, header.Hash().Hex())
+		if !strings.EqualFold(header.Hash, dbGenesisBlockHash) {
+			logrus.Errorf("genesis block not equal with db. id:%v db:%v node:%v", i, dbGenesisBlockHash, header.Hash)
 			os.Exit(0)
 		}
 	}

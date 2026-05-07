@@ -39,6 +39,67 @@ go run . reporter -input logs/app.log -title "scanner_eth sync report" -output r
 
 The report includes node request/failure counts, RPC method stats, task pool stats by task kind, scan stage results, store worker stats, runtime sync progress, and anomaly summaries. Open the generated HTML in a browser to review it or print it to PDF.
 
+## Mock Node
+
+`mocknode` starts local HTTP JSON-RPC nodes backed by the scanner database. It is useful for replaying already persisted chain data without calling external RPC providers.
+
+Configure it in `mocknode.conf` at the repository root:
+
+```yaml
+base_addr: "127.0.0.1"
+base_port: 18545
+
+nodes:
+  - latency: 0s
+    latency_jitter: 0s
+    drop_rate: 0
+  - latency: 100ms
+    latency_jitter: 50ms
+    drop_rate: 0.05
+
+database:
+  host: "127.0.0.1"
+  port: 3306
+  user: root
+  password: "123456"
+  dbname: mocknode_testnet
+  charset: utf8mb4
+  parseTime: true
+  loc: Local
+```
+
+Start the mock nodes:
+
+```bash
+go run . mocknode --conf mocknode.conf
+```
+
+The parent process starts one child process per `nodes` entry on consecutive ports. The list index is the node ID and port offset, for example:
+
+```text
+http://127.0.0.1:18545
+http://127.0.0.1:18546
+```
+
+Child logs are printed by the parent with a node prefix, such as `[mocknode:0 stderr] ...`. When the parent receives a shutdown signal, it terminates all child processes. `chain_id` is read from the database `scanner_info` table, so it does not need to be configured.
+
+The `nodes` section configures per-node network behavior and also determines node count. `latency` adds fixed delay before each request, `latency_jitter` adds a random extra delay from `0` to that duration, and `drop_rate` is a probability from `0` to `1` that closes the request connection without a JSON-RPC response.
+
+To make the scanner use these mock nodes, point `fetch.rpc_nodes` in `config.yaml` to the local URLs:
+
+```yaml
+fetch:
+  rpc_nodes:
+    - "http://127.0.0.1:18545"
+    - "http://127.0.0.1:18546"
+```
+
+Alternatively, start the scanner with `--mocknode`. In this mode `fetch.rpc_nodes` from `config.yaml` is replaced with the local URLs generated from `mocknode.conf`:
+
+```bash
+go run . scanner -conf config.yaml -env prd --mocknode
+```
+
 ## Documentation
 
 Core docs live under `doc/`:

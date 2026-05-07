@@ -9,6 +9,7 @@ import (
 	"scanner_eth/config"
 	"scanner_eth/log"
 	"scanner_eth/middleware"
+	"scanner_eth/mocknode"
 	"scanner_eth/model"
 	"syscall"
 	"time"
@@ -35,6 +36,10 @@ var cmdScanner = &cli.Command{
 			Usage: "[ prd | test ]. Default value: prd",
 			Value: "prd",
 		},
+		&cli.BoolFlag{
+			Name:  "mocknode",
+			Usage: "replace fetch.rpc_nodes with local mock node URLs from mocknode.conf",
+		},
 	},
 	Action: runScanner,
 }
@@ -44,6 +49,9 @@ func runScanner(cctx *cli.Context) error {
 	conf, err := config.LoadConf(cctx.String("conf"), env)
 	if err != nil {
 		return fmt.Errorf("load conf failed: %w", err)
+	}
+	if err := applyScannerMockNode(conf, cctx.Bool("mocknode")); err != nil {
+		return err
 	}
 
 	fmt.Println("load config success")
@@ -198,6 +206,23 @@ func runScanner(cctx *cli.Context) error {
 		cancel()
 	}
 	logrus.Infof("stop scanner eth")
+	return nil
+}
+
+func applyScannerMockNode(conf *config.Config, enabled bool) error {
+	if !enabled {
+		return nil
+	}
+	mockConf, err := mocknode.LoadConfig("mocknode.conf")
+	if err != nil {
+		return fmt.Errorf("load mocknode conf failed: %w", err)
+	}
+	nodeCount := mockConf.NodeCount()
+	rpcNodes := make([]string, 0, nodeCount)
+	for nodeID := 0; nodeID < nodeCount; nodeID++ {
+		rpcNodes = append(rpcNodes, "http://"+mocknode.NodeAddr(mockConf, nodeID))
+	}
+	conf.Fetch.RpcNodes = rpcNodes
 	return nil
 }
 

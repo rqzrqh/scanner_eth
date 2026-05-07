@@ -14,6 +14,8 @@ func main() {
 		Commands: []*cli.Command{
 			cmdScanner,
 			cmdReporter,
+			cmdMockNode,
+			cmdMockNodeChild,
 		},
 	}
 
