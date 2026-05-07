@@ -1,0 +1,240 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"os"
+	"os/signal"
+	"scanner_eth/config"
+	"scanner_eth/log"
+	"scanner_eth/middleware"
+	"scanner_eth/model"
+	"syscall"
+	"time"
+
+	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/sirupsen/logrus"
+	"github.com/urfave/cli/v2"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+var cmdScanner = &cli.Command{
+	Name:  "scanner",
+	Usage: "Start scanner eth",
+	Flags: []cli.Flag{
+		&cli.StringFlag{
+			Name:  "conf",
+			Usage: "conf file",
+			Value: "config.yaml",
+		},
+		&cli.StringFlag{
+			Name:  "env",
+			Usage: "[ prd | test ]. Default value: prd",
+			Value: "prd",
+		},
+	},
+	Action: runScanner,
+}
+
+func runScanner(cctx *cli.Context) error {
+	env := cctx.String("env")
+	conf, err := config.LoadConf(cctx.String("conf"), env)
+	if err != nil {
+		return fmt.Errorf("load conf failed: %w", err)
+	}
+
+	fmt.Println("load config success")
+
+	log.InitLogger(conf.AppName, env, conf.Log)
+
+	logrus.Infof("init log success")
+
+	db, err := middleware.InitDB(conf.Database)
+	if err != nil {
+		logrus.Errorf("failed to connect database: %v", err)
+		os.Exit(0)
+	}
+
+	logrus.Infof("connect database success")
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		logrus.Errorf("failed to get database instance %v", err)
+		os.Exit(0)
+	}
+
+	if err := sqlDB.Ping(); err != nil {
+		logrus.Errorf("failed to ping database %v", err)
+		os.Exit(0)
+	}
+
+	logrus.Infof("database ping success")
+
+	if conf.Fetch.Store.AutoCreateTables {
+		if err := db.AutoMigrate(
+			&model.ScannerInfo{},
+			&model.ScannerMessage{},
+			&model.Block{},
+			&model.Tx{},
+			&model.TxInternal{},
+			&model.EventLog{},
+			&model.EventErc20Transfer{},
+			&model.EventErc721Transfer{},
+			&model.EventErc1155Transfer{},
+
+			&model.Contract{},
+			&model.ContractErc20{},
+			&model.ContractErc721{},
+			&model.TokenErc721{},
+			&model.BalanceNative{},
+			&model.BalanceErc20{},
+			&model.BalanceErc1155{},
+		); err != nil {
+			logrus.Errorf("auto migrate failed %v", err)
+			os.Exit(0)
+		}
+
+		logrus.Infof("database auto migrate success")
+	}
+
+	rds := middleware.NewRedisClient(conf.Redis)
+	defer rds.Close()
+	pong, err := rds.Ping(context.Background()).Result()
+	if err != nil {
+		logrus.Errorf("failed to ping redis %v", err)
+		os.Exit(0)
+	}
+	logrus.Infof("redis response %s", pong)
+
+	allOptionalTables := make(map[string]struct{}, 0)
+	allOptionalTables[model.Tx.TableName(model.Tx{})] = struct{}{}
+	allOptionalTables[model.TxInternal.TableName(model.TxInternal{})] = struct{}{}
+	allOptionalTables[model.EventLog.TableName(model.EventLog{})] = struct{}{}
+	allOptionalTables[model.BalanceNative.TableName(model.BalanceNative{})] = struct{}{}
+	allOptionalTables[model.BalanceErc20.TableName(model.BalanceErc20{})] = struct{}{}
+	allOptionalTables[model.BalanceErc1155.TableName(model.BalanceErc1155{})] = struct{}{}
+	allOptionalTables[model.EventErc20Transfer.TableName(model.EventErc20Transfer{})] = struct{}{}
+	allOptionalTables[model.EventErc721Transfer.TableName(model.EventErc721Transfer{})] = struct{}{}
+	allOptionalTables[model.EventErc1155Transfer.TableName(model.EventErc1155Transfer{})] = struct{}{}
+	allOptionalTables[model.Contract.TableName(model.Contract{})] = struct{}{}
+	allOptionalTables[model.ContractErc20.TableName(model.ContractErc20{})] = struct{}{}
+	allOptionalTables[model.ContractErc721.TableName(model.ContractErc721{})] = struct{}{}
+	allOptionalTables[model.TokenErc721.TableName(model.TokenErc721{})] = struct{}{}
+
+	logrus.Infof("optional:%v", conf.Fetch.Store.Optional)
+	optionalTables := make(map[string]struct{}, 0)
+	for _, table := range conf.Fetch.Store.Optional {
+		if _, exist := allOptionalTables[table]; !exist {
+			logrus.Errorf("optional table:%v not exist", table)
+			os.Exit(0)
+		}
+		optionalTables[table] = struct{}{}
+	}
+
+	initScannerInfo(db, conf.Chain.ChainId, conf.Chain.GenesisBlockHash)
+
+	logrus.Infof("init scanner info success")
+
+	rpcNodeCount := len(conf.Fetch.RpcNodes)
+	if rpcNodeCount == 0 {
+		logrus.Errorf("rpc node count is zero")
+		os.Exit(0)
+	}
+
+	clients := make([]*ethclient.Client, rpcNodeCount)
+	for i, url := range conf.Fetch.RpcNodes {
+
+		customClient := &http.Client{
+			Transport: &http.Transport{
+				DisableKeepAlives: true,
+			},
+			Timeout: conf.Fetch.Timeout,
+		}
+
+		rpcClient, err := rpc.DialOptions(context.Background(), url, rpc.WithHTTPClient(customClient))
+		if err != nil {
+			logrus.Errorf("rpc dial failed idx:%d %v", i, err)
+			os.Exit(0)
+		}
+		clients[i] = ethclient.NewClient(rpcClient)
+	}
+
+	logrus.Infof("create eth client success")
+
+	chainId, genesisBlockHash := getScannerInfo(db)
+
+	logrus.Infof("get chain info success. chainId:%v genesisBlockHash:%v", chainId, genesisBlockHash)
+
+	ctx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
+	defer stopSignals()
+
+	go func() {
+		<-ctx.Done()
+
+		forceExitCh := make(chan os.Signal, 1)
+		signal.Notify(forceExitCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
+		defer signal.Stop(forceExitCh)
+
+		<-forceExitCh
+		logrus.Warnf("shutdown still in progress, second signal forcing exit")
+		os.Exit(1)
+	}()
+
+	fm := newFetchManager(conf, clients, db, rds, chainId, genesisBlockHash, optionalTables)
+	metricsServer := startMetricsServer(conf.Metrics)
+	fm.Run(ctx)
+
+	logrus.Infof("start success")
+
+	<-ctx.Done()
+	logrus.Infof("shutdown signal received, stopping scanner")
+	fm.Stop()
+	if metricsServer != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownMetricsServer(shutdownCtx, metricsServer)
+		cancel()
+	}
+	logrus.Infof("stop scanner eth")
+	return nil
+}
+
+func initScannerInfo(db *gorm.DB, chainId int64, genesisBlockHash string) {
+	var scannerInfos []model.ScannerInfo
+	if err := db.Find(&scannerInfos).Error; err != nil {
+		logrus.Errorf("load scanner info from db failed. err:%v", err)
+		os.Exit(0)
+	}
+	if len(scannerInfos) == 0 {
+		scannerInfo := &model.ScannerInfo{
+			ChainId:          chainId,
+			GenesisBlockHash: genesisBlockHash,
+		}
+		if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(scannerInfo).Error; err != nil {
+			logrus.Errorf("insert scanner info to db failed. err:%v", err)
+			os.Exit(0)
+		}
+		logrus.Infof("insert scanner info to db success. chain_id:%v hash:%v", chainId, genesisBlockHash)
+	} else if len(scannerInfos) > 1 {
+		logrus.Errorf("scanner info count more than 1 in db. count:%v", len(scannerInfos))
+		os.Exit(0)
+	} else {
+		if scannerInfos[0].ChainId != chainId || scannerInfos[0].GenesisBlockHash != genesisBlockHash {
+			logrus.Errorf("scanner info not equal with db. db:%v %v conf:%v %v",
+				scannerInfos[0].ChainId, scannerInfos[0].GenesisBlockHash, chainId, genesisBlockHash)
+			os.Exit(0)
+		}
+	}
+}
+
+func getScannerInfo(db *gorm.DB) (int64, string) {
+	var scannerInfo model.ScannerInfo
+	if err := db.First(&scannerInfo).Error; err != nil {
+		logrus.Errorf("load scanner info from db failed. err:%v", err)
+		os.Exit(0)
+	}
+
+	return scannerInfo.ChainId, scannerInfo.GenesisBlockHash
+}
